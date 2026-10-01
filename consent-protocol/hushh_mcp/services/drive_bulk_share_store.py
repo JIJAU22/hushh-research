@@ -1368,6 +1368,7 @@ class DriveBulkShareStore(DriveLivePreferences):
                     <= connection.execute(text("SELECT clock_timestamp()")).scalar_one()
                 ):
                     raise DriveSharingError("request_changed")
+<<<<<<< HEAD
                 private = self._open(
                     origin["request_envelope"],
                     user_id=user_id,
@@ -1376,6 +1377,8 @@ class DriveBulkShareStore(DriveLivePreferences):
                 )
                 if _request_missing_dates(private):
                     raise DriveSharingError("date_range_required")
+=======
+>>>>>>> 4d0b449ae (feat(drive): gate trusted document requests with Stripe payment)
                 self._require_paid_for_origin(connection, origin["request_id"])
                 search = self._row(
                     connection,
