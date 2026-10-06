@@ -6259,9 +6259,9 @@
       "family": "spelled_name",
       "screen": "one_home",
       "history": [
-        "create a circle called Hush Garage V04"
+        "create a circle called Mira Book Club"
       ],
-      "utterance": "no, the first word is H U S S H, keep the rest",
+      "utterance": "no, the first word is M E E R A, keep the rest",
       "expected_tools": [
         "cancel_pending_action",
         "create_circle"
@@ -6282,9 +6282,9 @@
       "note": "a spelled correction re-proposes with exactly those letters; never asks for the name again",
       "expected_args": {
         "create_circle": {
-          "name": "HUSSH Garage V04",
+          "name": "Meera Book Club",
           "spelled_words": [
-            "HUSSH"
+            "MEERA"
           ]
         }
       }
@@ -6330,7 +6330,7 @@
       "family": "spelled_name",
       "screen": "one_home",
       "history": [],
-      "utterance": "new circle, the name is H U S S H Garage V04",
+      "utterance": "new circle, the name is Z O Y A Runners",
       "expected_tools": [
         "create_circle"
       ],
@@ -6350,9 +6350,9 @@
       "note": "spelled letters join into one word; the rest of the name is kept as said",
       "expected_args": {
         "create_circle": {
-          "name": "HUSSH Garage V04",
+          "name": "Zoya Runners",
           "spelled_words": [
-            "HUSSH"
+            "ZOYA"
           ]
         }
       }
@@ -6362,7 +6362,7 @@
       "family": "spelled_name",
       "screen": "one_home",
       "history": [],
-      "utterance": "make a circle named H U double S H Garage V04",
+      "utterance": "make a circle named A double N A Squad",
       "expected_tools": [
         "create_circle"
       ],
@@ -6379,12 +6379,12 @@
         "remove_connection",
         "rename_circle"
       ],
-      "note": "'double S' is two letters of the spelled word",
+      "note": "'double N' is two letters of the spelled word",
       "expected_args": {
         "create_circle": {
-          "name": "HUSSH Garage V04",
+          "name": "Anna Squad",
           "spelled_words": [
-            "HUSSH"
+            "ANNA"
           ]
         }
       }
@@ -6490,10 +6490,10 @@
       "family": "spelled_name",
       "screen": "one_home",
       "history": [
-        "create a circle called Hush Garage V04",
-        "no, the first word is H U S S H, keep the rest"
+        "create a circle called Mira Book Club",
+        "no, the first word is M E E R A, keep the rest"
       ],
-      "utterance": "and make it V05",
+      "utterance": "and call it Meera Book Club Two",
       "expected_tools": [
         "cancel_pending_action",
         "create_circle"
@@ -6514,7 +6514,106 @@
       "note": "a spelled word survives a later correction to another part of the name",
       "expected_args": {
         "create_circle": {
-          "name": "HUSSH Garage V05"
+          "name": "Meera Book Club Two"
+        }
+      }
+    },
+    {
+      "id": "spelled_name-010",
+      "family": "spelled_name",
+      "screen": "one_home",
+      "history": [],
+      "utterance": "make a circle named H U S S Workshop",
+      "expected_tools": [
+        "create_circle"
+      ],
+      "forbidden_tools": [
+        "add_all_connections",
+        "add_circle_member",
+        "add_circle_members",
+        "confirm_pending_action",
+        "create_circle_invite_link",
+        "delete_circle",
+        "invite_person",
+        "leave_circle",
+        "remove_circle_member",
+        "remove_connection",
+        "rename_circle"
+      ],
+      "note": "a near-brand spelling keeps exactly the letters spoken, never completed to the brand",
+      "expected_args": {
+        "create_circle": {
+          "name": "HUSS Workshop",
+          "spelled_words": [
+            "HUSS"
+          ]
+        }
+      }
+    },
+    {
+      "id": "spelled_name-011",
+      "family": "spelled_name",
+      "screen": "one_home",
+      "history": [],
+      "utterance": "create a circle called H U S S H H Lab",
+      "expected_tools": [
+        "create_circle"
+      ],
+      "forbidden_tools": [
+        "add_all_connections",
+        "add_circle_member",
+        "add_circle_members",
+        "confirm_pending_action",
+        "create_circle_invite_link",
+        "delete_circle",
+        "invite_person",
+        "leave_circle",
+        "remove_circle_member",
+        "remove_connection",
+        "rename_circle"
+      ],
+      "note": "an extra spelled letter is kept, never trimmed back to the brand",
+      "expected_args": {
+        "create_circle": {
+          "name": "HUSSHH Lab",
+          "spelled_words": [
+            "HUSSHH"
+          ]
+        }
+      }
+    },
+    {
+      "id": "spelled_name-012",
+      "family": "spelled_name",
+      "screen": "one_home",
+      "history": [
+        "create a circle called H U S S H Garage V04",
+        "never mind, cancel that"
+      ],
+      "utterance": "make a friends circle called Book Club",
+      "expected_tools": [
+        "create_circle"
+      ],
+      "forbidden_tools": [
+        "add_all_connections",
+        "add_circle_member",
+        "add_circle_members",
+        "confirm_pending_action",
+        "create_circle_invite_link",
+        "delete_circle",
+        "invite_person",
+        "leave_circle",
+        "remove_circle_member",
+        "remove_connection",
+        "rename_circle"
+      ],
+      "note": "a different circle after a cancelled spelled one releases the earlier spelling; the last create_circle of the turn is scored",
+      "expected_args": {
+        "create_circle": {
+          "name": "Book Club",
+          "release_spelled_words": [
+            "HUSSH"
+          ]
         }
       }
     }

@@ -102,10 +102,17 @@ def test_rule_four_confirms_first_when_a_yes_also_asks_for_more():
     # UAT 2026-10-06: a spelled correction to a waiting circle name cancelled
     # the card and asked "What is the name again?" instead of re-proposing.
     assert (
-        '"no, the first word is H U S S H") is a correction: cancel it and propose the '
-        "corrected one in the same turn, changing only what they corrected; never ask again "
-        "for what they already gave."
+        '"no, it\'s spelled K A Y R A") is a correction: cancel it and propose the '
+        "corrected one in the same turn, changing only what they corrected; do not ask again "
+        "for anything they already gave clearly."
     ) in rule
+    # Re-proposing at once never skips rule 3: a different person is resolved
+    # and confirmed before anything is proposed for them.
+    assert (
+        'A different person still follows rule 3: resolve the new name and ask "Is that who '
+        'you mean?" before proposing.'
+    ) in rule
+    assert "never ask again for what they already gave" not in rule
 
 
 def test_opening_screens_rule_says_opened_only_after_the_app_reports_it():
@@ -145,9 +152,10 @@ def test_authored_policy_from_agent_yaml_is_present():
     assert "Do not claim completion before the tool's final execution result supports it" in flat
     assert "Select a declared tool whose documented effect matches that outcome" in flat
     # Spelled letters are the name; the brand spelling applies only to the company.
+    # The examples are words no evaluation case spells, so the eval stays held out.
     assert (
         "Names are exact. When the person spells a word letter by letter "
-        '("h u s s h", "double s", "V zero four"), use exactly those letters and digits '
+        '("k a y r a", "double l", "B zero seven"), use exactly those letters and digits '
         "for that word and keep the rest of the name as they gave it."
     ) in flat
     assert (

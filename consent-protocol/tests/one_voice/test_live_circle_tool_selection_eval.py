@@ -6,8 +6,9 @@ Two tests share ``fixtures/circle_tool_selection.v1.json``:
 * ``test_circle_fixture_is_well_formed_and_held_out`` always runs: fixture
   shape, every named tool really declared, every family's forbidden set
   carries the tools that would be the *wrong* effect (leave vs delete, remove
-  from circle vs disconnect, add vs send a connection request), and no fixture
-  sentence appears verbatim anywhere the model could have read it.
+  from circle vs disconnect, add vs send a connection request), no fixture
+  sentence shares six consecutive words with anything the model could have
+  read, and no word a case spells is spelled out there either.
 
 * ``test_live_model_selects_circle_tools`` drives the real model (marked
   ``live_model``, skipped unless ``ONE_VOICE_LIVE_TOOL_EVAL=1``). Function
@@ -22,6 +23,7 @@ Two tests share ``fixtures/circle_tool_selection.v1.json``:
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -286,6 +288,28 @@ def load_fixture() -> list[Case]:
     )
 
 
+# Consecutive normalized tokens a fixture sentence may share with production text.
+HELD_OUT_RUN = 6
+
+
+def _tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _runs(tokens: list[str]) -> set[tuple[str, ...]]:
+    return {tuple(tokens[i : i + HELD_OUT_RUN]) for i in range(len(tokens) - HELD_OUT_RUN + 1)}
+
+
+def _spelled_words(case: Case) -> set[str]:
+    return {
+        word
+        for args in case.expected_args_by_tool.values()
+        for arg, expected in args.items()
+        if arg.endswith("spelled_words") and not isinstance(expected, str)
+        for word in expected
+    }
+
+
 def test_circle_fixture_is_well_formed_and_held_out():
     cases = load_fixture()
     assert len(cases) >= MIN_CASES, len(cases)
@@ -310,12 +334,22 @@ def test_circle_fixture_is_well_formed_and_held_out():
             assert case.expected_tools, case.id
 
     corpus = support.production_corpus()
+    corpus_tokens = _tokens(corpus)
+    corpus_runs = _runs(corpus_tokens)
+    spelled_out = f" {' '.join(corpus_tokens)} "
     for case in cases:
         # Every evaluated utterance is held out. History turns are too, except
         # conversational glue ("yes", "that one") that no corpus can avoid.
         held_out = [case.utterance, *(h for h in case.history if len(h.split()) > 3)]
         for sentence in held_out:
             assert sentence.strip().lower() not in corpus, (case.id, sentence)
+            # A quoted example a few words longer or shorter is still the case.
+            shared = _runs(_tokens(sentence)) & corpus_runs
+            assert not shared, (case.id, sentence, sorted(" ".join(run) for run in shared))
+        # A word the case spells must not be spelled out anywhere the model
+        # reads, or a memorized example passes where the mechanism fails.
+        for word in _spelled_words(case):
+            assert f" {' '.join(word.lower())} " not in spelled_out, (case.id, word)
 
 
 def test_expected_args_name_parameters_the_declared_tool_accepts():
