@@ -705,6 +705,9 @@ function reduceServerFrame(
         activeInputTurnId: null,
         activeResponseTurnId: null,
         fencedTurnIds: [],
+        relayFeatures: Array.isArray(frame.features)
+          ? frame.features.filter((item): item is string => typeof item === "string")
+          : [],
       };
     }
     case "audio": {
@@ -1300,6 +1303,8 @@ export function reduceVoiceSession(
           activeInputTurnId: null,
           activeResponseTurnId: null,
           fencedTurnIds: [],
+          // The next relay may be older; it says what it accepts in session.ready.
+          relayFeatures: [],
         };
       }
       return {
@@ -1336,6 +1341,7 @@ export function reduceVoiceSession(
         clientStep: null,
         candidatePicker: null,
         idleDeadlineAt: null,
+        relayFeatures: [],
         // A reconnect that is not happening leaves no stale reason behind.
         reconnectReason: reconnecting ? state.reconnectReason : null,
         error: error

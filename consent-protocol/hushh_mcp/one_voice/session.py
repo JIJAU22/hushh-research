@@ -21,7 +21,7 @@ import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Protocol
 
@@ -141,6 +141,19 @@ _MAIL_DELIVERY_MEMORY = 16
 _MAIL_DELIVERY_SKEW = timedelta(seconds=60)
 # Reports per card: a failed send may be reviewed and sent again, once or twice.
 _MAIL_DELIVERY_REPORTS = 3
+# Typed "Edit name": the cards it may replace, the tool's own name bound, and
+# how many answered operations a session remembers for an idempotent resend.
+_NAME_EDITABLE_TOOLS = frozenset({"create_circle"})
+_NAME_EDIT_MAX_CHARS = 80
+_NAME_EDIT_MEMORY = 32
+# What the editor shows under the input on a refusal, by reason code.
+_NAME_EDIT_MESSAGES = {
+    "not_pending": "This card is no longer waiting, so its name can't be changed.",
+    "not_editable": "Only a new circle's name can be edited here.",
+    "already_confirmed": "This card was already confirmed, so its name wasn't changed.",
+    "storage_unavailable": "That didn't go through. Please try again.",
+    "not_proposed": "I couldn't prepare a card with that name. Please try again.",
+}
 # A client-executed step is still outstanding: neither a receipt nor a
 # rejection. It never counts as ok (so the turn cannot read "complete") and
 # never bumps the rejected counter; the settled result does one or the other.
@@ -358,6 +371,9 @@ class VoiceSession:
         self.mail_deliveries: dict[str, dict[str, Any]] = {}
         self._mail_delivery_status = mail_delivery_status or get_owner_send_action
         self.pending_receipts: dict[str, str] = {}
+        # Answered typed name edits by operation id: a resend gets the same
+        # name_edit.result back and never proposes a second card.
+        self._name_edits: dict[str, dict[str, Any]] = {}
         self._last_turn_ok = False
         self.close_code: int | None = None
         self.close_reason: str = ""
@@ -1006,6 +1022,8 @@ class VoiceSession:
         elif isinstance(frame, protocol.EndFrame):
             await self._close(protocol.CLOSE_ENDED, "ended")
             raise SessionClosed(protocol.CLOSE_ENDED, "ended")
+        elif isinstance(frame, protocol.NameEditSubmitFrame):
+            await self._submit_name_edit(frame)
         elif isinstance(frame, protocol.AuthFrame):
             await self._send(protocol.error("protocol", "already_authenticated"))
 
@@ -1192,6 +1210,173 @@ class VoiceSession:
             {"kind": "cancelled", "pending_action_ids": cancelled, "scope": frame.scope}
         )
         await self._send(protocol.voice_state("listening"))
+
+    # -- typed name edit -----------------------------------------------------
+
+    async def _submit_name_edit(self, frame: protocol.NameEditSubmitFrame) -> None:
+        """Answer one typed "Edit name", once per operation id."""
+        answered = self._name_edits.get(frame.operation_id)
+        if answered is None:
+            answered = await self._name_edit(frame)
+            if len(self._name_edits) >= _NAME_EDIT_MEMORY:
+                self._name_edits.pop(next(iter(self._name_edits)))
+            self._name_edits[frame.operation_id] = answered
+            logger.info(
+                "one_voice.name_edit session=%s status=%s reason=%s",
+                self.session_id,
+                answered["status"],
+                answered["reason_code"] or "none",
+            )
+        await self._send(answered)
+
+    def _name_edit_refused(
+        self, frame: protocol.NameEditSubmitFrame, reason_code: str, message: str | None = None
+    ) -> dict[str, Any]:
+        return protocol.name_edit_result(
+            operation_id=frame.operation_id,
+            status="rejected",
+            reason_code=reason_code,
+            message=message or _NAME_EDIT_MESSAGES[reason_code],
+        )
+
+    async def _name_edit(self, frame: protocol.NameEditSubmitFrame) -> dict[str, Any]:
+        """Replace an open create_circle card with the name the person typed.
+
+        The typed text is the person's own: it is validated against the tool's
+        bounds and proposed through the executor exactly as a model call
+        would be, marked person-authored, and never sent to Live to be read
+        again. Every refusal before the cancel leaves the card untouched.
+        """
+        try:
+            row = await self.pending.get(
+                user_id=self.ctx.user_id, pending_action_id=frame.pending_action_id
+            )
+        except PendingActionStorageError as exc:
+            self._storage_failed("name_edit", exc)
+            return self._name_edit_refused(frame, "storage_unavailable")
+        if (
+            row is None
+            or row.user_id != self.ctx.user_id
+            or row.conversation_id != self.ctx.conversation_id
+            or row.status != "pending"
+        ):
+            return self._name_edit_refused(frame, "not_pending")
+        if row.tool_name not in _NAME_EDITABLE_TOOLS:
+            return self._name_edit_refused(frame, "not_editable")
+        name = " ".join(frame.name.split())
+        if not name:
+            return self._name_edit_refused(frame, "invalid_name", "Type a name for the circle.")
+        if len(name) > _NAME_EDIT_MAX_CHARS:
+            return self._name_edit_refused(
+                frame,
+                "invalid_name",
+                f"Keep the name to {_NAME_EDIT_MAX_CHARS} characters or fewer.",
+            )
+        if not name.isprintable():
+            return self._name_edit_refused(
+                frame, "invalid_name", "That name has characters that can't be used."
+            )
+        try:
+            cancelled = await self.pending.cancel(
+                user_id=self.ctx.user_id, pending_action_id=row.id
+            )
+        except PendingActionStorageError as exc:
+            self._storage_failed("name_edit", exc)
+            return self._name_edit_refused(frame, "storage_unavailable")
+        if cancelled is None:
+            # A confirmation (or the clock) settled the card first; nothing is
+            # proposed over an action the person already answered.
+            try:
+                current = await self.pending.get(user_id=self.ctx.user_id, pending_action_id=row.id)
+            except PendingActionStorageError:
+                current = None
+            confirmed = current is not None and current.status in {
+                "confirmed",
+                "executed",
+                "failed",
+            }
+            return self._name_edit_refused(
+                frame, "already_confirmed" if confirmed else "not_pending"
+            )
+        replaced_turn_id = self._pending_turn_ids.pop(row.id, None) or row.origin_turn_id
+        self.pending_receipts.pop(row.id, None)
+        await self._send(
+            protocol.pending_resolved(
+                pending_action_id=row.id, status="cancelled", result_public=None
+            )
+        )
+        self._bump(pending_cancelled=1)
+        self._count_turn_perf(replaced_turn_id, "pending_cancelled")
+
+        # The card now answers the person's latest input, so the client keeps
+        # it and a tap on it reports there.
+        bind_turn_id = self._latest_input_turn_id or self.turn.turn_id
+        args: dict[str, Any] = {"name": name}
+        kind = row.args.get("kind") if isinstance(row.args, dict) else None
+        if isinstance(kind, str) and kind:
+            args["kind"] = kind
+        outcome = await self.executor.call(
+            _typed_name_context(self.ctx), row.tool_name, args, origin_turn_id=bind_turn_id
+        )
+        for stale in outcome.superseded:
+            self.pending_receipts.pop(stale.id, None)
+            self._pending_turn_ids.pop(stale.id, None)
+            await self._send(
+                protocol.pending_resolved(
+                    pending_action_id=stale.id, status="cancelled", result_public=None
+                )
+            )
+            self._bump(pending_cancelled=1)
+        await self._persist_entities()
+        if outcome.pending is None or outcome.result.status != "confirmation_required":
+            reason_code = str(outcome.result.public().get("reason_code") or "not_proposed")[:40]
+            # The old card is gone and no new one exists: the model must not
+            # ask about either.
+            await self._inject_event(
+                {
+                    "kind": "name_edited",
+                    "status": "rejected",
+                    "reason_code": reason_code,
+                    "replaced_pending_action_id": row.id,
+                }
+            )
+            return protocol.name_edit_result(
+                operation_id=frame.operation_id,
+                status="rejected",
+                reason_code=reason_code,
+                message=_NAME_EDIT_MESSAGES["not_proposed"],
+            )
+        new_row = outcome.pending
+        self._pending_turn_ids[new_row.id] = bind_turn_id
+        if outcome.receipt_token:
+            self.pending_receipts[new_row.id] = outcome.receipt_token
+        await self._send(
+            protocol.pending_action(
+                row=new_row.public(),
+                receipt_token=outcome.receipt_token,
+                entities=self._entities_for(outcome),
+                risk_level="high" if new_row.tier == "tap" else "medium",
+                turn_id=bind_turn_id,
+            )
+        )
+        self._bump(pending_created=1)
+        self._count_turn_perf(bind_turn_id, "pending_created")
+        await self._send(protocol.voice_state("confirming", turn_id=self.turn.turn_id))
+        # The person typed this name; the model asks for the new card once. It
+        # carries the card's own result, never the typed text as speech.
+        await self._inject_event(
+            {
+                "kind": "name_edited",
+                "status": "accepted",
+                "tool": row.tool_name,
+                "pending_action_id": new_row.id,
+                "replaced_pending_action_id": row.id,
+                "result": outcome.result.model_public(),
+            }
+        )
+        return protocol.name_edit_result(
+            operation_id=frame.operation_id, status="accepted", pending_action_id=new_row.id
+        )
 
     async def _after_execution(
         self,
@@ -2793,6 +2978,21 @@ class VoiceSession:
             # result already computed must still reach the model. Only a
             # resumed session (or an HTTP tap resolver) would see older ones.
             self._storage_failed("entities", exc)
+
+
+def _typed_name_context(ctx: ToolContext) -> ToolContext:
+    """A copy of ``ctx`` that marks the proposed name as typed by the person.
+
+    A copy, because the model's own tool calls run concurrently on ``ctx`` and
+    must never inherit the mark. It shares ``entities``, so what the prepare
+    hook records about the name lands in the conversation as usual. Written
+    through ``__dict__`` so it holds whether or not ``ToolContext`` declares
+    ``typed_name`` yet; equivalent to ``replace(ctx, typed_name=True)`` once it
+    does.
+    """
+    marked = replace(ctx)
+    marked.__dict__["typed_name"] = True
+    return marked
 
 
 def _public_args(args: dict[str, Any], *, hidden_fields: tuple[str, ...] = ()) -> dict[str, Any]:
