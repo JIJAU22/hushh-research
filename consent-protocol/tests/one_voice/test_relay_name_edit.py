@@ -46,7 +46,7 @@ async def _never_called(frame, claims):  # pragma: no cover - sessions here skip
     raise AssertionError("auth is not part of these tests")
 
 
-async def _session_with_card():
+async def _session_with_card(args: dict | None = None):
     """An open create_circle card, proposed by the model on the person's turn."""
     transport = FakeTransport()
     fake = FakeLive([])
@@ -69,7 +69,11 @@ async def _session_with_card():
         protocol.TextFrame(type="text", text="Create a friends circle")
     )
     await session._dispatch_tool_call(
-        {"id": "c1", "name": "create_circle", "args": {"name": "Hush Garage V4", "kind": "friends"}}
+        {
+            "id": "c1",
+            "name": "create_circle",
+            "args": args or {"name": "Hush Garage V4", "kind": "friends"},
+        }
     )
     card = transport.frames("pending_action")[-1]
     transport.sent.clear()
@@ -175,6 +179,48 @@ async def test_typed_name_replaces_the_open_card_without_passing_through_live(mo
     # Operational logs carry the outcome, never the name.
     assert "one_voice.name_edit" in caplog.text and "status=accepted" in caplog.text
     assert "GARAGE" not in caplog.text.upper()
+
+
+@pytest.mark.parametrize("via", ["typed", "heard"])
+async def test_a_typed_name_is_kept_as_written_over_an_earlier_spelling(via):
+    # HUSSH was spelled for the card under review, and the new name drops it
+    # and changes V04 without declaring either. Typed, it is the person's own
+    # and the card shows it exactly; the same text heard from the model is
+    # refused (negative control), so the typed mark is what lets it through.
+    session, transport, fake, pending, old_id = await _session_with_card(
+        {"name": "HUSSH GARAGE V04", "kind": "friends", "spelled_words": ["H U S S H"]}
+    )
+    if via == "heard":
+        await session._dispatch_tool_call(
+            {"id": "c2", "name": "create_circle", "args": {"name": "Hush Garage V05"}}
+        )
+        [response] = fake.tool_responses
+        assert response["response"]["status"] == "rejected"
+        assert transport.frames("pending_action") == []
+        return
+
+    await session._handle_client_frame(_submit(old_id, "Hush Garage V05"))
+
+    [result] = transport.frames("name_edit.result")
+    assert result["status"] == "accepted"
+    card = transport.frames("pending_action")[-1]
+    assert card["args"]["name"] == "Hush Garage V05"
+    assert pending.rows[card["pending_action_id"]].status == "pending"
+    assert "spelled" not in card["summary"]
+    # It is now the name under review: a later heard correction of one word
+    # keeps the typed rest and needs no earlier spelling.
+    await session._dispatch_tool_call(
+        {
+            "id": "c3",
+            "name": "create_circle",
+            "args": {
+                "name": "Hush Garage V06",
+                "kind": "friends",
+                "changed_words": [{"old": "V05", "new": "V06"}],
+            },
+        }
+    )
+    assert transport.frames("pending_action")[-1]["args"]["name"] == "Hush Garage V06"
 
 
 async def test_repeated_operation_returns_the_same_result_and_no_second_card():

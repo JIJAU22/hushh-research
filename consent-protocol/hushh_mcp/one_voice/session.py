@@ -2992,14 +2992,9 @@ def _typed_name_context(ctx: ToolContext) -> ToolContext:
 
     A copy, because the model's own tool calls run concurrently on ``ctx`` and
     must never inherit the mark. It shares ``entities``, so what the prepare
-    hook records about the name lands in the conversation as usual. Written
-    through ``__dict__`` so it holds whether or not ``ToolContext`` declares
-    ``typed_name`` yet; equivalent to ``replace(ctx, typed_name=True)`` once it
-    does.
+    hook records about the name lands in the conversation as usual.
     """
-    marked = replace(ctx)
-    marked.__dict__["typed_name"] = True
-    return marked
+    return replace(ctx, typed_name=True)
 
 
 def _public_args(args: dict[str, Any], *, hidden_fields: tuple[str, ...] = ()) -> dict[str, Any]:
