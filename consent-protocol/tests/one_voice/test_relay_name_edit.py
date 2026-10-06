@@ -15,9 +15,11 @@ import pytest
 
 from hushh_mcp.one_voice import protocol
 from hushh_mcp.one_voice.config import OneVoiceLiveConfig
+from hushh_mcp.one_voice.live_client import LiveEvent
 from hushh_mcp.one_voice.pending_actions import PendingAction
 from hushh_mcp.one_voice.session import AuthResult, VoiceSession
 from hushh_mcp.one_voice.tickets import TicketClaims
+from hushh_mcp.one_voice.tools.circles import CIRCLE_SERVICE
 from hushh_mcp.one_voice.tools.executor import ToolExecutor
 from tests.one_voice.fakes import (
     FakeLive,
@@ -26,6 +28,7 @@ from tests.one_voice.fakes import (
     MemoryPendingStore,
     live_factory_for,
 )
+from tests.one_voice.test_tools_circles import FakeCircleService
 
 USER = "user-1"
 CONV = "11111111-2222-4333-8444-555555555555"
@@ -179,6 +182,46 @@ async def test_typed_name_replaces_the_open_card_without_passing_through_live(mo
     # Operational logs carry the outcome, never the name.
     assert "one_voice.name_edit" in caplog.text and "status=accepted" in caplog.text
     assert "GARAGE" not in caplog.text.upper()
+
+
+@pytest.mark.parametrize("moment", ["after_read_back", "while_new_speech_waits"])
+async def test_the_replacement_card_rides_a_turn_the_client_still_shows(moment):
+    # The person edits once One has read the card back. Live has completed the
+    # input turn and the read-back, and the client fenced both at model_end:
+    # a card sent on either is dropped and nothing can be tapped (UAT gap 6).
+    # While newer speech waits for Live to finish, the client follows that
+    # input instead, and a card on any other turn is dropped the same way.
+    session, transport, fake, pending, old_id = await _session_with_card()
+    session.ctx.services[CIRCLE_SERVICE] = FakeCircleService()
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    await session._handle_live_event(
+        LiveEvent(kind="output_transcript", text="Should I create it?", finished=True)
+    )
+    if moment == "after_read_back":
+        await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    else:
+        await session._handle_live_event(LiveEvent(kind="input_transcript", text="Um"))
+
+    await session._handle_client_frame(_submit(old_id, "HUSSH GARAGE V04"))
+
+    card = transport.frames("pending_action")[-1]
+    assert card["pending_action_id"] != old_id
+    assert card["turn_id"] not in {frame["turn_id"] for frame in transport.frames("turn")}
+    if moment == "while_new_speech_waits":
+        [heard] = transport.frames("transcript.input")
+        assert card["turn_id"] == heard["turn_id"]
+    # A tap on it reports there: its result reaches the screen and the model.
+    transport.sent.clear()
+    fake.events_sent.clear()
+    await session._handle_client_frame(
+        protocol.parse_client_frame(
+            json.dumps({"type": "confirm_action", "pending_action_id": card["pending_action_id"]})
+        )
+    )
+    [result] = transport.frames("tool.result")
+    assert result["pending_action_id"] == card["pending_action_id"]
+    assert result["turn_id"] == card["turn_id"] and result["ok"] is True
+    assert [event["kind"] for event in _events(fake)] == ["tool_result"]
 
 
 @pytest.mark.parametrize("via", ["typed", "heard"])

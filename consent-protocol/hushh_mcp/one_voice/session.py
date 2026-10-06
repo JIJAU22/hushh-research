@@ -1313,9 +1313,15 @@ class VoiceSession:
         self._bump(pending_cancelled=1)
         self._count_turn_perf(replaced_turn_id, "pending_cancelled")
 
-        # The card now answers the person's latest input, so the client keeps
-        # it and a tap on it reports there.
-        bind_turn_id = self._latest_input_turn_id or self.turn.turn_id
+        # The card rides the turn open now, the way a model proposal does. The
+        # client fenced the input turn and its read-back at model_end and
+        # drops a card sent on either; the open turn is bound to that input,
+        # so a tap still reports there. While newer input waits for Live's
+        # boundary, the open turn is superseded and the client follows that
+        # input, so the card rides it instead.
+        bind_turn_id = self.turn.turn_id
+        if self._origin_is_stale(bind_turn_id) and self._latest_input_turn_id:
+            bind_turn_id = self._latest_input_turn_id
         args: dict[str, Any] = {"name": name}
         kind = row.args.get("kind") if isinstance(row.args, dict) else None
         if isinstance(kind, str) and kind:
@@ -1366,7 +1372,7 @@ class VoiceSession:
         )
         self._bump(pending_created=1)
         self._count_turn_perf(bind_turn_id, "pending_created")
-        await self._send(protocol.voice_state("confirming", turn_id=self.turn.turn_id))
+        await self._send(protocol.voice_state("confirming", turn_id=bind_turn_id))
         # The person typed this name; the model asks for the new card once. It
         # carries the card's own result, never the typed text as speech.
         await self._inject_event(
