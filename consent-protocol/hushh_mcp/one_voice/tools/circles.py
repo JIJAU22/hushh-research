@@ -747,8 +747,7 @@ class CreateCircleInput(ToolInput):
         max_length=MAX_SPELLED_WORDS_PER_CALL,
         description=(
             "Each word of this name the person spelled letter by letter, as one word of "
-            "exactly those letters and digits (k a y r a -> KAYRA), even when it is also in "
-            "changed_words. Keep them in every correction."
+            "letters and digits (k a y r a -> KAYRA). Keep them in every correction."
         ),
     )
     release_spelled_words: list[str] = Field(
@@ -763,10 +762,9 @@ class CreateCircleInput(ToolInput):
         default_factory=list,
         max_length=MAX_CHANGED_WORDS_PER_CALL,
         description=(
-            "When correcting the waiting card: each word you changed, added or removed — "
-            "old as on the card (empty if added), new as in name (empty if removed). Every "
-            "other word must stay exactly as on the card. A word they spelled also goes in "
-            "spelled_words."
+            "When correcting the waiting card: each word you changed, added or removed that "
+            "they did not spell — old as on the card (empty if added), new as in name (empty "
+            "if removed). A word neither listed here nor spelled stays exactly as on the card."
         ),
     )
 
@@ -2451,8 +2449,9 @@ TOOLS: tuple[ToolSpec, ...] = (
             "Creating a circle sends no invitations and shares no location; adding people is a "
             "separate action. Reports already_exists when the person already owns one by that name."
             " Use the name exactly as the person said or spelled it. When correcting the waiting "
-            "card, change only what they asked and list each changed word in changed_words; a "
-            "word they spelled stays until they change it. If it answers name_changed or "
+            "card, change only what they asked: a word they spell goes in spelled_words, and "
+            "each other changed word in changed_words; a word they spelled stays until they "
+            "change it. If it answers name_changed or "
             "spelled_word_missing for a change they did ask for, call it again with that change "
             "declared (changed_words or release_spelled_words)."
         ),
