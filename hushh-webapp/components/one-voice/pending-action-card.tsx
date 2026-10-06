@@ -26,6 +26,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { morphyToast } from "@/lib/morphy-ux/morphy";
 import {
   roleClasses,
   type SemanticRole,
@@ -249,7 +250,9 @@ const NAME_EDIT_FALLBACK = "That didn't go through. Please try again.";
 /**
  * The inline "Edit name" form. Mounted fresh each time it opens, prefilled
  * with the card's current name. Submitting hands the collapsed name to the
- * relay, which replaces the card; a refusal stays here, under the input.
+ * relay, which replaces the card; a refusal stays here, under the input. A
+ * refusal that arrives after the form is gone (the relay cancelled the card
+ * before it could prepare the new one) is shown as a toast instead.
  */
 function NameEditor({
   initialName,
@@ -264,6 +267,7 @@ function NameEditor({
 }) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const mounted = useRef(false);
   const [draft, setDraft] = useState(initialName);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -272,7 +276,11 @@ function NameEditor({
   const reviewable = canSubmit && !submitting && name.length > 0 && !tooLong;
 
   useEffect(() => {
+    mounted.current = true;
     inputRef.current?.focus({ preventScroll: true });
+    return () => {
+      mounted.current = false;
+    };
   }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -291,9 +299,17 @@ function NameEditor({
         pendingActionId: null,
       };
     }
-    setSubmitting(false);
     // Accepted: the relay has already replaced this card with the new one.
-    if (outcome.status !== "accepted") setError(outcome.message || NAME_EDIT_FALLBACK);
+    const refusal =
+      outcome.status === "accepted" ? null : outcome.message || NAME_EDIT_FALLBACK;
+    if (!mounted.current) {
+      // The card went first (the relay cancelled it, then could not prepare
+      // the new one), so there is no input left to show the refusal under.
+      if (refusal) morphyToast.error(refusal);
+      return;
+    }
+    setSubmitting(false);
+    if (refusal) setError(refusal);
   };
 
   const hintId = `${id}-hint`;
