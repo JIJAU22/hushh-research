@@ -927,6 +927,23 @@ describe("reduceVoiceSession: transcript", () => {
     expect(lines(doubled)).toEqual([["you", "SS"]]);
   });
 
+  // Regression: whitespace-normalized prefix matching let a chunk that
+  // begins with a space replace the row, dropping what was already heard.
+  it("a chunk that begins with a space continues the row, never replaces it", () => {
+    const spelled = run([said("S", false), said(" S", true)], connected());
+    expect(lines(spelled)).toEqual([["you", "S S"]]);
+    const named = run([said("H", false), said(" Hussh garage", false)], connected());
+    expect(lines(named)).toEqual([["you", "H Hussh garage"]]);
+    const settled = run(
+      [out("Creating it.", true), out(" Creating it. Done.", true)],
+      connected(),
+    );
+    expect(lines(settled)).toEqual([
+      ["one", "Creating it."],
+      ["one", " Creating it. Done."],
+    ]);
+  });
+
   it("row ids stay unique once the 200-row cap is reached", () => {
     const fill = Array.from({ length: 200 }, (_, index) =>
       out(`line ${index}`, true, `f${index}`),

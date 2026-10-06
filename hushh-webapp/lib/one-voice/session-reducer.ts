@@ -518,16 +518,20 @@ function mergeTranscript(
   const current = normalizeTranscriptText(existing.text);
   const isPrefix = incoming.startsWith(current);
   const longer = incoming.length > current.length;
+  // A chunk that begins with whitespace is incremental by its own shape: it
+  // continues the row ("H" + " Hussh garage"), so it can never restate it.
+  const continues = /^\s/.test(text);
+  const restates = !continues && isPrefix;
 
   if (!existing.final) {
     // A cumulative restatement replaces the row. A chunk equal to the row so
     // far is not strictly longer, so it is incremental and appends ("S","S").
-    if (isPrefix && (longer || final)) return replaceRow(index, text);
+    if (restates && (longer || final)) return replaceRow(index, text);
     return replaceRow(index, `${existing.text}${text}`);
   }
   // The row is settled. Re-sending the same final changes nothing.
   if (final && incoming === current) return { transcript, transcriptSeq };
-  if (isPrefix && longer) return replaceRow(index, text);
+  if (restates && longer) return replaceRow(index, text);
   // Anything else (e.g. speech after a tool result) is its own line.
   return appendRow();
 }
