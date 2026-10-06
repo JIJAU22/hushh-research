@@ -128,7 +128,7 @@ an editable draft, never submit it. Existing manually entered name/expiry values
 are preserved. CVV, PIN, issuing region and nickname remain manual.
 
 Recognition runs locally with Tesseract.js. Worker, WASM and English language
-assets are copied from locked npm dependencies by `scripts/prepare-wallet-ocr.mjs`
+assets are copied from locked npm dependencies by `hushh-webapp/scripts/prepare-wallet-ocr.mjs`
 from Next config before development/build/export. Generated assets are ignored; no CDN, image
 upload or OCR-result persistence is used. Native capture disables cropping and
 gallery saving. Leaving Add, cancelling, or unmounting aborts the scan; the owned supervisor and nested OCR worker
