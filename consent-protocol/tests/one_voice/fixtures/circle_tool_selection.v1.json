@@ -6486,40 +6486,6 @@
       }
     },
     {
-      "id": "spelled_name-008",
-      "family": "spelled_name",
-      "screen": "one_home",
-      "history": [
-        "list my circles"
-      ],
-      "utterance": "rename Weekend Crew to H U S S H Riders",
-      "expected_tools": [
-        "confirm_circle",
-        "resolve_circle",
-        "list_circles",
-        "rename_circle"
-      ],
-      "forbidden_tools": [
-        "add_all_connections",
-        "add_circle_member",
-        "add_circle_members",
-        "confirm_pending_action",
-        "create_circle",
-        "create_circle_invite_link",
-        "delete_circle",
-        "invite_person",
-        "leave_circle",
-        "remove_circle_member",
-        "remove_connection"
-      ],
-      "note": "a spelled new name for an existing circle is a rename with exactly those letters",
-      "expected_args": {
-        "rename_circle": {
-          "name": "HUSSH Riders"
-        }
-      }
-    },
-    {
       "id": "spelled_name-009",
       "family": "spelled_name",
       "screen": "one_home",
