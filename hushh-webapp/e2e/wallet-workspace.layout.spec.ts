@@ -407,7 +407,7 @@ for (const width of [320, 390, 1024]) {
     await dock.getByRole("button", { name: "Open Travel - Demo, ending 4444" }).click();
     await expect(page.getByTestId("wallet-card-browser")).toHaveAttribute("data-mode", "card");
     await expect(page.getByTestId("wallet-demo-details")).toContainText("Travel card");
-    await expect(page.getByTestId("wallet-demo-activity")).toContainText("â‚¹8,640.00");
+    await expect(page.getByTestId("wallet-demo-activity")).toContainText("₹8,640.00");
     await expect(dock.getByRole("button", { name: "Open Travel - Demo, ending 4444" })).toHaveAttribute("aria-pressed", "true");
     await page.screenshot({ path: testInfo.outputPath("cards-detail.png") });
     await page.getByRole("button", { name: "Payment preview", exact: true }).first().click();
