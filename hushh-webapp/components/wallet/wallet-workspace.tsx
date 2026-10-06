@@ -59,7 +59,7 @@ import { SecureCardAddForm } from "@/components/wallet/secure-card-add-form";
 import { clearSecretOffer, peekSecretOffer } from "@/lib/pkm/secret-offer-handoff";
 import { SecretsVaultService } from "@/lib/pkm/secrets-vault-service";
 import { SecureCardReveal } from "@/components/wallet/secure-card-reveal";
-import { WalletAddCollection } from "@/components/wallet/wallet-add-collection";
+import { WalletCardBrowser } from "@/components/wallet/wallet-card-browser";
 import { useAuth } from "@/hooks/use-auth";
 import { prefersReducedMotion } from "@/lib/morphy-ux/gsap";
 import { morphyToast } from "@/lib/morphy-ux/morphy";
@@ -217,6 +217,7 @@ export function WalletWorkspace() {
   const [view, dispatch] = useReducer(walletViewReducer, INITIAL_WALLET_VIEW);
   const [tab, setTab] = useState<WalletTab>("cards");
   const [introductionOpen, setIntroductionOpen] = useState(true);
+  const [cardDockHost, setCardDockHost] = useState<HTMLDivElement | null>(null);
   const [formRevision, setFormRevision] = useState(0);
   const [removingCardId, setRemovingCardId] = useState<string | null>(null);
   useEffect(() => setIntroductionOpen(true), [renderedOwnerId]);
@@ -661,18 +662,21 @@ export function WalletWorkspace() {
 
           {hasCards && searchOpen && deferredQuery ? <ul className="mx-auto w-full max-w-[420px] space-y-2" aria-label="Card search results">{filteredCards.map((card) => <li key={card.cardId}><Button variant="secondary" size="standard" className="w-full justify-start" onClick={() => selectCard(card.cardId)}>{card.nickname || cardNetworkLabel(card.brand)} · {cardNetworkLabel(card.brand)} ending {card.last4}</Button></li>)}</ul> : null}
           {ready && !(searchOpen && deferredQuery) ? (
-            <WalletAddCollection
+            <WalletCardBrowser
               key={renderedOwnerId}
               cards={cards}
-              selectedCardId={focusedCard?.cardId ?? null}
+              selectedCardId={selectedDeckCardId}
               onSelect={selectCard}
-              onAdd={() => dispatch({ type: "open_add" })}
+              onOverview={() => dispatch({ type: "unfocus" })}
+              onAdd={() => { dispatch({ type: "unfocus" }); dispatch({ type: "open_add" }); }}
+              details={cardDetails}
+              dockHost={cardDockHost}
+              active={activeTab === "cards"}
               onRemove={setRemoveTarget}
               busyCardId={removingCardId}
               disabled={Boolean(busyCardId)}
             />
           ) : null}
-          {ready && cards.length > 0 && !(searchOpen && deferredQuery) ? <div className="mx-auto w-full max-w-[420px]">{cardDetails}</div> : null}
           </div>
           <div className="space-y-3.5 px-[var(--page-inline-gutter-standard)]">
           {ready ? (
@@ -771,6 +775,7 @@ export function WalletWorkspace() {
           />
         ) : null}
       </AppPageContentRegion>
+      <div ref={setCardDockHost} hidden={introductionOpen || !ready || activeTab !== "cards" || Boolean(searchOpen && deferredQuery)} className="sticky bottom-0 z-20 mx-auto w-full max-w-[460px] pb-3 pt-2" data-testid="wallet-card-dock-host" />
     </AppPageShell>
   );
 }
