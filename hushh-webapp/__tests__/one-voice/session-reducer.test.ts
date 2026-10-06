@@ -153,6 +153,44 @@ describe("turn ownership", () => {
     expect(state.pendingAction?.pending_action_id).toBe(oldCard.pending_action_id);
   });
 
+  it("keeps the card an Edit name sends after One read the old one back", () => {
+    // The relay's frames, in order, for a name typed once Live completed the
+    // input turn and the read-back: the replacement rides the turn open now.
+    const circle = { tool: "create_circle", gateway_action_id: "location.create_circle", entities: [], receipt_token: undefined };
+    const oldCard = pendingActionFrame({ ...circle, pending_action_id: "11111111-0000-4000-8000-0000000000e1", turn_id: "input" });
+    const newCard = pendingActionFrame({ ...circle, pending_action_id: "11111111-0000-4000-8000-0000000000e2", turn_id: "open" });
+    let state = run([
+      server(input("input", "Create Hush Garage V4")),
+      server(oldCard),
+      server({ type: "state", state: "confirming", turn_id: "input" }),
+      server({ type: "turn", state: "model_end", turn_id: "input" }),
+      server(output("read-back", "Should I create Hush Garage V4?")),
+      server({ type: "turn", state: "model_end", turn_id: "read-back" }),
+      server({ type: "state", state: "listening" }),
+      server({ type: "pending_action.resolved", pending_action_id: oldCard.pending_action_id, status: "cancelled", result_public: null }),
+      server(newCard),
+      server({ type: "state", state: "confirming", turn_id: "open" }),
+      server({ type: "name_edit.result", operation_id: "op-edit-1", status: "accepted", reason_code: null, message: null, pending_action_id: newCard.pending_action_id }),
+    ], connected());
+    expect(state.pendingAction?.pending_action_id).toBe(newCard.pending_action_id);
+    expect(hasOpenPendingAction(state)).toBe(true);
+    expect(state.phase).toBe("confirming");
+
+    // One asks about it and its turn ends: the card stays, and its own
+    // resolution still lands.
+    state = run([
+      server(output("open", "Should I create HUSSH GARAGE V04?")),
+      server({ type: "turn", state: "model_end", turn_id: "open" }),
+      server({ type: "state", state: "listening" }),
+    ], state);
+    expect(state.pendingAction?.pending_action_id).toBe(newCard.pending_action_id);
+    expect(hasOpenPendingAction(state)).toBe(true);
+    state = run([
+      server({ type: "pending_action.resolved", pending_action_id: newCard.pending_action_id, status: "executed", result_public: { status: "created" } }),
+    ], state);
+    expect(state.pendingAction?.resolvedStatus).toBe("executed");
+  });
+
   it("does not give an unowned result the answer slot after completion", () => {
     const state = run([
       server(input("a", "First question")),
