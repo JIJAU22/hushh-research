@@ -144,7 +144,9 @@ final class HushhNativeNavigationPlugin: CAPPlugin, CAPBridgedPlugin, UITabBarDe
         bar.delegate = self
         // Keep Apple's standard appearance: no custom blur, material or background image.
         let labels = ["Chat", "One", "Connect", "Feed", "Search"]
-        let symbols = ["bubble.left.and.bubble.right", "square.grid.2x2", "safari", "newspaper", "magnifyingglass"]
+        // Solid glyphs: full silhouette with the semantic detail cut out as negative space.
+        let symbols = ["bubble.left.and.bubble.right.fill", "square.grid.2x2.fill", "safari.fill", "newspaper.fill", "magnifyingglass.circle.fill"]
+        bar.unselectedItemTintColor = .label
         bar.items = zip(labels, symbols).enumerated().map { index, pair in
             let item = UITabBarItem(title: pair.0, image: UIImage(systemName: pair.1), tag: index)
             item.accessibilityIdentifier = "one-native-tab-\(HushhNativeNavigationState.tabs[index])"

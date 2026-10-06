@@ -156,6 +156,7 @@ import {
 } from "./connect-surface-layout";
 import { cn } from "@/lib/utils";
 import { ContactSourceBadge } from "@/components/connections/contact-source-badge";
+import { MessageBubbleIcon } from "@/components/connections/message-bubble-icon";
 import {
   CONNECT_CONNECTION_LIST_CLASSNAME,
   CONNECT_PAGE_CONTENT_CLASSNAME,
@@ -3288,7 +3289,7 @@ export default function ConnectPageClient() {
                                           effect="fade"
                                           size="compact"
                                           aria-label={`Message ${connection.displayName || connection.userId}`}
-                                          className="!border !border-[color:var(--app-accent)] !bg-transparent !px-3 !text-[color:var(--app-accent)]"
+                                          className="!size-11 !min-w-11 !bg-transparent !p-0"
                                           onClick={(event) => {
                                             event.stopPropagation();
                                             router.push(
@@ -3298,7 +3299,7 @@ export default function ConnectPageClient() {
                                             );
                                           }}
                                         >
-                                          Message
+                                          <MessageBubbleIcon />
                                         </Button>
                                       ) : null}
                                       <Button
@@ -3313,7 +3314,7 @@ export default function ConnectPageClient() {
                                           );
                                         }}
                                         aria-label={`Remove connection with ${connection.displayName || connection.userId}`}
-                                        className="!size-11 !min-w-11 !bg-transparent !p-0 text-[color:var(--app-secondary-label)]"
+                                        className="!size-11 !min-w-11 !bg-transparent !p-0 text-destructive"
                                       >
                                         <Trash2
                                           aria-hidden="true"
@@ -3351,9 +3352,10 @@ export default function ConnectPageClient() {
                           <div className="space-y-4">
                             <SettingsGroup
                               testId="connect-directory-group"
-                              headingClassName={
-                                CONNECT_SECTION_HEADING_CLASSNAME
-                              }
+                              headingClassName={cn(
+                                CONNECT_SECTION_HEADING_CLASSNAME,
+                                "mb-1 mt-1",
+                              )}
                               titleControl={directorySelector}
                               // People only. This one JSX node also renders the RIAs
                               // tab, where an address book has nothing to offer --

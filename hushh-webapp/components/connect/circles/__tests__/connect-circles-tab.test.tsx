@@ -268,7 +268,7 @@ describe("ConnectCirclesTab", () => {
     expect(smsCircle.querySelector("[data-one-sms-text-icon]")).toBeTruthy();
   });
 
-  it("keeps the SMS mark in the reference orange icon tile", async () => {
+  it("paints the SMS mark in the Location agent accent tile", async () => {
     mocks.listCircles.mockResolvedValue([
       circle("trusted", "Trusted", 20, "trusted"),
       circle("sms", "SMS Circle", 4, "sms"),
@@ -279,8 +279,9 @@ describe("ConnectCirclesTab", () => {
     const smsRow = await screen.findByTestId("connect-circle-sms");
     const mark = within(smsRow).getByText("SMS");
     const disc = mark.parentElement!;
-    // SMS identity remains explicit within the pastel reference tile.
-    expect(disc.className).toContain("bg-orange-50");
+    // Same fill as the Location agent icon: accent disc, white mark.
+    expect(disc.className).toContain("bg-[color:var(--app-accent)]");
+    expect(disc.className).toContain("text-white");
     expect(disc.className).toContain("rounded-2xl");
     expect(disc.className).toContain("size-12");
 
@@ -289,6 +290,15 @@ describe("ConnectCirclesTab", () => {
     const trusted = screen.getByTestId("connect-circle-trusted");
     expect(within(trusted).getByTestId("connect-circle-cluster")).toBeTruthy();
     expect(trusted.querySelector("svg")).not.toBeNull();
+  });
+
+  it("shows no empty member placeholder under a Trusted circle with nobody in it", async () => {
+    mocks.listCircles.mockResolvedValue([circle("trusted", "Trusted", 1, "trusted")]);
+
+    render(<ConnectCirclesTab />);
+
+    const trusted = await screen.findByTestId("connect-circle-trusted");
+    expect(within(trusted).queryByTestId("connect-circle-cluster")).toBeNull();
   });
 
   it("marks every SMS Circle on the list, not only the one you own", async () => {

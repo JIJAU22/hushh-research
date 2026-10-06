@@ -28,6 +28,7 @@ import {
   CreateCircleFlow,
   JoinCircleFlow,
 } from "@/components/one-location/redesign/circles/named-circle-flows";
+import { AGENT_THEME_BY_TONE } from "@/lib/design/agent-theme-registry";
 import { SmsTextIcon } from "@/components/one-location/redesign/sms-text-icon";
 import { createConnectCircleActions } from "@/components/connect/circles/connect-circle-actions";
 import { CircleChat } from "@/components/connect/circles/circle-chat";
@@ -237,7 +238,7 @@ function SmsCircleMainIcon() {
 function circleVisual(circle: OneLocationCircleSummary) {
   const kind = systemKindOf(circle);
   if (kind === "trusted") return { Icon: ShieldCheck, tone: "text-[color:var(--app-accent)] bg-[color:var(--app-accent-ring)]" };
-  if (kind === "sms") return { Icon: SmsCircleMainIcon, tone: "bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-300" };
+  if (kind === "sms") return { Icon: SmsCircleMainIcon, tone: AGENT_THEME_BY_TONE.location.iconClassName };
   const name = circle.name.trim().toLowerCase();
   if (name === "family" || name === "family circle") return { Icon: Heart, tone: "text-rose-700 bg-rose-50 dark:text-rose-300 dark:bg-rose-950/40" };
   if (name === "finance" || name === "finance circle") return { Icon: Wallet, tone: "text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-950/40" };
@@ -924,7 +925,7 @@ export function ConnectCirclesTab({
             {circleRowDescription(circle)}
           </span>
         </span>
-        {!canInviteToEmptyCircle ? (
+        {!canInviteToEmptyCircle && !(kind === "trusted" && circle.memberCount <= 1) ? (
           <span className="col-span-3 flex min-w-0 items-center sm:col-auto sm:ml-auto sm:w-40 sm:shrink-0 sm:justify-end">
             <CircleCluster circle={circle} vaultOwnerToken={vaultOwnerToken ?? ""} reloadToken={reloadToken + refreshToken} />
 

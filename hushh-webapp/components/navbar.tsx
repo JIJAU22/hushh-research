@@ -75,6 +75,10 @@ function FilledChatCircleIcon(props: PhosphorIconProps) {
   return <ChatCircle {...props} weight="fill" />;
 }
 
+function FilledNewspaperIcon(props: PhosphorIconProps) {
+  return <Newspaper {...props} weight="fill" />;
+}
+
 const BOTTOM_GAP_PX = 4;
 
 const BOTTOM_NAV_OPTION_META: Record<
@@ -84,14 +88,14 @@ const BOTTOM_NAV_OPTION_META: Record<
   dashboard: {
     value: "dashboard",
     label: "One",
-    icon: SquaresFour,
+    icon: FilledSquaresFourIcon,
     activeIcon: FilledSquaresFourIcon,
     dataTourId: "nav-one-dashboard",
   },
   chat: {
     value: "chat",
     label: "Chat",
-    icon: ChatCircle,
+    icon: FilledChatCircleIcon,
     activeIcon: FilledChatCircleIcon,
     dataTourId: "nav-chat",
   },
@@ -116,7 +120,7 @@ const BOTTOM_NAV_OPTION_META: Record<
   connect: {
     value: "connect",
     label: "Connect",
-    icon: PhosphorCompass,
+    icon: FilledCompassIcon,
     activeIcon: FilledCompassIcon,
     dataTourId: "nav-connect",
   },
@@ -165,7 +169,8 @@ const BOTTOM_NAV_OPTION_META: Record<
   feed: {
     value: "feed",
     label: "Feed",
-    icon: Newspaper,
+    icon: FilledNewspaperIcon,
+    activeIcon: FilledNewspaperIcon,
     dataTourId: "nav-one-feed",
   },
   pkm: {
@@ -189,7 +194,7 @@ const BOTTOM_NAV_OPTION_META: Record<
   search: {
     value: "search",
     label: "Search",
-    icon: MagnifyingGlass,
+    icon: FilledMagnifyingGlassIcon,
     activeIcon: FilledMagnifyingGlassIcon,
     dataTourId: "nav-search",
   },
