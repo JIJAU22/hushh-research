@@ -1958,6 +1958,7 @@ export function VaultFlow({
                   <div
                     className={cn(
                       VAULT_INPUT_SHELL_CLASS,
+                      "!rounded-none",
                       passphrase
                         ? "border-[color:var(--app-accent)]"
                         : "border-black/10 dark:border-white/15",
@@ -1997,7 +1998,7 @@ export function VaultFlow({
                     effect="fill"
                     size="default"
                     fullWidth
-                    className="h-12 rounded-full type-headline border-0 !bg-[var(--app-accent)] !text-[var(--app-accent-fg)] transition-[background-color,transform] duration-[var(--motion-duration-sm)] ease-[var(--motion-ease-standard)] hover:!bg-[var(--app-accent-hover)] motion-reduce:transition-none disabled:!bg-black/[0.08] disabled:!text-black/30 disabled:!shadow-none dark:disabled:!bg-white/10 dark:disabled:!text-white/30"
+                    className="h-12 !rounded-none type-headline border-0 !bg-[var(--app-accent)] !text-[var(--app-accent-fg)] transition-[background-color,transform] duration-[var(--motion-duration-sm)] ease-[var(--motion-ease-standard)] hover:!bg-[var(--app-accent-hover)] motion-reduce:transition-none disabled:!bg-black/[0.08] disabled:!text-black/30 disabled:!shadow-none dark:disabled:!bg-white/10 dark:disabled:!text-white/30"
                     onClick={() => void handleUnlockPassphrase()}
                     disabled={isUnlocking || !passphrase}
                   >
