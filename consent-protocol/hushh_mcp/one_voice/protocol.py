@@ -309,6 +309,10 @@ def audio_out(
     return frame
 
 
+# How a client applies a contracted transcript frame to its segment's row.
+TranscriptKind = Literal["partial", "cumulative", "final"]
+
+
 def transcript(
     kind: Literal["input", "output"],
     text: str,
@@ -316,10 +320,29 @@ def transcript(
     final: bool,
     turn_id: str,
     request_id: str | None = None,
+    segment_id: str | None = None,
+    seq: int | None = None,
+    segment_kind: TranscriptKind | None = None,
 ) -> dict[str, Any]:
-    frame = {"type": f"transcript.{kind}", "text": text, "final": final, "turn_id": turn_id}
+    """One transcript frame.
+
+    ``segment_id``/``seq``/``kind`` are additive and travel together: the relay
+    names the segment, numbers its frames from 1, and says how to apply the
+    text (``partial`` appends it, ``cumulative`` replaces the row, ``final``
+    replaces and freezes it). A client that ignores them keeps its own merge.
+    """
+    frame: dict[str, Any] = {
+        "type": f"transcript.{kind}",
+        "text": text,
+        "final": final,
+        "turn_id": turn_id,
+    }
     if request_id:
         frame["request_id"] = request_id
+    if segment_id is not None and seq is not None and segment_kind is not None:
+        frame["segment_id"] = segment_id
+        frame["seq"] = seq
+        frame["kind"] = segment_kind
     return frame
 
 

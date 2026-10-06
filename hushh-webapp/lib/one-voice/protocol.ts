@@ -228,7 +228,17 @@ export type TranscriptFrame = {
   turn_id: string;
   /** Present only for a typed request echoed by the relay. */
   request_id?: string;
+  /**
+   * Relay-owned line identity, additive and used only when all three are
+   * present: frames of one segment carry a seq rising from 1, and `kind` says
+   * how to apply `text` (partial appends, cumulative replaces, final replaces
+   * and freezes). Without them the client keeps its legacy merge.
+   */
+  segment_id?: string;
+  seq?: number;
+  kind?: TranscriptKind;
 };
+export type TranscriptKind = "partial" | "cumulative" | "final";
 export type TurnFrame = { type: "turn"; state: "model_start" | "model_end" | "interrupted"; turn_id: string };
 export type StateFrame = { type: "state"; state: VoiceState; turn_id?: string | null };
 export type ToolStartedFrame = { type: "tool.started"; call_id: string; tool: string; args_public: Record<string, unknown>; turn_id?: string };

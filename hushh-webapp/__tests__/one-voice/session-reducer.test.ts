@@ -957,6 +957,130 @@ describe("reduceVoiceSession: transcript", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  // Contracted frames (UAT 2026-10-06, "HelloHelloHello"): the relay names the
+  // segment, numbers its frames and says how to apply the text, so the
+  // reducer never guesses delta vs restatement from the text's shape.
+  const seg = (
+    role: "you" | "one",
+    text: string,
+    kind: "partial" | "cumulative" | "final",
+    seq: number,
+    segment_id = "s1",
+    turn_id = "t1",
+  ) =>
+    server({
+      type: role === "you" ? "transcript.input" : "transcript.output",
+      text,
+      final: kind === "final",
+      turn_id,
+      segment_id,
+      seq,
+      kind,
+    });
+
+  it("contracted: a repeated cumulative hypothesis then its final shows once", () => {
+    const hearing = run(
+      [seg("you", "Hello", "cumulative", 1), seg("you", "Hello", "cumulative", 2)],
+      connected(),
+    );
+    expect(lines(hearing)).toEqual([["you", "Hello"]]);
+    const settled = run([seg("you", "Hello", "final", 3)], hearing);
+    expect(lines(settled)).toEqual([["you", "Hello"]]);
+    expect(settled.transcript[0]?.final).toBe(true);
+  });
+
+  it("contracted: a leading-space cumulative line and its final stay one row", () => {
+    const state = run(
+      [
+        seg("one", " Shall I", "cumulative", 1),
+        seg("one", " Shall I create it?", "cumulative", 2),
+        seg("one", " Shall I create it?", "final", 3),
+      ],
+      connected(),
+    );
+    expect(lines(state)).toEqual([["one", " Shall I create it?"]]);
+  });
+
+  it("contracted: spelled letters keep the repeated S", () => {
+    const deltas = run(
+      ["H", "U", "S", "S", "H"].map((letter, index) =>
+        seg("you", letter, "partial", index + 1),
+      ),
+      connected(),
+    );
+    expect(lines(deltas)).toEqual([["you", "HUSSH"]]);
+    const whole = run(
+      [seg("you", "H U S S", "cumulative", 1), seg("you", "H U S S H", "final", 2)],
+      connected(),
+    );
+    expect(lines(whole)).toEqual([["you", "H U S S H"]]);
+  });
+
+  it("contracted: a frame delivered twice is applied once", () => {
+    const state = run(
+      [
+        seg("you", "Hel", "partial", 1),
+        seg("you", "lo", "partial", 2),
+        seg("you", "lo", "partial", 2),
+      ],
+      connected(),
+    );
+    expect(lines(state)).toEqual([["you", "Hello"]]);
+  });
+
+  it("contracted: a frame older than the row's last seq is ignored", () => {
+    const state = run(
+      [seg("you", "Hello there", "cumulative", 3), seg("you", "Hello", "cumulative", 2)],
+      connected(),
+    );
+    expect(lines(state)).toEqual([["you", "Hello there"]]);
+  });
+
+  it("contracted: a final freezes its row and a new segment is a new row", () => {
+    const state = run(
+      [
+        seg("one", "Creating it.", "final", 1),
+        seg("one", "Creating it. Again", "cumulative", 2),
+        seg("one", "Done.", "cumulative", 1, "s2"),
+      ],
+      connected(),
+    );
+    expect(lines(state)).toEqual([
+      ["one", "Creating it."],
+      ["one", "Done."],
+    ]);
+    expect(state.transcript.map((item) => item.id)).toEqual(["one:s1", "one:s2"]);
+  });
+
+  it("negative control: a frame missing any contract field takes the legacy merge", () => {
+    const partialFields = (text: string, final: boolean) =>
+      server({
+        type: "transcript.output",
+        text,
+        final,
+        turn_id: "t1",
+        segment_id: "s1",
+      });
+    const state = run(
+      [
+        partialFields(" Shall I create", false),
+        partialFields(" HUSSH GARAGE V04?", false),
+        partialFields("Shall I create HUSSH GARAGE V04?", true),
+      ],
+      connected(),
+    );
+    expect(lines(state)).toEqual([["one", "Shall I create HUSSH GARAGE V04?"]]);
+    expect(state.transcript[0]?.id).toBe("one:t1:0");
+    const doubled = run(
+      [
+        server({ type: "transcript.input", text: "S", final: false, turn_id: "t1", seq: 1 }),
+        server({ type: "transcript.input", text: "S", final: false, turn_id: "t1", seq: 1 }),
+      ],
+      connected(),
+    );
+    expect(lines(doubled)).toEqual([["you", "SS"]]);
+  });
+
   it("property: no transcript frame ever produces a success-looking phase or receipt", () => {
     const phrases = [
       "done, you are now sharing with Priya",

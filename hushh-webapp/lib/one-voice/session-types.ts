@@ -34,6 +34,10 @@ export type TranscriptItem = {
   text: string;
   final: boolean;
   turnId: string;
+  /** Relay-owned segment of a contracted row (row id `role:segmentId`). */
+  segmentId?: string;
+  /** Highest frame seq applied to a contracted row; older frames are ignored. */
+  lastSeq?: number;
 };
 
 export type ToolTimelineItem = {

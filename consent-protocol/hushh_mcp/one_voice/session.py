@@ -266,6 +266,16 @@ class TurnPerf:
     pending_cancelled: int = 0
 
 
+@dataclass
+class TranscriptSegment:
+    """One displayed transcript line the relay owns: identity, order, text so far."""
+
+    turn_id: str
+    segment_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    seq: int = 0
+    text: str = ""
+
+
 class VoiceSession:
     def __init__(
         self,
@@ -300,6 +310,9 @@ class VoiceSession:
         self._queued_texts: deque[tuple[str, str, float]] = deque()
         self._superseded_turn_ids: set[str] = set()
         self._input_segment_id: str | None = None
+        # The open transcript line per direction (input, output), so every
+        # transcript frame carries a relay-owned segment id and seq.
+        self._transcript_segments: dict[str, TranscriptSegment] = {}
         self._pending_voice_turn_id: str | None = None
         self._pending_turn_ids: dict[str, str] = {}
         self._latest_input_turn_id: str | None = None
@@ -408,6 +421,58 @@ class VoiceSession:
                 if isinstance(turn_id, str):
                     self._issued_turn_ids.append(turn_id)
             await self.transport.send(frame)
+
+    async def _send_transcript(
+        self,
+        role: Literal["input", "output"],
+        chunk: str,
+        *,
+        finished: bool,
+        turn_id: str,
+        request_id: str | None = None,
+        typed: bool = False,
+    ) -> None:
+        """The one place a transcript frame leaves the relay.
+
+        Live sends both directions as deltas (captured 2026-10-06: output
+        chunks lead with a space and its ``finished`` carries no text; input
+        arrives as whole finished segments). The relay owns the line so the
+        client never guesses from text shape: a stable segment id, a seq from 1,
+        the whole text so far (``cumulative``) and ``final`` when Live finishes
+        it. A finished chunk equal to the text so far restates it and is not
+        appended twice; any other chunk, a repeated letter included, is. A
+        typed echo is its own one-frame segment. Never logs text.
+        """
+        segment = None if typed else self._transcript_segments.get(role)
+        if segment is None or segment.turn_id != turn_id:
+            segment = TranscriptSegment(turn_id=turn_id)
+            if not typed:
+                self._transcript_segments[role] = segment
+        if typed:
+            segment.text = chunk
+        elif not segment.text:
+            # Leading space separates a delta from what came before; a line
+            # never starts with it.
+            segment.text = chunk.lstrip()
+        elif not (finished and chunk == segment.text):
+            segment.text += chunk
+        if finished and self._transcript_segments.get(role) is segment:
+            del self._transcript_segments[role]
+        if not segment.text:
+            return
+        segment.seq += 1
+        await self._send(
+            protocol.transcript(
+                role,
+                segment.text,
+                final=finished,
+                turn_id=turn_id,
+                request_id=request_id,
+                segment_id=segment.segment_id,
+                seq=segment.seq,
+                segment_kind="final" if finished else "cumulative",
+            )
+        )
 
     def _touch(self) -> None:
         self.last_activity = self.clock()
@@ -868,14 +933,13 @@ class VoiceSession:
                 self.turn.model_only = False
             self._latest_input_turn_id = input_id
             self._bind_turn_to_input(input_id, input_id)
-            await self._send(
-                protocol.transcript(
-                    "input",
-                    frame.text,
-                    final=True,
-                    turn_id=input_id,
-                    request_id=frame.request_id,
-                )
+            await self._send_transcript(
+                "input",
+                frame.text,
+                finished=True,
+                turn_id=input_id,
+                request_id=frame.request_id,
+                typed=True,
             )
             if input_id == self.turn.turn_id:
                 self._narration_owns_response = False
@@ -1829,10 +1893,8 @@ class VoiceSession:
                 self._narration_owns_response = False
                 self._narration_origin_turn_id = None
             self.turn.input_seen = True
-            await self._send(
-                protocol.transcript(
-                    "input", event.text, final=bool(event.finished), turn_id=input_turn_id
-                )
+            await self._send_transcript(
+                "input", event.text, finished=bool(event.finished), turn_id=input_turn_id
             )
             if event.finished:
                 self.turn.input_transcript_completed = True
@@ -1848,10 +1910,8 @@ class VoiceSession:
                 return
             self.turn.input_seen = True
             self.turn.output_text.append(event.text)
-            await self._send(
-                protocol.transcript(
-                    "output", event.text, final=bool(event.finished), turn_id=self.turn.turn_id
-                )
+            await self._send_transcript(
+                "output", event.text, finished=bool(event.finished), turn_id=self.turn.turn_id
             )
             if self.turn.output_final_sent:
                 self.turn.output_after_final += 1
@@ -2127,6 +2187,9 @@ class VoiceSession:
         self._hold_chain = True
 
     async def _advance_turn(self) -> None:
+        # The client freezes a turn's answer line at model_end/interrupted, so
+        # whatever Live says next is a new transcript line.
+        self._transcript_segments.pop("output", None)
         finished = self.turn
         finished_id = finished.turn_id
         input_origin = self._turn_input_origins.get(finished_id)

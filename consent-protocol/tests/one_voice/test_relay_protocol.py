@@ -800,6 +800,74 @@ async def test_provider_audio_and_transcripts_reach_the_client():
     assert [f["state"] for f in transport.frames("turn")] == ["model_start", "model_end"]
 
 
+def _segments(frames: list[dict]) -> list[tuple[str, int, str, str]]:
+    return [(f["segment_id"], f["seq"], f["kind"], f["text"]) for f in frames]
+
+
+async def test_transcript_segments_carry_identity_seq_and_full_text():
+    """UAT 2026-10-06: the client guessed delta vs restatement from text shape
+    and doubled lines. Live sends deltas (captured), so the relay owns the
+    segment: a stable id, a rising seq, the whole text so far, final on finish."""
+    session, transport, _fake = await _relay_on_live()
+    await _say(session, "And what", " about this?")
+    spoken = _segments(transport.frames("transcript.input"))
+    segment = spoken[0][0]
+    assert spoken == [
+        (segment, 1, "cumulative", "And what"),
+        (segment, 2, "final", "And what about this?"),
+    ]
+    assert transport.frames("transcript.input")[-1]["final"] is True
+    for text, finished in (("Sure,", False), (" one", False), (" moment.", True)):
+        await session._handle_live_event(
+            LiveEvent(kind="output_transcript", text=text, finished=finished)
+        )
+    await session._handle_live_event(
+        LiveEvent(kind="output_transcript", text=" Done.", finished=False)
+    )
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    await session._handle_live_event(
+        LiveEvent(kind="output_transcript", text="Next.", finished=False)
+    )
+    answer = _segments(transport.frames("transcript.output"))
+    first, after_final, next_turn = answer[0][0], answer[3][0], answer[4][0]
+    assert answer == [
+        (first, 1, "cumulative", "Sure,"),
+        (first, 2, "cumulative", "Sure, one"),
+        (first, 3, "final", "Sure, one moment."),
+        (after_final, 1, "cumulative", "Done."),
+        (next_turn, 1, "cumulative", "Next."),
+    ]
+    assert len({segment, first, after_final, next_turn}) == 4
+
+
+async def test_transcript_restated_final_is_not_appended_but_a_repeated_letter_is():
+    session, transport, _fake = await _relay_on_live()
+    await _say(session, "Hello", "Hello")
+    assert [(f["kind"], f["text"]) for f in transport.frames("transcript.input")] == [
+        ("cumulative", "Hello"),
+        ("final", "Hello"),
+    ]
+    # Negative control: Live sends deltas, so a repeated letter is spelling.
+    await _say(session, "S", "S", "H")
+    assert [f["text"] for f in transport.frames("transcript.input")][2:] == ["S", "SS", "SSH"]
+
+
+async def test_typed_echo_is_one_final_transcript_segment():
+    session, transport, fake = await _relay_on_live()
+    await session._handle_client_frame(
+        protocol.TextFrame(type="text", text="What is my name?", request_id="typed-1")
+    )
+    [echo] = transport.frames("transcript.input")
+    assert (echo["seq"], echo["kind"], echo["final"], echo["text"]) == (
+        1,
+        "final",
+        True,
+        "What is my name?",
+    )
+    assert echo["segment_id"] and echo["request_id"] == "typed-1"
+    assert fake.texts == ["What is my name?"]
+
+
 # --- tool dispatch ---------------------------------------------------------
 
 
