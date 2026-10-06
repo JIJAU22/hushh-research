@@ -559,9 +559,11 @@ def test_fake_world_answers_reads_with_real_ids_and_stops_mutations_at_a_card():
 
     # A newer card names the one it retired, as the relay tells the model, so
     # the scorer replays which proposal is still open from the results alone.
+    # The second name shares no word with the first: a name that did would be a
+    # correction held to the words it declares (changed_words).
     fresh = make_responder(case)
     first = asyncio.run(fresh("create_circle", {"name": "Book Club"}))
-    second = asyncio.run(fresh("create_circle", {"name": "Book Club Two"}))
+    second = asyncio.run(fresh("create_circle", {"name": "Garden Friends"}))
     assert first["status"] == second["status"] == "confirmation_required"
     assert "superseded_pending_action_ids" not in first
     assert second["superseded_pending_action_ids"] == [first["pending_action_id"]]
