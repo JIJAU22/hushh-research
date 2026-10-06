@@ -48,6 +48,7 @@ const serviceMock = vi.hoisted(() => ({
   listCardSummaries: vi.fn(),
   deleteCard: vi.fn(),
   getCard: vi.fn(),
+  addCard: vi.fn(),
 }));
 
 vi.mock("@/lib/services/wallet-service", async () => {
@@ -62,6 +63,7 @@ vi.mock("@/lib/services/wallet-service", async () => {
       listCardSummaries: serviceMock.listCardSummaries,
       deleteCard: serviceMock.deleteCard,
       getCard: serviceMock.getCard,
+      addCard: serviceMock.addCard,
       matchesQuery: actual.WalletService.matchesQuery,
     },
   };
@@ -84,6 +86,51 @@ function makeCards(count: number) {
 }
 
 describe("WalletWorkspace at scale", () => {
+  const fillCard = () => {
+    fireEvent.change(screen.getByLabelText("Nickname"), { target: { value: "New card" } });
+    fireEvent.change(screen.getByLabelText(/Card number/), { target: { value: "4242424242424242" } });
+    fireEvent.change(screen.getByLabelText("Expiry (MM/YY)"), { target: { value: "04/30" } });
+    fireEvent.change(screen.getByLabelText("Issuing region"), { target: { value: "IN" } });
+  };
+
+  it("inserts the real saved summary, selects it in Add, and preserves Cards ordering", async () => {
+    serviceMock.listCardSummaries.mockResolvedValue(makeCards(2));
+    const summary = { ...makeCards(1)[0], cardId: "saved", nickname: "New card", last4: "4242" };
+    serviceMock.addCard.mockResolvedValue({ cardId: "saved", summary });
+    render(<WalletWorkspace />);
+    await screen.findByTestId("one-wallet-list");
+    fireEvent.click(screen.getByRole("tab", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another card" }));
+    fillCard();
+    fireEvent.click(screen.getByTestId("secure-card-save"));
+    await screen.findByTestId("wallet-add-collection");
+    expect(screen.getByTestId("wallet-add-layer-4242")).toHaveAttribute("data-selected", "true");
+    expect(screen.getByRole("tab", { name: "Add" })).toHaveAttribute("aria-selected", "true");
+    expect(serviceMock.listCardSummaries).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("tab", { name: "Cards" }));
+    expect(screen.getAllByTestId("wallet-card").map((el) => el.getAttribute("data-card-id"))).toEqual(["card_0", "card_1", "saved"]);
+  });
+
+  it("retains a failed save draft and rejects a late save after vault lock", async () => {
+    serviceMock.addCard.mockRejectedValueOnce(new Error("Could not save"));
+    const workspace = render(<WalletWorkspace />);
+    await screen.findByTestId("one-wallet-list");
+    fireEvent.click(screen.getByTestId("one-wallet-add"));
+    fillCard();
+    fireEvent.click(screen.getByTestId("secure-card-save"));
+    await screen.findByText("Could not save");
+    expect(screen.getByLabelText("Nickname")).toHaveValue("New card");
+    let finish!: (value: unknown) => void;
+    serviceMock.addCard.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fireEvent.click(screen.getByTestId("secure-card-save"));
+    vaultMock.locked = true;
+    workspace.rerender(<WalletWorkspace />);
+    await screen.findByTestId("one-wallet-locked");
+    await act(async () => finish({ cardId: "saved", summary: makeCards(1)[0] }));
+    expect(screen.queryByTestId("wallet-add-collection")).toBeNull();
+    expect(screen.queryByTestId("secure-card-add-form")).toBeNull();
+  });
+
   it("links all three tabs to their panels and supports keyboard selection", async () => {
     render(<WalletWorkspace />);
     await screen.findByTestId("one-wallet-list");
@@ -94,7 +141,8 @@ describe("WalletWorkspace at scale", () => {
     }
     fireEvent.keyDown(screen.getByRole("tab", { name: "Cards" }), { key: "ArrowRight" });
     expect(screen.getByRole("tab", { name: "Add" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("secure-card-add-form")).toBeTruthy();
+    expect(screen.getByTestId("wallet-add-collection")).toBeTruthy();
+    expect(screen.queryByTestId("secure-card-add-form")).toBeNull();
     fireEvent.keyDown(screen.getByRole("tab", { name: "Add" }), { key: "Home" });
     expect(screen.getByRole("tab", { name: "Cards" })).toHaveAttribute("aria-selected", "true");
   });
@@ -103,6 +151,7 @@ describe("WalletWorkspace at scale", () => {
     const workspace = render(<WalletWorkspace />);
     await screen.findByTestId("one-wallet-list");
     fireEvent.click(screen.getByRole("tab", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another card" }));
     fireEvent.change(screen.getByLabelText("Nickname"), { target: { value: "Travel" } });
     fireEvent.change(screen.getByLabelText("CVV"), { target: { value: "123" } });
     fireEvent.click(screen.getByRole("button", { name: "Show CVV and PIN" }));
@@ -150,11 +199,10 @@ describe("WalletWorkspace at scale", () => {
     const addSuccess = source.indexOf('action: "card_added", result: "success"');
     const addCatch = source.indexOf("} catch (error) {", addSuccess);
     const addError = source.indexOf('action: "card_added", result: "error"', addCatch);
-    const addRefresh = source.indexOf("await refresh(", addError);
     expect(addSuccess).toBeGreaterThan(-1);
     expect(addCatch).toBeGreaterThan(addSuccess);
     expect(addError).toBeGreaterThan(addCatch);
-    expect(addRefresh).toBeGreaterThan(addError);
+    expect(source.indexOf("await refresh(", addError)).toBe(-1);
     expect(source).toContain("activeOwnerIdRef.current = null");
   });
 

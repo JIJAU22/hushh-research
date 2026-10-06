@@ -280,11 +280,69 @@ for (const width of [320, 393, 1440]) {
   });
 }
 
-test("Wallet tabs preserve a draft and return to the Cards panel", async ({ page }) => {
+for (const [width, count] of [[320, 10], [375, 10], [390, 10], [430, 10], [1440, 10], [390, 0], [390, 1], [390, 2], [390, 3], [390, 5]]) {
+  test(`Add collection contains ${count} cards at ${width}px without overlapping its actions`, async ({ page }) => {
+    const errors = await open(page, width, "light", { cards: count }, { height: 844, shell: true });
+    await mount(page);
+    await page.getByRole("tab", { name: "Add", exact: true }).click();
+    const collection = page.getByTestId("wallet-add-collection");
+    await expect(collection).toBeVisible();
+    await expect.poll(() => page.evaluate(() => Math.abs(
+      document.querySelector("#top-shell-wallet-panel-add")!.getBoundingClientRect().x -
+      document.querySelector('[data-swipe-views-root="true"]')!.getBoundingClientRect().x
+    ))).toBeLessThan(1);
+    await expect.poll(() => collection.evaluate((el) => el.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length)).toBe(0);
+    const add = collection.getByRole("button", { name: count ? "Add another card" : "Add your first card", exact: true });
+    if (count) {
+      const stack = page.getByTestId("wallet-add-stack");
+      const layers = stack.locator("li:not([inert])");
+      await expect(layers).toHaveCount(Math.min(count, 4));
+      const geometry = await stack.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const faces = [...el.querySelectorAll('li:not([inert]) [data-testid="wallet-card-face"]')].map((face) => {
+          const r = face.getBoundingClientRect();
+          return { x: r.x, right: r.right, bottom: r.bottom, ratio: r.width / r.height };
+        });
+        return { x: box.x, right: box.right, bottom: box.bottom, width: box.width, faces };
+      });
+      expect(geometry.width).toBeLessThanOrEqual(420);
+      for (const face of geometry.faces) {
+        expect(face.x).toBeGreaterThanOrEqual(geometry.x - 1);
+        expect(face.right).toBeLessThanOrEqual(geometry.right + 1);
+        expect(face.bottom).toBeLessThanOrEqual(geometry.bottom + 1);
+        expect(Math.abs(face.ratio - ISO_RATIO)).toBeLessThan(0.01);
+      }
+      expect((await add.boundingBox())!.y).toBeGreaterThan(geometry.bottom);
+      if (width === 390 && count === 3) await page.screenshot({ path: test.info().outputPath("add-collection.png") });
+      if (count > 1) {
+        await collection.getByRole("button", { name: `View all ${count} cards` }).click();
+        await expect(layers).toHaveCount(count);
+        await expect(stack).toHaveAttribute("data-expanded", "true");
+        const last = stack.locator("li").last().getByRole("button");
+        await last.click();
+        await expect(last).toHaveAttribute("aria-pressed", "true");
+        await expect(stack).toHaveAttribute("data-expanded", "false");
+      }
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      expect(await stack.locator("li").first().evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0s");
+    } else {
+      await expect(page.getByTestId("wallet-add-stack")).toHaveCount(0);
+      await expect(page.getByTestId("wallet-add-preview")).toBeVisible();
+      await page.screenshot({ path: test.info().outputPath("empty-add-preview.png") });
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await add.click();
+    await expect(page.getByTestId("secure-card-add-form")).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+}
+
+test("Wallet tabs preserve a draft and cancel to the Add collection", async ({ page }) => {
   const errors = await open(page, 393, "light");
   await mount(page);
   await expect(page.getByTestId("one-wallet-card-4242")).toBeVisible();
   await page.getByRole("tab", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Add another card", exact: true }).click();
   await expect(page.getByTestId("secure-card-add-form")).toBeVisible();
   await page.getByLabel("Nickname", { exact: true }).fill("Travel");
   await page.getByRole("tab", { name: "Cards", exact: true }).click();
@@ -294,7 +352,8 @@ test("Wallet tabs preserve a draft and return to the Cards panel", async ({ page
   await page.getByRole("tab", { name: "Add", exact: true }).click();
   await expect(page.getByLabel("Nickname", { exact: true })).toHaveValue("Travel");
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(page.getByRole("tab", { name: "Cards", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "Add", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("wallet-add-collection")).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -305,7 +364,13 @@ test("Wallet Add scrolls in the page and swipes back to Cards without a tall bla
   const scroll = page.locator('[data-app-scroll-root="true"]');
   const cardsOverflow = await scroll.evaluate((el) => el.scrollHeight - el.clientHeight);
   await page.getByRole("tab", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Add another card", exact: true }).click();
   await expect(page.getByTestId("secure-card-add-form")).toBeInViewport();
+  await expect.poll(() => page.evaluate(() => {
+    const panel = document.querySelector("#top-shell-wallet-panel-add")!;
+    const pager = document.querySelector('[data-swipe-views-root="true"]')!;
+    return pager.clientHeight >= panel.scrollHeight;
+  })).toBe(true);
   await scroll.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await expect(page.getByTestId("secure-card-save")).toBeInViewport();
   const formScrollers = await page.getByTestId("secure-card-add-form").evaluate((form) =>

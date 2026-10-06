@@ -61,6 +61,7 @@ import { clearSecretOffer, peekSecretOffer } from "@/lib/pkm/secret-offer-handof
 import { SecretsVaultService } from "@/lib/pkm/secrets-vault-service";
 import { SecureCardReveal } from "@/components/wallet/secure-card-reveal";
 import { WalletCardStack } from "@/components/wallet/wallet-card-stack";
+import { WalletAddCollection } from "@/components/wallet/wallet-add-collection";
 import { useAuth } from "@/hooks/use-auth";
 import { prefersReducedMotion } from "@/lib/morphy-ux/gsap";
 import { morphyToast } from "@/lib/morphy-ux/morphy";
@@ -213,6 +214,7 @@ export function WalletWorkspace() {
   const [view, dispatch] = useReducer(walletViewReducer, INITIAL_WALLET_VIEW);
   const [tab, setTab] = useState<WalletTab>("cards");
   const [addDraftOpen, setAddDraftOpen] = useState(false);
+  const [selectedAddCardId, setSelectedAddCardId] = useState<string | null>(null);
   const ready = view.kind === "list" || view.kind === "add" || view.kind === "reveal";
   const activeTab = view.kind === "add" ? "add" : tab;
   const [cards, setCards] = useState<WalletCardSummary[]>([]);
@@ -229,6 +231,7 @@ export function WalletWorkspace() {
     if (view.kind === "add") setAddDraftOpen(true);
     if (!ready) {
       setAddDraftOpen(false);
+      setSelectedAddCardId(null);
       setTab("cards");
       setFiling(null);
       setOfferNickname(null);
@@ -239,11 +242,7 @@ export function WalletWorkspace() {
     if (!ready || value === activeTab || !WALLET_TABS.some((option) => option.value === value)) return;
     // Drop revealed values and reject an in-flight reveal when leaving Cards.
     dispatch({ type: "unfocus" });
-    if (value === "add") {
-      dispatch({ type: "open_add" });
-    } else {
-      dispatch({ type: "close_add" });
-    }
+    dispatch({ type: "close_add" });
     setTab(value as WalletTab);
   };
   const stackRef = useRef<HTMLDivElement | null>(null);
@@ -690,8 +689,19 @@ export function WalletWorkspace() {
 
           </div>
           <div className="space-y-3.5 px-[var(--page-inline-gutter-standard)]">
+          {ready && activeTab === "add" && !addDraftOpen && view.kind !== "add" ? (
+            <WalletAddCollection
+              key={renderedOwnerId}
+              cards={cards}
+              selectedCardId={selectedAddCardId}
+              onSelect={setSelectedAddCardId}
+              onAdd={() => dispatch({ type: "open_add" })}
+              onRemove={setRemoveTarget}
+              busyCardId={busyCardId}
+            />
+          ) : null}
           {ready && (addDraftOpen || view.kind === "add") ? (
-            <div>
+            <div className="mx-auto w-full max-w-[420px] py-4">
               <SecureCardAddForm
                 key={`${renderedOwnerId}:${filing?.secretId ?? "new"}`}
                 active={activeTab === "add"}
@@ -701,12 +711,16 @@ export function WalletWorkspace() {
                   const context = vaultContext();
                   if (!context) throw new Error("Unlock your vault to save a card.");
                   try {
-                    await WalletService.addCard({
+                    const saved = await WalletService.addCard({
                       ...context,
                       card,
                       surface: "web",
                       source: "one_wallet_add",
                     });
+                    const current = vaultContextRef.current();
+                    if (activeOwnerIdRef.current !== context.userId || !current || current.vaultKey !== context.vaultKey) return;
+                    setCards((existing) => [...existing.filter((item) => item.cardId !== saved.cardId), saved.summary]);
+                    setSelectedAddCardId(saved.cardId);
                     if (activeOwnerIdRef.current === context.userId) {
                       trackEvent("one_wallet_action", { route_id: "one_wallet", action: "card_added", result: "success" });
                     }
@@ -717,18 +731,18 @@ export function WalletWorkspace() {
                     throw error;
                   }
                   setAddDraftOpen(false);
-                  setTab("cards");
+                  setTab("add");
+                  dispatch({ type: "close_add" });
                   setOfferNickname(null);
                   if (filing) {
                     clearSecretOffer();
                     void SecretsVaultService.markFiled({ ...context, secretId: filing.secretId, filedTo: "wallet" }).catch(() => undefined);
                     setFiling(null);
                   }
-                  await refresh();
                 }}
                 onCancel={() => {
                   setAddDraftOpen(false);
-                  setTab("cards");
+                  setTab("add");
                   setOfferNickname(null);
                   clearSecretOffer();
                   setFiling(null);
