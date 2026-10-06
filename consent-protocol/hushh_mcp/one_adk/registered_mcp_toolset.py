@@ -309,7 +309,7 @@ class RegisteredMcpToolset(BaseToolset):
                                 connector_id,
                                 reason,
                                 type(error).__name__,
-                                getattr(error, "code", None),
+                                str(getattr(error, "code", None)).lower().replace("_", "."),
                             )
                         return note_unavailable(connector_id, display_name, reason)
                 if tools:

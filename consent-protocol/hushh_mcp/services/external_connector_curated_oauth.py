@@ -38,7 +38,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from os import getenv
 from typing import Any, Protocol
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -83,6 +83,22 @@ _FEATURE = "curated_mcp_connectors"
 # see curated_connector_manifest.py). A provider with no valid manifest is
 # never served, and its tools never skip review.
 logger = logging.getLogger(__name__)
+
+# RFC 6749 section 5.2 (plus RFC 6750/7009 additions). A provider-controlled value is
+# logged only when it is one of these.
+_OAUTH_ERROR_TOKENS = frozenset(
+    {
+        "invalid_request",
+        "invalid_client",
+        "invalid_grant",
+        "unauthorized_client",
+        "unsupported_grant_type",
+        "invalid_scope",
+        "access_denied",
+        "server_error",
+        "temporarily_unavailable",
+    }
+)
 
 
 def curated_free_read_tools(connector_id: str) -> frozenset[str]:
@@ -346,7 +362,18 @@ class ExternalConnectorCuratedOAuth:
                     if not isinstance(parsed, dict):
                         raise CuratedConnectorOAuthError("provider_unavailable", status_code=502)
                     if response.status_code != 200:
-                        if response.status_code == 400 and parsed.get("error") == "invalid_grant":
+                        # Only the HTTP status and the standard OAuth error token are kept:
+                        # a wrong client secret and a provider outage otherwise look alike.
+                        oauth_error = parsed.get("error")
+                        logger.warning(
+                            "curated_oauth.token_endpoint host=%s status=%s error=%s",
+                            urlsplit(url).hostname,
+                            response.status_code,
+                            oauth_error.replace("_", ".")
+                            if oauth_error in _OAUTH_ERROR_TOKENS
+                            else "other",
+                        )
+                        if response.status_code == 400 and oauth_error == "invalid_grant":
                             raise CuratedConnectorOAuthError("grant_rejected", status_code=401)
                         raise CuratedConnectorOAuthError("provider_unavailable", status_code=503)
                     return parsed
@@ -469,12 +496,13 @@ class ExternalConnectorCuratedOAuth:
         the review policy before/after any tool call. `connector` is the live
         registry row when the caller already holds it."""
         row = await self.lifecycle.read(user_id=user_id, connector_id=connector_id, purge=False)
-        if (
-            not row
-            or row["status"] not in {"connected", "verifying"}
-            or row["envelope_version"] != 2
-        ):
+        if not row or row["status"] == "revoked":
+            # Never connected, or the person disconnected it: nothing to report.
             raise CuratedNotConnectedError()
+        if row["status"] not in {"connected", "verifying"} or row["envelope_version"] != 2:
+            # needs_reauth (the provider rejected the refresh token), error, or a legacy
+            # envelope: the person did connect it and it stopped working, so say so.
+            raise CuratedConnectorOAuthError("reconnect_required", status_code=401)
         connector, client_id, client_secret = await self._configuration(connector_id, connector)
         # Check the registry hasn't drifted from what was consented to BEFORE
         # any decrypt or provider call: an operator edit (endpoint, token

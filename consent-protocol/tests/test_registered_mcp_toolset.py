@@ -688,3 +688,32 @@ async def test_a_reused_listing_still_carries_the_review_note_exactly_once(regis
         assert listing[0].description.count(module.REVIEW_CARD_NOTE) == 1
         assert listing[0].description.endswith(module.REVIEW_CARD_NOTE)
     assert write.description == "Create records"
+
+
+async def test_a_provider_outage_is_not_reported_as_needing_a_reconnect(registry):
+    registry.list_active_connectors.return_value = [definition("hubspot")]
+    async with mcp_turn_scope("thread") as scope:
+        scope.acquire = AsyncMock(
+            side_effect=ExternalMcpError("down", code="MCP_CONNECTOR_UNAVAILABLE")
+        )
+        (stand_in,) = await module.RegisteredMcpToolset().get_tools(context())
+        result = await stand_in.run_async(args={}, tool_context=Mock())
+    assert result["reason"] == "unavailable"
+    assert "reconnect" not in result["message"].lower()
+
+
+async def test_the_discovery_log_keeps_the_cause_in_a_form_the_redactor_leaves_alone(
+    registry, caplog
+):
+    from mcp_modules.log_redaction import redact_log_value
+
+    registry.list_active_connectors.return_value = [definition("hubspot")]
+    async with mcp_turn_scope("thread") as scope:
+        scope.acquire = AsyncMock(side_effect=ExternalMcpError("x", code="MCP_CREDENTIAL_EXPIRED"))
+        with caplog.at_level("WARNING", logger=module.logger.name):
+            await module.RegisteredMcpToolset().get_tools(context())
+    line = next(
+        r.getMessage() for r in caplog.records if "mcp_connector_unavailable" in r.getMessage()
+    )
+    assert "code=mcp.credential.expired" in line
+    assert redact_log_value(line) == line
