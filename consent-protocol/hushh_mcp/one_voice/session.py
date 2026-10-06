@@ -45,6 +45,7 @@ from hushh_mcp.one_voice.tickets import TicketClaims
 from hushh_mcp.one_voice.tools import registry
 from hushh_mcp.one_voice.tools.base import (
     EntityContext,
+    Rejected,
     ScreenContext,
     ToolContext,
     ToolResult,
@@ -55,6 +56,7 @@ from hushh_mcp.one_voice.tools.base import (
 from hushh_mcp.one_voice.tools.executor import (
     CONFIRMATION_WAITING,
     PENDING_ACTION_EXISTS,
+    STORAGE_UNAVAILABLE,
     ToolCallOutcome,
     ToolExecutor,
 )
@@ -2342,7 +2344,7 @@ class VoiceSession:
 
     async def _held_card(
         self, spec: ToolSpec | None, origin_turn_id: str, *, name: str = ""
-    ) -> PendingAction | None:
+    ) -> PendingAction | ToolCallOutcome | None:
         """The waiting card a proposal Live made on its own must leave alone.
 
         UAT 2026-10-06: 14.5 s after a card was read back, with no input
@@ -2358,6 +2360,10 @@ class VoiceSession:
         as the model asked. Arguments are never read. A confirm or cancel of
         the waiting card made the same way is held too: only the person
         answers a card.
+
+        Returns the card to hold the call on, or None to let it run. When the
+        open cards cannot be read, a card answer gets a fail-closed outcome
+        instead, which the relay answers without running the call.
         """
         proposes = spec is not None and spec.policy.needs_confirmation
         if not (proposes or name in _CARD_ANSWER_TOOLS) or not self.turn.model_only:
@@ -2377,10 +2383,24 @@ class VoiceSession:
                 user_id=self.ctx.user_id, conversation_id=self.ctx.conversation_id
             )
         except PendingActionStorageError as exc:
-            # Unreadable is not "nothing waiting". The executor reads the same
-            # rows and fails closed, so the call is left to it.
+            # Unreadable is not "nothing waiting". A proposal is left to the
+            # executor, which reads the same rows and fails closed. A card
+            # answer is not: the executor confirms or cancels by id without
+            # that read, so storage back a moment later would let a yes or
+            # cancel made in silence through. It is answered here instead,
+            # with nothing changed and the card left as it is.
             self._storage_failed("hold", exc)
-            return None
+            if name not in _CARD_ANSWER_TOOLS:
+                return None
+            return ToolCallOutcome(
+                result=Rejected(
+                    reason_code=STORAGE_UNAVAILABLE,
+                    spoken_facts=[
+                        "I couldn't reach that right now, so nothing was changed. "
+                        "Please try again in a moment."
+                    ],
+                )
+            )
         other: PendingAction | None = None
         for row in open_rows:
             open_spec = registry.get_tool(row.tool_name)
@@ -2596,14 +2616,18 @@ class VoiceSession:
                 turn_id=origin_turn_id,
             )
         )
-        card = await self._held_card(spec, origin_turn_id, name=name)
-        if card is not None:
-            await self._answer_held(card, name=name, call_id=call_id, origin_turn_id=origin_turn_id)
+        held = await self._held_card(spec, origin_turn_id, name=name)
+        if isinstance(held, PendingAction):
+            await self._answer_held(held, name=name, call_id=call_id, origin_turn_id=origin_turn_id)
             return
         # Whatever this call returns is something real for Live to answer.
         self._hold_chain = False
         await self._send(protocol.voice_state("executing", turn_id=self.turn.turn_id))
-        outcome = await self.executor.call(self.ctx, name, args, origin_turn_id=origin_turn_id)
+        outcome = (
+            held
+            if held is not None
+            else await self.executor.call(self.ctx, name, args, origin_turn_id=origin_turn_id)
+        )
         if outcome.timings:
             # Executor phases only (store reads, prepare, handler), as short
             # key=ms pairs; the result status is bounded vocabulary.

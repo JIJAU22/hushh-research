@@ -592,26 +592,44 @@ async def test_a_proposal_live_makes_in_silence_leaves_the_waiting_card_alone(
     assert created == ["HUSSH GARAGE V04"]
 
 
+@pytest.mark.parametrize("read_fails", [False, True], ids=["cards_read", "read_fails_once"])
 @pytest.mark.parametrize("tool", ["confirm_pending_action", "cancel_pending_action"])
-async def test_live_never_answers_the_waiting_card_in_silence(monkeypatch, caplog, tool):
+async def test_live_never_answers_the_waiting_card_in_silence(
+    monkeypatch, caplog, tool, read_fails
+):
     """Only the person answers a card. A confirm made in silence would approve
     an action nobody said yes to; a cancel made in silence would clear the way
     for an unprompted re-proposal. Both are held like a proposal made in
-    silence: the card stays pending and the person's own yes still runs it once."""
+    silence: the card stays pending and the person's own yes still runs it once.
+    When the open cards cannot be read for the hold, the answer fails closed
+    instead of reaching the executor, which confirms or cancels by id without
+    that read: nothing changes, even if storage is back a moment later."""
     created = _circle_catalog(monkeypatch)
     session, transport, fake = await _relay_on_live()
     original = {"name": "HUSSH GARAGE V04", "spelled_words": ["HUSSH"]}
     await _say(session, "Create a circle called hussh garage v04")
     card = await _card_read_back_then_silence(session, transport, "c1", "create_circle", original)
+    if read_fails:
+        read_open = session.pending.list_open
+
+        async def _fails_once(**kwargs):
+            monkeypatch.setattr(session.pending, "list_open", read_open)
+            raise PendingActionStorageError("unavailable")
+
+        monkeypatch.setattr(session.pending, "list_open", _fails_once)
     with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
         await _model_calls(session, "c2", tool, {"pending_action_id": card})
 
     assert session.pending.rows[card].status == "pending"
     assert created == []
     held = _responses(fake, tool)[-1]
-    assert held["status"] == "confirmation_waiting" and held["pending_action_id"] == card
-    assert held["spoken_facts"] == [] and held["reason_code"] == "awaiting_answer"
-    assert f"one_voice.tool.held tool={tool} after=none" in caplog.text
+    if read_fails:
+        assert held["status"] == "rejected" and held["reason_code"] == "storage_unavailable"
+        assert held["spoken_facts"] and "op=hold" in caplog.text
+    else:
+        assert held["status"] == "confirmation_waiting" and held["pending_action_id"] == card
+        assert held["spoken_facts"] == [] and held["reason_code"] == "awaiting_answer"
+        assert f"one_voice.tool.held tool={tool} after=none" in caplog.text
 
     await session._handle_live_event(LiveEvent(kind="turn_complete"))
     await _speak_and_end(session, "QkJC")
