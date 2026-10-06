@@ -762,9 +762,10 @@ class CreateCircleInput(ToolInput):
         default_factory=list,
         max_length=MAX_CHANGED_WORDS_PER_CALL,
         description=(
-            "When correcting the waiting card: each word you changed, added or removed that "
-            "they did not spell — old as on the card (empty if added), new as in name (empty "
-            "if removed). A word neither listed here nor spelled stays exactly as on the card."
+            "When correcting a name you proposed, even after cancelling its card: each word "
+            "you changed, added or removed that they did not spell — old as on the card (empty "
+            "if added), new as in name (empty if removed). A word neither listed here nor "
+            "spelled stays exactly as on the card."
         ),
     )
 
@@ -2448,10 +2449,10 @@ TOOLS: tuple[ToolSpec, ...] = (
             "Create an empty circle with the given name (kind family, friends, or other). "
             "Creating a circle sends no invitations and shares no location; adding people is a "
             "separate action. Reports already_exists when the person already owns one by that name."
-            " Use the name exactly as the person said or spelled it. When correcting the waiting "
-            "card, change only what they asked: a word they spell goes in spelled_words, and "
-            "each other changed word in changed_words; a word they spelled stays until they "
-            "change it. If it answers name_changed or "
+            " Use the name exactly as the person said or spelled it. When correcting a name you "
+            "proposed, even after cancelling its card, change only what they asked: a word they "
+            "spell goes in spelled_words, and each other changed word in changed_words; a word "
+            "they spelled stays until they change it. If it answers name_changed or "
             "spelled_word_missing for a change they did ask for, call it again with that change "
             "declared (changed_words or release_spelled_words)."
         ),
