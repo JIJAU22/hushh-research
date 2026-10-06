@@ -101,3 +101,21 @@ The illustration loads eagerly at high priority with an inline blur placeholder;
 it does not wait for the card summary request or a server image transform.
 Cold connections can still require an image download. The PNG remains the
 source artwork.
+
+## Card browser
+
+The Cards tab uses `WalletCardBrowser` to coordinate an All overview, the existing
+animated card collection, and a selected-card detail view. Cards open as a scroll-driven stack; Collapse cards switches to a compact deck and View all restores
+a spaced list without overlapping detail links. A thumbnail strip outside the tab pager remains above the shared
+bottom chrome; its plus action opens the existing Add form. Reduced-motion users
+receive the same controls with a static list and instant selection.
+
+An empty Wallet shows explicitly labelled demo cards with fictional numbers,
+statements, activity, rewards, payment and autopay previews. These are presentation
+records only: they are never inserted into saved Wallet cards or sent to payment,
+consent, or vault services. Preview actions explain that no transaction or autopay
+is performed. Saved-card selection remains metadata-only; the existing explicit
+Show card details action owns decryption, and leaving Cards or selecting All
+clears any revealed values.
+
+The card thumbnail bar hides on downward page scrolling and returns on upward scrolling. Stopping alone does not reveal it; keyboard focus keeps its controls available.

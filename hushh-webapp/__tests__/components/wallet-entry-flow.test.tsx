@@ -100,7 +100,7 @@ describe("Wallet visit introduction", () => {
     expect(screen.getByTestId("one-wallet-empty-art")).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Cards" })).toBeNull();
     await enter();
-    expect(screen.getByTestId("wallet-add-preview")).toBeTruthy();
+    expect(screen.getByTestId("wallet-preview-collection")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Travel - Demo" }));
     expect(serviceMock.addCard).not.toHaveBeenCalled();
     expect(serviceMock.getCard).not.toHaveBeenCalled();
@@ -133,9 +133,10 @@ describe("Wallet visit introduction", () => {
     serviceMock.listCardSummaries.mockResolvedValue(makeCards(2));
     render(<WalletWorkspace />);
     await enter();
-    expect(screen.queryByTestId("wallet-add-preview")).toBeNull();
+    expect(screen.queryByTestId("wallet-preview-collection")).toBeNull();
     expect(screen.getByTestId("wallet-add-layer-1000")).toBeTruthy();
     expect(serviceMock.getCard).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Open Card 0, ending 1000" }));
     expect(screen.getByRole("button", { name: "Show card details" })).toBeTruthy();
   });
   it("returns a saved real card to Cards without mixing in demos", async () => {
@@ -150,8 +151,9 @@ describe("Wallet visit introduction", () => {
     fireEvent.change(screen.getByLabelText("Issuing region"), { target: { value: "IN" } });
     fireEvent.click(screen.getByTestId("secure-card-save"));
     await waitFor(() => expect(screen.getByRole("tab", { name: "Cards" })).toHaveAttribute("aria-selected", "true"));
-    expect(screen.getByTestId("wallet-add-layer-4242")).toHaveAttribute("data-selected", "true");
-    expect(screen.queryByTestId("wallet-add-preview")).toBeNull();
+    await screen.findByTestId("wallet-selected-card");
+    expect(screen.getByRole("button", { name: "Open New card, ending 4242" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId("wallet-preview-collection")).toBeNull();
   });
   it("removes the form and card details when the vault locks", async () => {
     const page = render(<WalletWorkspace />);
