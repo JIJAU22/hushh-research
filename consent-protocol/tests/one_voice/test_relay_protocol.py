@@ -470,16 +470,43 @@ async def test_confirm_tool_in_a_turn_without_its_own_input_is_logged(caplog):
         # tool in a model-only continuation, are not unprompted proposals.
         await _model_calls(session, "c1", "ask", {"person": {"user_id": "u-priya"}})
         await session._handle_live_event(LiveEvent(kind="turn_complete"))
+        # Live answers the tool result in its own turn; after that nothing is owed.
+        await _speak_and_end(session, "QUJD")
         await _model_calls(session, "c2", "echo", {"text": "private echo words"})
         assert "one_voice.tool.no_input" not in caplog.text
         await _model_calls(session, "c3", "delete_thing", {"thing_id": "private-thing-id"})
         session._log_session_perf()
     lines = [r.message for r in caplog.records if "one_voice.tool.no_input" in r.message]
-    assert len(lines) == 1 and "tool=delete_thing" in lines[0]
+    assert len(lines) == 1 and "tool=delete_thing after=none" in lines[0]
     assert session._counters.get("unprompted", 0) == 1
-    assert "unprompted=1" in caplog.text
+    assert "unprompted=1 chained=0" in caplog.text
     for private in ("Priya", "private echo words", "private-thing-id", "Ask Priya"):
         assert private not in caplog.text
+
+
+async def test_confirm_tool_chained_after_a_tool_or_event_is_not_unprompted(caplog):
+    """A lookup then a proposal, or a reply to an injected event, is Live
+    answering what it was handed: logged with what opened the turn, counted as
+    chained, never as unprompted."""
+    session, _transport, _fake, _pending = await _voice_card_session()
+    with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
+        await _model_calls(session, "c1", "echo", {"text": "private echo words"})
+        await session._handle_live_event(LiveEvent(kind="turn_complete"))
+        await _model_calls(session, "c2", "delete_thing", {"thing_id": "private-thing-id"})
+        await session._handle_live_event(LiveEvent(kind="turn_complete"))
+        await _speak_and_end(session, "QUJD")
+        await session._inject_event({"kind": "private_event_kind"})
+        await _model_calls(session, "c3", "delete_thing", {"thing_id": "private-other-id"})
+        session._log_session_perf()
+    lines = [r.message for r in caplog.records if "one_voice.tool.no_input" in r.message]
+    assert len(lines) == 2
+    assert "tool=delete_thing after=tool" in lines[0]
+    assert "tool=delete_thing after=event" in lines[1]
+    assert session._counters.get("unprompted", 0) == 0
+    assert "unprompted=0 chained=2" in caplog.text
+    for private in ("Priya", "private echo words", "private-thing-id", "private-other-id"):
+        assert private not in caplog.text
+    assert "private_event_kind" not in caplog.text
 
 
 async def test_output_transcript_after_its_final_is_counted_at_turn_end(caplog):
@@ -503,9 +530,15 @@ async def test_output_transcript_after_its_final_is_counted_at_turn_end(caplog):
             LiveEvent(kind="output_transcript", text="Last private words.", finished=True)
         )
         await session._handle_live_event(LiveEvent(kind="turn_complete"))
-    assert len(transport.frames("transcript.output")) == 5
+        # An interrupted turn ends without turn_complete; its shape still counts.
+        for text in ("Private early final.", "Private late words."):
+            await session._handle_live_event(
+                LiveEvent(kind="output_transcript", text=text, finished=True)
+            )
+        await session._handle_live_event(LiveEvent(kind="interrupted"))
+    assert len(transport.frames("transcript.output")) == 7
     lines = [r.message for r in caplog.records if "one_voice.transcript_shape" in r.message]
-    assert len(lines) == 1 and "after_final=2" in lines[0]
+    assert len(lines) == 2 and "after_final=2" in lines[0] and "after_final=1" in lines[1]
     assert "private" not in caplog.text.lower()
 
 

@@ -200,6 +200,9 @@ class AuthResult:
 
 AuthVerifier = Callable[[protocol.AuthFrame, TicketClaims], Awaitable[AuthResult]]
 LiveFactory = Callable[[str, dict[str, Any]], AbstractAsyncContextManager[LiveSessionPort]]
+# What a model-only continuation follows: a tool response or an injected app
+# event Live owes a reply to, or nothing. Short values: logged as-is.
+OpenedAfter = Literal["none", "tool", "event"]
 
 
 @dataclass
@@ -215,6 +218,8 @@ class TurnState:
     # Opened by a provider boundary with no input of its own: whatever Live says
     # next is either a continuation it owes or the answer to the next input.
     model_only: bool = False
+    # Structural only, for forensics: what this continuation is answering.
+    opened_after: OpenedAfter = "none"
     # Live said something in this turn: forwarded, held for a narration, or fenced.
     live_spoke: bool = False
     # Live output dropped because this turn was fenced; logged at its boundary.
@@ -234,6 +239,7 @@ class TurnState:
         self.input_seen = False
         self.input_transcript_completed = False
         self.model_only = False
+        self.opened_after = "none"
         self.live_spoke = False
         self.muted_chunks = 0
         self.output_final_sent = False
@@ -315,6 +321,8 @@ class VoiceSession:
         # close that provider turn and speak the reply in a fresh one, so a new
         # input waits behind it instead of taking the turn the reply will use.
         self._reply_owed = False
+        # What the owed reply answers; meaningful only while _reply_owed.
+        self._reply_owed_to: OpenedAfter = "none"
         # Set from the auth frame before any tool runs; UTC until then.
         self._client_timezone = "UTC"
         self.started_at = clock()
@@ -496,7 +504,7 @@ class VoiceSession:
             "one_voice.session_perf session=%s user_input_turns=%d provider_turns=%d "
             "tool_calls=%d confirmation_proposals=%d confirmation_reused=%d "
             "confirmation_cancelled=%d confirmations_completed=%d clarifications=%d "
-            "unprompted=%d%s",
+            "unprompted=%d chained=%d%s",
             self.session_id,
             inputs,
             provider_turns,
@@ -507,6 +515,7 @@ class VoiceSession:
             self._counters.get("confirmations_completed", 0),
             self._counters.get("clarifications", 0),
             self._counters.get("unprompted", 0),
+            self._counters.get("chained", 0),
             ratios,
         )
 
@@ -964,6 +973,11 @@ class VoiceSession:
         )
         # The event closes a turn of its own, so Live owes it a reply.
         self._reply_owed = True
+        self._reply_owed_to = "event"
+        # Live's reply lands in whatever turn is open; a continuation that
+        # followed nothing is now answering this event.
+        if self.turn.model_only and self.turn.opened_after == "none":
+            self.turn.opened_after = "event"
 
     def _origin_is_stale(self, origin_turn_id: str | None) -> bool:
         input_turn_id = self._turn_input_origins.get(origin_turn_id or "", origin_turn_id)
@@ -1838,6 +1852,7 @@ class VoiceSession:
             self._reply_owed = False
             await self._send(protocol.turn("interrupted", turn_id=self.turn.turn_id))
             self._log_muted(self.turn)
+            self._log_transcript_shape(self.turn)
             await self._advance_turn()
             await self._send(protocol.voice_state("listening"))
         elif kind == "turn_complete":
@@ -1952,16 +1967,24 @@ class VoiceSession:
         """Record a confirm-tier call from a provider turn with no input of its own.
 
         Structural only: a model-only continuation that the relay attributes to
-        an earlier input. The call still runs exactly as the model asked.
+        an earlier input. A continuation that follows a tool response or an
+        injected event is Live answering what it was handed, so it is counted as
+        chained; only one that followed nothing is unprompted. The call still
+        runs exactly as the model asked.
         """
         if spec is None or not spec.policy.needs_confirmation or not self.turn.model_only:
             return
         if self._turn_input_origins.get(origin_turn_id) == origin_turn_id:
             return
-        self._bump(unprompted=1)
+        opened_after = self.turn.opened_after
+        if opened_after == "none":
+            self._bump(unprompted=1)
+        else:
+            self._bump(chained=1)
         logger.info(
-            "one_voice.tool.no_input tool=%s session=%s turn=%s",
+            "one_voice.tool.no_input tool=%s after=%s session=%s turn=%s",
             spec.name[:80],
+            opened_after,
             self.session_id,
             origin_turn_id,
         )
@@ -1971,6 +1994,11 @@ class VoiceSession:
         finished_id = finished.turn_id
         input_origin = self._turn_input_origins.get(finished_id)
         self._superseded_turn_ids.discard(finished_id)
+        # Read before the owed reply is cleared below: what the next
+        # continuation, if there is one, is answering.
+        opened_after: OpenedAfter = (
+            "tool" if finished.tool_calls else (self._reply_owed_to if self._reply_owed else "none")
+        )
         if finished.model_only and not finished.tool_calls:
             # Live closed a turn of its own without calling a tool, so a reply
             # still owed did not come in it. Holding the next input any longer
@@ -2000,7 +2028,9 @@ class VoiceSession:
             # transcript belongs to a new input segment, even though this
             # model-only continuation has a fresh display turn ID.
             self.turn = TurnState(
-                input_transcript_completed=input_origin is not None, model_only=True
+                input_transcript_completed=input_origin is not None,
+                model_only=True,
+                opened_after=opened_after,
             )
             if input_origin is not None:
                 self._bind_turn_to_input(self.turn.turn_id, input_origin)
@@ -2307,6 +2337,7 @@ class VoiceSession:
         # Live still speaks about this result, possibly in a fresh provider turn;
         # after a narration that is the short acknowledgement the narration holds.
         self._reply_owed = True
+        self._reply_owed_to = "tool"
 
     async def _narrate(self, result: ToolResult, *, origin_turn_id: str) -> bool:
         """Speak a result's own short digest, if it has one and narration is on.
