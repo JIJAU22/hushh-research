@@ -592,7 +592,15 @@ async def test_a_proposal_live_makes_in_silence_leaves_the_waiting_card_alone(
     assert created == ["HUSSH GARAGE V04"]
 
 
-@pytest.mark.parametrize("read_fails", [False, True], ids=["cards_read", "read_fails_once"])
+@pytest.mark.parametrize(
+    "read_fails",
+    [None, "same_turn", "next_continuation"],
+    ids=[
+        "cards_read",
+        "read_fails_once_retry_same_turn",
+        "read_fails_once_retry_next_continuation",
+    ],
+)
 @pytest.mark.parametrize("tool", ["confirm_pending_action", "cancel_pending_action"])
 async def test_live_never_answers_the_waiting_card_in_silence(
     monkeypatch, caplog, tool, read_fails
@@ -603,7 +611,9 @@ async def test_live_never_answers_the_waiting_card_in_silence(
     silence: the card stays pending and the person's own yes still runs it once.
     When the open cards cannot be read for the hold, the answer fails closed
     instead of reaching the executor, which confirms or cancels by id without
-    that read: nothing changes, even if storage is back a moment later."""
+    that read: nothing changes and Live gets nothing to say. That answer is a
+    held one for what follows, so Live retrying at once, in the same provider
+    turn or the next continuation, is held even with storage back."""
     created = _circle_catalog(monkeypatch)
     session, transport, fake = await _relay_on_live()
     original = {"name": "HUSSH GARAGE V04", "spelled_words": ["HUSSH"]}
@@ -625,7 +635,15 @@ async def test_live_never_answers_the_waiting_card_in_silence(
     held = _responses(fake, tool)[-1]
     if read_fails:
         assert held["status"] == "rejected" and held["reason_code"] == "storage_unavailable"
-        assert held["spoken_facts"] and "op=hold" in caplog.text
+        assert held["spoken_facts"] == [] and "op=hold" in caplog.text
+        if read_fails == "next_continuation":
+            await session._handle_live_event(LiveEvent(kind="turn_complete"))
+        await _model_calls(session, "c2r", tool, {"pending_action_id": card})
+        assert session.pending.rows[card].status == "pending"
+        assert created == []
+        retried = _responses(fake, tool)[-1]
+        assert retried["status"] == "confirmation_waiting" and retried["pending_action_id"] == card
+        assert session._counters.get("held") == 1
     else:
         assert held["status"] == "confirmation_waiting" and held["pending_action_id"] == card
         assert held["spoken_facts"] == [] and held["reason_code"] == "awaiting_answer"

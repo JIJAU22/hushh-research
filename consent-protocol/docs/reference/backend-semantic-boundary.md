@@ -609,7 +609,10 @@ would sit on the drift list above. It is declared, and scoped, as catalog search
   note to wait for the person's answer). The card is not cancelled, replaced
   or sent again, and the client gets a not-ok result. If the waiting cards
   cannot be read, a card answer made this way is refused
-  (`storage_unavailable`, nothing changed) instead of run.
+  (`storage_unavailable`, nothing changed, no spoken facts) instead of run.
+  That refusal counts as a held answer, so Live retrying it at once, in the
+  same provider turn or the next continuation, is checked again even when
+  storage is back.
 - Recorded: every hold is logged as `one_voice.tool.held tool=… after=…` and
   counted as `held` in the session's perf line, so a skipped call is never
   read as one the executor answered.

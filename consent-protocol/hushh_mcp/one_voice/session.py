@@ -2425,17 +2425,21 @@ class VoiceSession:
             # answer is not: the executor confirms or cancels by id without
             # that read, so storage back a moment later would let a yes or
             # cancel made in silence through. It is answered here instead,
-            # with nothing changed and the card left as it is.
+            # with nothing changed and the card left as it is, and the relay
+            # treats that answer as a held one (see _dispatch_tool_call_inner).
             self._storage_failed("hold", exc)
             if name not in _CARD_ANSWER_TOOLS:
                 return None
+            # No spoken facts, since the person asked for nothing; only a note
+            # for Live, as on a held answer.
             return ToolCallOutcome(
-                result=Rejected(
-                    reason_code=STORAGE_UNAVAILABLE,
-                    spoken_facts=[
-                        "I couldn't reach that right now, so nothing was changed. "
-                        "Please try again in a moment."
-                    ],
+                result=Rejected(reason_code=STORAGE_UNAVAILABLE, spoken_facts=[]).model_copy(
+                    update={
+                        "note": (
+                            "Nothing was changed. The waiting card is the person's to answer. "
+                            "Wait for them to answer it."
+                        )
+                    }
                 )
             )
         other: PendingAction | None = None
@@ -2511,10 +2515,7 @@ class VoiceSession:
                 },
             )
             return
-        input_turn_id = self._turn_input_origins.get(origin_turn_id)
-        streak_input, count = self._hold_streak
-        count = count + 1 if streak_input == input_turn_id else 1
-        self._hold_streak = (input_turn_id, count)
+        count = self._count_hold(origin_turn_id)
         waiting: dict[str, Any] = {
             "pending_action_id": card.id,
             "tier": card.tier,
@@ -2551,6 +2552,17 @@ class VoiceSession:
         self._reply_owed = True
         self._reply_owed_to = "tool"
         self._hold_chain = True
+
+    def _count_hold(self, origin_turn_id: str) -> int:
+        """Count a held answer against the input its call followed.
+
+        New input restarts the count. Returns the holds in a row so far.
+        """
+        input_turn_id = self._turn_input_origins.get(origin_turn_id)
+        streak_input, count = self._hold_streak
+        count = count + 1 if streak_input == input_turn_id else 1
+        self._hold_streak = (input_turn_id, count)
+        return count
 
     async def _advance_turn(self) -> None:
         # The client freezes a turn's answer line at model_end/interrupted, so
@@ -2682,8 +2694,13 @@ class VoiceSession:
         if isinstance(held, PendingAction):
             await self._answer_held(held, name=name, call_id=call_id, origin_turn_id=origin_turn_id)
             return
-        # Whatever this call returns is something real for Live to answer.
-        self._hold_chain = False
+        # The hold's fail-closed answer to a card answer it could not check
+        # never ran the call: like a held answer, it hands Live nothing real,
+        # so Live's retry is checked again. Anything else this call returns
+        # is something real for Live to answer.
+        fail_closed = held is not None
+        if not fail_closed:
+            self._hold_chain = False
         await self._send(protocol.voice_state("executing", turn_id=self.turn.turn_id))
         outcome = (
             held
@@ -2914,6 +2931,9 @@ class VoiceSession:
         # after a narration that is the short acknowledgement the narration holds.
         self._reply_owed = True
         self._reply_owed_to = "tool"
+        if fail_closed:
+            self._count_hold(origin_turn_id)
+            self._hold_chain = True
 
     async def _narrate(self, result: ToolResult, *, origin_turn_id: str) -> bool:
         """Speak a result's own short digest, if it has one and narration is on.
