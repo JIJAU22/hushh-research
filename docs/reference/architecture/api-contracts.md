@@ -761,7 +761,7 @@ server-side, then bind both actions to that source.
 
 The maintained architecture reference is [Personal Gmail Information Requests](./personal-gmail-information-requests.md).
 
-### B2B profile suggestion — Phase 1 UAT fixture
+### B2B profile suggestion — UAT review and confirmation
 
 `GET /api/one/business/suggestion` requires the existing `VAULT_OWNER`
 capability. The owner is derived from its validated token; query/body email,
@@ -775,6 +775,9 @@ key (process-local unless a shared limiter backend is configured).
 not `no_match`. A fresh Firebase primary email must be verified and its exact
 domain must be `hushh.ai`; a cached identity, alias or client assertion cannot
 establish eligibility. Disabled or mismatched Firebase identities fail closed.
+The canonical `vault_keys` row must also have `setup_completed=true` and an
+active vault; this read neither creates a placeholder nor updates login state.
+Failed setup reads are unavailable, not an empty candidate list.
 
 The default-off server switch `ONE_BUSINESS_UAT_FIXTURE_ENABLED=true` maps from
 `one_business_uat_fixture_enabled` in `BACKEND_RUNTIME_CONFIG_JSON`. Admission
@@ -783,7 +786,7 @@ also requires explicit `ENVIRONMENT=uat`; any supplied `HUSHH_DEPLOY_ENV` or
 hosted dev and conflicting labels return `disabled` before provider access,
 even if the switch is on. This change does not enable or deploy the switch.
 
-The sole candidate is **Hushh — UAT Test Business**, explicitly `synthetic`,
+The sole candidate is `Hushh — UAT Test Business`, explicitly `synthetic`,
 with website `https://hushh.ai`, source `uat_fixture`, source key `hushh.ai:v1`,
 and stable `business_uid: urn:hushh:business:uat:hushh.ai:v1`. This test business
 UID is not the user UID and is not a production directory identity. There are
@@ -796,12 +799,60 @@ owner authority, through the existing One Next proxy on web and `ApiService`
 Capacitor HTTP on native. No new screen or native plugin is introduced in this
 slice; physical-device acceptance is not claimed. The service rejects unknown
 versions and inconsistent candidate/status shapes. Consumers must call after
-setup resolves and the vault unlocks and retain the suggestion in memory only.
+setup resolves and the vault unlocks. Ordinary suggestion responses stay in memory.
 
-This slice provides the read contract only: no popup, dismissal lifecycle,
-directory lookup, profile store, private-agent invocation, claim mutation or
-PKM write. Later review/confirmation must reuse the existing private agent and
-client-encrypted PKM writer; receiving a suggestion never authorizes a save.
+The main chat workspace mounts `BusinessProfileSuggestion` after current auth
+and unlocked-vault admission, requiring known, unexpired owner authority.
+It opens a labelled synthetic suggestion with Review, Later and Not my business.
+Editing a name/HTTPS website invalidates prior proposals. Review uses the existing
+private-agent memory preparation and exact-card selection; it does not save.
+Save requires an explicit second action, plus separate acknowledgment when the
+selected memory affects active sharing. It rechecks fresh candidate eligibility
+before using `business_profile_review`, a governed memory-agent writer, through
+the existing client-encrypted PKM coordinator. No new profile store or router.
+
+Immutable `business_uid`, source identity, synthetic and unverified-ownership
+labels are attached as `_business_origin` to the semantic agent's single
+selected entity. Inconsistent destinations and non-entity proposals fail closed.
+This internal ciphertext-only provenance is excluded from manifests, model
+context and exported knowledge paths; it never replaces the user or entity ID.
+
+Owner/business-scoped, vault-encrypted `business_profile_review:uat:v1:{businessUid}` device recovery
+holds only control state and the exact approved cards/scopes. It is not profile
+authority. Later defers 24 hours; Not my business and saved suppress this device's
+offer. These decisions are not cross-device. Checkpoints have a 30-day freshness
+bound; expired, unreadable or unavailable recovery fails closed rather than
+silently starting another job. Existing account-cache deletion remains applicable.
+Before cloud writes, an explicit Save durably checkpoints its reviewed revision.
+Retries reuse stable owner/business/revision/card scopes and query owner-bound
+commit receipts before replay. Decisions and saves share the existing owner Web
+Lock (in-process fallback where unavailable); a stale Later preserves a pending
+job and cannot overwrite saved. Only acknowledged numeric revisions count as saved.
+Lock, account/session change and expired authority fence every effect and hide
+old content. Recovering a pending save requires another explicit Save action.
+
+This is a UAT synthetic vertical slice, not a production business claim system.
+Real directory matching, business-authority verification, cross-device lifecycle
+and deployment acceptance remain separate gates. Source/unit tests do not certify
+live model quality or physical-device behavior. Receiving a suggestion never
+authorizes a save.
+
+Production matching must support one person selecting multiple independent
+businesses, never one business per owner. Decisions, reviewed drafts and retry
+identities must be keyed by owner **and** immutable business UID. Email and phone
+are independent signals, not an obligatory exact pair: a domain-only match,
+phone-only match or missing contact may suggest candidates but cannot establish
+business authority. Conflicting signals must not silently choose either result.
+Shared switchboards, franchise domains, multiple branches, consultants using
+client email, employee accounts, recycled phones, changed domains and stale
+directory rows require explicit disambiguation and provenance. Generic personal
+email providers are not business domains. No-match must remain distinct from
+provider failure; never fabricate a candidate to fill a coverage gap.
+The current UAT response deliberately admits only the single synthetic fixture;
+these broader production matching cases are not implemented by that fixture.
+At the encrypted writer, an existing semantic entity can only be updated by the
+same business UID. A different or unidentified origin fails closed rather than
+merging two businesses merely because their names or contact details overlap.
 
 ### One Google Calendar
 

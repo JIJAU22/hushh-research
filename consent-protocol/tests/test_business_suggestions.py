@@ -20,6 +20,7 @@ def fixture_identity(monkeypatch):
     monkeypatch.delenv("HUSHH_DEPLOY_ENV", raising=False)
     monkeypatch.delenv("APP_RUNTIME_PROFILE", raising=False)
     monkeypatch.setattr(service, "get_firebase_auth_app", lambda: object())
+    monkeypatch.setattr(service, "_setup_resolved", lambda uid: True)
     record = SimpleNamespace(
         uid="owner", disabled=False, email="person@hushh.ai", email_verified=True
     )
@@ -46,6 +47,24 @@ async def test_verified_uat_owner_gets_only_synthetic_candidate(fixture_identity
     assert candidate["claim_created"] is False
     assert candidate["business_uid"] != "owner"
     assert "person@" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_unfinished_setup_never_offers_candidate(fixture_identity, monkeypatch):
+    monkeypatch.setattr(service, "_setup_resolved", lambda uid: False)
+    result = await service.get_business_suggestion("owner")
+    assert result["status"] == "no_match"
+    assert result["candidates"] == []
+
+
+@pytest.mark.asyncio
+async def test_setup_read_failure_is_unavailable_not_no_match(fixture_identity, monkeypatch):
+    def unavailable(uid):
+        raise RuntimeError("synthetic database unavailable")
+
+    monkeypatch.setattr(service, "_setup_resolved", unavailable)
+    with pytest.raises(service.BusinessSuggestionUnavailable):
+        await service.get_business_suggestion("owner")
 
 
 @pytest.mark.parametrize(
