@@ -897,6 +897,27 @@ def _owned_circle_named(rows: list[dict[str, Any]], name: str) -> dict[str, Any]
     return None
 
 
+def _invalid_create_circle_correction(raw_args: dict[str, Any]) -> Rejected | None:
+    """The refusal for a proposal that declared a spelling and could not be read
+    or prepared: ask for the spelled word again, not for a missing detail.
+
+    The executor has already retired the card this proposal was correcting.
+    Only whether a spelling argument is present is checked; no value is read,
+    repeated or logged. ``None`` keeps the executor's generic refusal.
+    """
+    spelling_args = ("spelled_words", "release_spelled_words", "changed_words")
+    if not any(raw_args.get(key) for key in spelling_args):
+        return None
+    return Rejected(
+        reason_code="invalid_spelling",
+        needs="repeat_name",
+        spoken_facts=[
+            "I couldn't read how that was spelled. Which word did they spell? "
+            "Ask them to spell just that word."
+        ],
+    )
+
+
 def _prepared_spelled_words(snapshot: dict[str, Any] | None) -> list[str]:
     raw = snapshot.get("spelled_words") if isinstance(snapshot, dict) else None
     if not isinstance(raw, list):
@@ -2376,6 +2397,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         ui_refresh=REFRESH_CIRCLES,
         summarize=summarize_create_circle,
         prepare=prepare_create_circle,
+        on_invalid_correction=_invalid_create_circle_correction,
         # A new circle names no existing person or circle, so a lookup made for
         # a follow-up ("yes, and add Priya to it") must not cancel its card.
         lookup_targets=(),

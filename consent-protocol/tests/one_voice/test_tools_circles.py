@@ -2440,3 +2440,40 @@ def test_a_refused_bulk_write_reports_nobody_added():
     assert done.result.status == "rejected"
     assert done.result.reason_code == "LOCATION_CIRCLE_INVITE_COOLDOWN"
     assert getattr(done.result, "added_count", 0) == 0
+
+
+def test_a_spelling_the_schema_cannot_read_retires_the_card_it_corrected():
+    """UAT 2026-10-06: with the card for HUSH GARAGE V04 open, the model declared
+    "HUSSH GARAGE" as one spelled word. The schema refused the call and the old
+    card stayed confirmable, so a yes would have created the name the person had
+    just corrected. The refusal now retires that card and asks for the word."""
+    from tests.one_voice.fakes import MemoryPendingStore
+
+    service = FakeCircleService()
+    ctx = make_ctx(service, confirm_family=False)
+    store = MemoryPendingStore()
+    executor = ToolExecutor(pending_store=store)
+    card = _propose_circle(ctx, executor, name="HUSH GARAGE V04")
+    asyncio.run(store.mark_shown(user_id=USER, pending_action_id=card.pending.id))
+
+    bad = _propose_circle(ctx, executor, name="HUSSH GARAGE V04", spelled_words=["HUSSH GARAGE"])
+
+    assert (bad.result.status, bad.result.reason_code, bad.result.needs) == (
+        "rejected",
+        "invalid_spelling",
+        "repeat_name",
+    )
+    assert bad.result.spoken_facts == [
+        "I couldn't read how that was spelled. Which word did they spell? "
+        "Ask them to spell just that word."
+    ]
+    assert [row.id for row in bad.superseded] == [card.pending.id]
+    late_yes = asyncio.run(
+        executor.call(ctx, "confirm_pending_action", {"pending_action_id": card.pending.id})
+    )
+    assert late_yes.result.status == "not_pending"
+    assert not [call for call in service.calls if call[0] == "create_circle"]
+    # Negative control: a malformed call that declares no spelling gets the
+    # generic answer. The spelling question is asked only about a spelling.
+    unspelled = _propose_circle(ctx, executor, name="")
+    assert unspelled.result.reason_code == "invalid_arguments"

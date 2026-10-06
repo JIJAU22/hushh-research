@@ -788,6 +788,13 @@ class ToolSpec:
     # tool itself. A shared gateway action is NOT enough on its own:
     # request_location and withdraw_request share one and do opposite things.
     correction_group: str | None = None
+    # For confirm_* tools: the refusal for a proposal that could not be read
+    # (its arguments failed validation) or prepared (its ``prepare`` hook
+    # raised). Either way the executor retires the open card of the same
+    # correction key first. Given the raw arguments, never logged; returning a
+    # ``Rejected`` replaces the generic invalid_arguments / prepare_failed
+    # answer, and ``None`` keeps it.
+    on_invalid_correction: Callable[[dict[str, Any]], Rejected | None] | None = None
     # For a tool whose arguments do not name what it acts on -- a position in a
     # list the server offered, or the item open on screen -- the server-side
     # identity of that target, resolved without I/O. Equal arguments against

@@ -20,6 +20,7 @@ from hushh_mcp.one_voice.tools.base import (
     ConfirmedPerson,
     EntityContext,
     PersonRef,
+    Prepared,
     ScreenContext,
     ToolContext,
     ToolInput,
@@ -969,3 +970,148 @@ def test_changed_or_late_reproposal_after_a_cancel_asks_as_usual(monkeypatch):
     monkeypatch.setattr(executor_module.time, "monotonic", lambda: later)
     late = asyncio.run(executor.call(ctx, PLAIN.name, {"person": {"user_id": AISHA}}))
     assert "repeats_cancelled" not in late.result.public()
+
+
+# -- a correction that cannot be read still retires the card it corrects ---------
+#
+# UAT 2026-10-06: a correction whose arguments failed validation was refused
+# with invalid_arguments and the card it was correcting stayed confirmable, so
+# the next yes acted on the name the person had just corrected. A proposal of a
+# confirm-tier action that cannot be read or prepared now retires the open card
+# of its own correction key, exactly as a well-formed refused correction does.
+
+
+async def _prepare_name(ctx: ToolContext, args: _NameInput) -> Prepared:
+    if args.name == "unreadable":
+        raise RuntimeError("state unreadable")
+    return Prepared(summary=f"name it {args.name}")
+
+
+async def _read(ctx: ToolContext, args: _NameInput) -> ToolResult:
+    return ToolResult(status="ok")
+
+
+NAMED = ToolSpec(
+    name="name_thing",
+    gateway_action_id="location.rename_circle",
+    policy=ToolPolicy.confirm_voice,
+    input_model=_NameInput,
+    output_model=_SendResult,
+    description="Name.",
+    handler=_send,
+    prepare=_prepare_name,
+    lookup_targets=(),
+)
+READ = ToolSpec(
+    name="read_thing",
+    gateway_action_id="location.open_circles",
+    policy=ToolPolicy.read,
+    input_model=_NameInput,
+    output_model=ToolResult,
+    description="Read.",
+    handler=_read,
+)
+
+
+def _correction_harness(monkeypatch, store: MemoryPendingStore | None = None):
+    by_name = {spec.name: spec for spec in (PLAIN, NAMED, READ)}
+    monkeypatch.setattr(registry, "get_tool", lambda name: by_name.get(str(name or "")))
+    store = store or MemoryPendingStore()
+    executor = ToolExecutor(pending_store=store, actor_proof=_proof({"good": "ok"}))
+    ctx = _ctx("good")
+    card = asyncio.run(executor.call(ctx, NAMED.name, {"name": "Garage"}))
+    assert card.result.status == "confirmation_required"
+    asyncio.run(store.mark_shown(user_id=USER, pending_action_id=card.pending.id))
+    return store, executor, ctx, card.pending
+
+
+@pytest.mark.parametrize(
+    ("args", "reason"),
+    [({}, "invalid_arguments"), ({"name": "unreadable"}, "prepare_failed")],
+)
+def test_an_unreadable_correction_retires_the_card_it_was_aimed_at(monkeypatch, args, reason):
+    store, executor, ctx, card = _correction_harness(monkeypatch)
+
+    refused = asyncio.run(executor.call(ctx, NAMED.name, args))
+
+    assert (refused.result.status, refused.result.reason_code) == ("rejected", reason)
+    assert [row.id for row in refused.superseded] == [card.id]
+    assert _open_rows(store, ctx) == []
+    late_yes = asyncio.run(
+        executor.call(ctx, "confirm_pending_action", {"pending_action_id": card.id})
+    )
+    assert late_yes.result.status == "not_pending"
+
+
+@pytest.mark.parametrize("args", [{}, {"name": "unreadable"}])
+def test_an_unreadable_correction_fails_closed_when_its_card_cannot_be_retired(monkeypatch, args):
+    store, executor, ctx, card = _correction_harness(monkeypatch, _BrokenStore())
+    store.broken = {"cancel"}
+
+    refused = asyncio.run(executor.call(ctx, NAMED.name, args))
+
+    assert (refused.result.status, refused.result.reason_code) == (
+        "rejected",
+        "storage_unavailable",
+    )
+    assert refused.result.spoken_facts == [
+        "I couldn't prepare that right now. Nothing was changed. Please try again in a moment."
+    ]
+    assert refused.superseded == []
+    assert [row.id for row in _open_rows(store, ctx)] == [card.id]
+
+
+def test_an_unreadable_call_that_corrects_no_open_card_changes_nothing(monkeypatch):
+    """Negative controls: a different action's malformed proposal and a
+    malformed read leave the person's card to be answered, and with nothing
+    open at all the store is not written."""
+    store, executor, ctx, card = _correction_harness(monkeypatch)
+
+    other = asyncio.run(executor.call(ctx, PLAIN.name, {"person": {}}))
+    read = asyncio.run(executor.call(ctx, READ.name, {}))
+
+    for refused in (other, read):
+        assert (refused.result.status, refused.result.reason_code) == (
+            "rejected",
+            "invalid_arguments",
+        )
+        assert refused.superseded == []
+    assert [row.id for row in _open_rows(store, ctx)] == [card.id]
+    done = asyncio.run(executor.call(ctx, "confirm_pending_action", {"pending_action_id": card.id}))
+    assert done.result.status == "sent"
+
+    before = {row_id: row.status for row_id, row in store.rows.items()}
+    alone = asyncio.run(executor.call(ctx, NAMED.name, {}))
+    assert (alone.result.reason_code, alone.superseded) == ("invalid_arguments", [])
+    assert {row_id: row.status for row_id, row in store.rows.items()} == before
+
+
+def test_a_card_retired_by_an_unreadable_correction_is_asked_fresh(monkeypatch):
+    """The yes after the refusal answers its question, never the retired card.
+    Re-proposing that card is a new card asked as usual: not the old one still
+    waiting, and not a repeat of a cancel the model made before the refusal."""
+    store, executor, ctx, card = _correction_harness(monkeypatch)
+    asyncio.run(executor.call(ctx, "cancel_pending_action", {"pending_action_id": card.id}))
+    # A twin of the cancelled card is still open: the store's cancel and insert
+    # are separate statements, so two proposals in flight can both land.
+    twin, _receipt = asyncio.run(
+        store.create(
+            user_id=USER,
+            conversation_id=ctx.conversation_id,
+            tool_name=NAMED.name,
+            gateway_action_id=NAMED.gateway_action_id,
+            tier="voice",
+            args={"name": "Garage"},
+            summary="name it Garage",
+        )
+    )
+    asyncio.run(store.mark_shown(user_id=USER, pending_action_id=twin.id))
+
+    refused = asyncio.run(executor.call(ctx, NAMED.name, {}))
+    again = asyncio.run(executor.call(ctx, NAMED.name, {"name": "Garage"}))
+
+    assert [row.id for row in refused.superseded] == [twin.id]
+    assert again.result.status == "confirmation_required"
+    assert again.pending.id not in {card.id, twin.id}
+    assert "repeats_cancelled" not in again.result.public()
+    assert again.result.spoken_facts == ["I can name it Garage. Should I go ahead?"]
