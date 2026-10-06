@@ -253,8 +253,9 @@ class TurnState:
     live_spoke: bool = False
     # Live output dropped because this turn was fenced; logged at its boundary.
     muted_chunks: int = 0
-    # Output transcript frames forwarded after this turn already forwarded an
-    # output final. A count only, logged at the turn's boundary.
+    # Output transcript chunks after this turn already forwarded an output
+    # final, a resent final line included (that one is not sent again). A
+    # count only, logged at the turn's boundary.
     output_final_sent: bool = False
     output_after_final: int = 0
 
@@ -395,6 +396,10 @@ class VoiceSession:
         # The open transcript line per direction (input, output), so every
         # transcript frame carries a relay-owned segment id and seq.
         self._transcript_segments: dict[str, TranscriptSegment] = {}
+        # The line each direction just finished, as (turn id, its text with
+        # whitespace collapsed), until the next chunk in that direction or
+        # the provider turn's end: Live resending it is not shown twice.
+        self._finished_transcripts: dict[str, tuple[str, str]] = {}
         self._pending_voice_turn_id: str | None = None
         self._pending_turn_ids: dict[str, str] = {}
         self._latest_input_turn_id: str | None = None
@@ -530,13 +535,22 @@ class VoiceSession:
         owns the line so the client never guesses from text shape: a stable
         segment id, a seq from 1, the whole text so far (``cumulative``) and
         ``final`` when Live finishes it. The chunks merge once, here, by
-        ``TranscriptSegment.accept``. A typed echo is its own one-frame
-        segment. Never logs text.
+        ``TranscriptSegment.accept``. The client freezes a line at its final,
+        so a finished chunk that only resends the line just finished in the
+        same turn (whitespace aside) sends nothing; anything else starts a
+        new line. A typed echo is its own one-frame segment. Never logs text.
         """
         segment = None if typed else self._transcript_segments.get(role)
         if segment is not None and segment.turn_id != turn_id:
             self._end_transcript_segment(role)
             segment = None
+        if not typed:
+            just_finished = self._finished_transcripts.pop(role, None)
+            if segment is None and finished and just_finished == (turn_id, _spaced(chunk)):
+                # Already shown final. For output, the turn's after_final
+                # count still records the resend.
+                self._finished_transcripts[role] = just_finished
+                return
         if segment is None:
             segment = TranscriptSegment(turn_id=turn_id)
             if not typed:
@@ -547,6 +561,7 @@ class VoiceSession:
             segment.accept(chunk, finished=finished)
             if finished:
                 self._end_transcript_segment(role)
+                self._finished_transcripts[role] = (turn_id, _spaced(segment.raw))
         if not segment.text:
             return
         segment.seq += 1
@@ -2318,7 +2333,7 @@ class VoiceSession:
             )
 
     def _log_transcript_shape(self, turn: TurnState) -> None:
-        """Count output transcript frames that followed the turn's own final."""
+        """Count output transcript chunks that followed the turn's own final."""
         if turn.output_after_final:
             logger.info(
                 "one_voice.transcript_shape after_final=%d session=%s turn=%s",
@@ -2566,8 +2581,9 @@ class VoiceSession:
 
     async def _advance_turn(self) -> None:
         # The client freezes a turn's answer line at model_end/interrupted, so
-        # whatever Live says next is a new transcript line.
+        # whatever Live says next is a new transcript line, even the same words.
         self._end_transcript_segment("output")
+        self._finished_transcripts.clear()
         finished = self.turn
         finished_id = finished.turn_id
         input_origin = self._turn_input_origins.get(finished_id)

@@ -990,7 +990,8 @@ async def test_a_question_typed_while_the_waiting_card_is_read_gets_the_stale_an
 
 async def test_output_transcript_after_its_final_is_counted_at_turn_end(caplog):
     """The output transcript shape behind the UAT circle naming is unknown:
-    count frames forwarded after a turn already forwarded an output final."""
+    count output chunks after a turn already forwarded an output final,
+    including a finished line resent, which is counted but not shown again."""
     session, transport, _fake = await _relay_on_live()
     with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
         await _say(session, "private question")
@@ -1001,7 +1002,11 @@ async def test_output_transcript_after_its_final_is_counted_at_turn_end(caplog):
             )
         await session._handle_live_event(LiveEvent(kind="turn_complete"))
         assert "after_final=" not in caplog.text
-        for text, finished in (("Private reply.", True), (" More private words", False)):
+        for text, finished in (
+            ("Private reply.", True),
+            ("Private reply.", True),
+            (" More private words", False),
+        ):
             await session._handle_live_event(
                 LiveEvent(kind="output_transcript", text=text, finished=finished)
             )
@@ -1015,9 +1020,10 @@ async def test_output_transcript_after_its_final_is_counted_at_turn_end(caplog):
                 LiveEvent(kind="output_transcript", text=text, finished=True)
             )
         await session._handle_live_event(LiveEvent(kind="interrupted"))
+    # The resent "Private reply." is counted after the final but never sent.
     assert len(transport.frames("transcript.output")) == 7
     lines = [r.message for r in caplog.records if "after_final=" in r.message]
-    assert len(lines) == 2 and "after_final=2" in lines[0] and "after_final=1" in lines[1]
+    assert len(lines) == 2 and "after_final=3" in lines[0] and "after_final=1" in lines[1]
     assert "private" not in caplog.text.lower()
 
 
@@ -1212,6 +1218,84 @@ def _lines(transport) -> list[tuple[str, int, str, str]]:
                 (_OUT, 1, "final", "Shall I create it?"),
             ],
             id="G-final-restates-with-other-whitespace",
+        ),
+        # The line Live just finished, sent again finished in the same turn, is
+        # already shown final: nothing more is sent, as the old client merge
+        # ignored a repeated final on a settled row.
+        pytest.param(
+            [
+                (_IN, "Create it", True),
+                (_OUT, "Shall I create it?", True),
+                (_OUT, "Shall I create it?", True),
+            ],
+            [(_IN, 0, "final", "Create it"), (_OUT, 1, "final", "Shall I create it?")],
+            id="H-finished-line-resent",
+        ),
+        pytest.param(
+            [
+                (_IN, "Create it", True),
+                (_OUT, "Shall I", False),
+                (_OUT, " create it?", False),
+                (_OUT, " Shall I create it?", True),
+                (_OUT, " Shall I create it? ", True),
+            ],
+            [
+                (_IN, 0, "final", "Create it"),
+                (_OUT, 1, "cumulative", "Shall I"),
+                (_OUT, 1, "cumulative", "Shall I create it?"),
+                (_OUT, 1, "final", "Shall I create it?"),
+            ],
+            id="F-then-the-final-resent",
+        ),
+        # Negative controls: only the line just finished, resent in its own
+        # turn, is dropped. Words extending it are never lost, and the same
+        # words after other words, or in the next turn, are said again.
+        pytest.param(
+            [
+                (_IN, "Create it", True),
+                (_OUT, "Shall I create it?", True),
+                (_OUT, "Shall I create it? Say yes.", False),
+            ],
+            [
+                (_IN, 0, "final", "Create it"),
+                (_OUT, 1, "final", "Shall I create it?"),
+                (_OUT, 2, "cumulative", "Shall I create it? Say yes."),
+            ],
+            id="extension-after-the-final-is-kept",
+        ),
+        pytest.param(
+            [
+                (_OUT, "Done.", True),
+                (_OUT, "Anything else?", True),
+                (_OUT, "Done.", True),
+                _END,
+                (_OUT, "Done.", True),
+            ],
+            [
+                (_OUT, 0, "final", "Done."),
+                (_OUT, 1, "final", "Anything else?"),
+                (_OUT, 2, "final", "Done."),
+                (_OUT, 3, "final", "Done."),
+            ],
+            id="said-again-later-or-in-the-next-turn",
+        ),
+        # A yes said over Live waits for Live's boundary; the person's next
+        # words then join that same input. Saying it again is still shown.
+        pytest.param(
+            [
+                (_IN, "Create it", True),
+                (_OUT, "Sure", False),
+                (_IN, "Yes.", True),
+                _END,
+                (_IN, "Yes.", True),
+            ],
+            [
+                (_IN, 0, "final", "Create it"),
+                (_OUT, 1, "cumulative", "Sure"),
+                (_IN, 2, "final", "Yes."),
+                (_IN, 3, "final", "Yes."),
+            ],
+            id="the-person-says-it-again-after-the-boundary",
         ),
         # Negative controls the old client merge protects: a space-led chunk
         # that only repeats the previous one, or grows a word already heard,
