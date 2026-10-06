@@ -99,6 +99,13 @@ def test_rule_four_confirms_first_when_a_yes_also_asks_for_more():
     )
     assert "A change to the waiting action itself" in rule and "is a correction" in rule
     assert "pending_action_exists means a different action is still waiting" in rule
+    # UAT 2026-10-06: a spelled correction to a waiting circle name cancelled
+    # the card and asked "What is the name again?" instead of re-proposing.
+    assert (
+        '"no, the first word is H U S S H") is a correction: cancel it and propose the '
+        "corrected one in the same turn, changing only what they corrected; never ask again "
+        "for what they already gave."
+    ) in rule
 
 
 def test_opening_screens_rule_says_opened_only_after_the_app_reports_it():
@@ -137,6 +144,16 @@ def test_authored_policy_from_agent_yaml_is_present():
     assert "do not ask for a prescribed phrase or exact wording" in flat
     assert "Do not claim completion before the tool's final execution result supports it" in flat
     assert "Select a declared tool whose documented effect matches that outcome" in flat
+    # Spelled letters are the name; the brand spelling applies only to the company.
+    assert (
+        "Names are exact. When the person spells a word letter by letter "
+        '("h u s s h", "double s", "V zero four"), use exactly those letters and digits '
+        "for that word and keep the rest of the name as they gave it."
+    ) in flat
+    assert (
+        "The company is Hussh, spelled with two s's; use that spelling only when they mean "
+        "the company."
+    ) in flat
 
 
 def test_context_lines_name_the_person_and_screen():
