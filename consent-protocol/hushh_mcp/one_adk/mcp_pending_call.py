@@ -94,7 +94,7 @@ async def _execute(sql: str, params: dict[str, Any]):
         # The exception details can carry the SQL and every bound value.
         logger.error(
             "mcp_pending_call.storage_failed code=%s operation=%s",
-            getattr(exc, "code", "DATABASE_EXECUTION_ERROR"),
+            str(getattr(exc, "code", "DATABASE_EXECUTION_ERROR")).lower().replace("_", "."),
             getattr(exc, "operation", "unknown"),
         )
         raise PendingCallStorageError("Connector review is temporarily unavailable.") from None
