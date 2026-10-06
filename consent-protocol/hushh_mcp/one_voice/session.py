@@ -17,6 +17,7 @@ import json
 import logging
 import secrets
 import time
+import unicodedata
 import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -151,6 +152,11 @@ _MAIL_DELIVERY_REPORTS = 3
 _NAME_EDITABLE_TOOLS = frozenset({"create_circle"})
 _NAME_EDIT_MAX_CHARS = 80
 _NAME_EDIT_MEMORY = 32
+# Unicode categories a typed name may not carry: control characters, line and
+# paragraph separators, and lone surrogates. Format characters stay allowed,
+# so the joiners in emoji sequences and in Persian or Indic text get through,
+# as they do through the tool's own bounds.
+_NAME_EDIT_REFUSED_CATEGORIES = frozenset({"Cc", "Zl", "Zp", "Cs"})
 # What the editor shows under the input on a refusal, by reason code.
 _NAME_EDIT_MESSAGES = {
     "not_pending": "This card is no longer waiting, so its name can't be changed.",
@@ -1277,7 +1283,7 @@ class VoiceSession:
                 "invalid_name",
                 f"Keep the name to {_NAME_EDIT_MAX_CHARS} characters or fewer.",
             )
-        if not name.isprintable():
+        if any(unicodedata.category(char) in _NAME_EDIT_REFUSED_CATEGORIES for char in name):
             return self._name_edit_refused(
                 frame, "invalid_name", "That name has characters that can't be used."
             )

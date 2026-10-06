@@ -338,13 +338,31 @@ async def test_a_card_that_is_not_an_open_create_circle_here_is_refused_untouche
     assert fake.events_sent == []
 
 
-@pytest.mark.parametrize("name", ["", "   \t ", "x" * 81])
-async def test_an_invalid_typed_name_is_refused_and_the_card_stays_open(name):
+@pytest.mark.parametrize(
+    ("name", "accepted"),
+    [
+        ("", False),
+        ("   \t ", False),
+        ("x" * 81, False),
+        ("Hussh\x07Garage", False),
+        # Joiners are format characters the tool's own bounds accept: an emoji
+        # sequence and Persian text are names the person can type.
+        ("\U0001f468\u200d\U0001f469\u200d\U0001f467 Family", True),
+        ("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", True),
+    ],
+)
+async def test_a_typed_name_outside_the_tools_bounds_is_refused_and_the_card_stays_open(
+    name, accepted
+):
     session, transport, fake, pending, old_id = await _session_with_card()
 
     await session._handle_client_frame(_submit(old_id, name))
 
     [result] = transport.frames("name_edit.result")
+    if accepted:
+        assert result["status"] == "accepted"
+        assert transport.frames("pending_action")[-1]["args"]["name"] == name
+        return
     assert result["status"] == "rejected" and result["reason_code"] == "invalid_name"
     assert result["message"]
     assert pending.rows[old_id].status == "pending"
