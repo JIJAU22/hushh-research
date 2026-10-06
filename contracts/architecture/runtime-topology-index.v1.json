@@ -5940,7 +5940,7 @@
   "source_sha256": {
     "a2a_scope_map": "7379039859448ff3db422aa5ee50124bbcadcecc8c9c49e3c1471791f54208c1",
     "action_gateway": "f1345cd5c40ee9acc3e4bd30e393a4d6604f061364653ce48dcd1c07c34b9788",
-    "agent_registry": "2805f379716689e1655feaa4e53d083ca27e80a2e1b9b873d2379a998bce2fc0",
+    "agent_registry": "faa4c5a078831614ec3e577d446a9cb54394e2b175b87fee22ff7ce5c3211385",
     "cache_manifest": "dcf4ad2bdc42263d49cd3b0bd66b51695e9b2a45c6bbf8c570f54d494c11c1d7",
     "data_plane": "18071853b380377320df6e2ae2c2e9e6b349abfee747c7fc96cca7a2b4db2c64",
     "in_process_dispatch": "11ad2e84c6953e3788b1221d422d60bc105401eb7028e0eb64f9a794b6094dc7",
