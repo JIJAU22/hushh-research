@@ -407,7 +407,7 @@ for (const width of [320, 390, 1024]) {
     await dock.getByRole("button", { name: "Open Travel - Demo, ending 4444" }).click();
     await expect(page.getByTestId("wallet-card-browser")).toHaveAttribute("data-mode", "card");
     await expect(page.getByTestId("wallet-demo-details")).toContainText("Travel card");
-    await expect(page.getByTestId("wallet-demo-activity")).toContainText("₹8,640.00");
+    await expect(page.getByTestId("wallet-demo-activity")).toContainText("â‚¹8,640.00");
     await expect(dock.getByRole("button", { name: "Open Travel - Demo, ending 4444" })).toHaveAttribute("aria-pressed", "true");
     await page.screenshot({ path: testInfo.outputPath("cards-detail.png") });
     await page.getByRole("button", { name: "Payment preview", exact: true }).first().click();
@@ -513,4 +513,40 @@ test("expanded cards stack with scroll and unwind on return", async ({ page }) =
   await expect.poll(translation).toBeGreaterThan(80);
   await page.locator("[data-app-scroll-root]").evaluate((root) => { root.scrollTop = 0; });
   await expect.poll(translation).toBe(0);
+});
+
+for (const width of [320, 393, 1440]) {
+  test(`single-screen Add form fits at ${width}px`, async ({ page }) => {
+    await open(page, width, "light", {}, { shell: true });
+    await mount(page);
+    await page.getByRole("tab", { name: "Add", exact: true }).click();
+    const form = page.getByTestId("secure-card-add-form");
+    await expect(form.getByRole("button", { name: "Scan card", exact: true })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Add", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect.poll(async () => {
+      const box = await form.boundingBox();
+      return Boolean(box && box.x >= 0 && box.x + box.width <= width);
+    }).toBe(true);
+    for (const label of ["Name on card", "Nickname", "Expiry (MM/YY)", "CVV", "PIN (optional)", "Issuing region"]) {
+      await expect(form.getByLabel(label, { exact: true })).toBeAttached();
+    }
+    await form.getByTestId("secure-card-save").scrollIntoViewIfNeeded();
+    await expect(form.getByTestId("secure-card-save")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+}
+
+test("typing replaces the card-number placeholder instead of appending to Xs", async ({ page }) => {
+  await open(page, 393, "light", {}, { shell: true });
+  await mount(page);
+  await page.getByRole("tab", { name: "Add", exact: true }).click();
+  const input = page.getByTestId("secure-card-pan-input");
+  await input.click();
+  await input.pressSequentially("4242");
+  await expect(input).toHaveValue("4242");
+  expect(await input.evaluate((node) => node.matches(":placeholder-shown"))).toBe(false);
+  await input.fill("5555 5555 5555 4444");
+  await expect(input).toHaveValue("5555555555554444");
+  await input.fill("");
+  expect(await input.evaluate((node) => node.matches(":placeholder-shown"))).toBe(true);
 });
