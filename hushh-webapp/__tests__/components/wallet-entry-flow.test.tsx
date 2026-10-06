@@ -85,6 +85,7 @@ function makeCards(count: number) {
 describe("Wallet visit introduction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     authMock.user = { uid: "user_1" };
     vaultMock.locked = false;
     serviceMock.listCardSummaries.mockResolvedValue([]);
@@ -95,13 +96,13 @@ describe("Wallet visit introduction", () => {
     await screen.findByRole("tab", { name: "Cards" });
     await waitFor(() => expect(screen.getByRole("tab", { name: "Add" })).not.toBeDisabled());
   };
-  it("shows the illustration every visit, and demo Cards after Continue without saving them", async () => {
+  it("shows the illustration once, then opens Cards on later visits", async () => {
     const page = render(<WalletWorkspace />);
-    expect(screen.getByTestId("one-wallet-empty-art")).toBeTruthy();
+    expect(await screen.findByTestId("one-wallet-empty-art")).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Cards" })).toBeNull();
     await enter();
     expect(screen.getByTestId("wallet-preview-collection")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Travel - Demo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Travel, ending 4444" }));
     expect(serviceMock.addCard).not.toHaveBeenCalled();
     expect(serviceMock.getCard).not.toHaveBeenCalled();
     expect(serviceMock.deleteCard).not.toHaveBeenCalled();
@@ -111,7 +112,8 @@ describe("Wallet visit introduction", () => {
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     page.unmount();
     render(<WalletWorkspace />);
-    expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
+    expect(await screen.findByRole("tab", { name: "Cards" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   });
   it("opens entry directly in Add, retains masked drafts across tabs, and clears a cancelled draft", async () => {
     render(<WalletWorkspace />);
