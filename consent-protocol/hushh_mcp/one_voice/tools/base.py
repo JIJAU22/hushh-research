@@ -791,10 +791,11 @@ class ToolSpec:
     # For confirm_* tools: the refusal for a proposal that could not be read
     # (its arguments failed validation) or prepared (its ``prepare`` hook
     # raised). Either way the executor retires the open card of the same
-    # correction key first. Given the raw arguments, never logged; returning a
-    # ``Rejected`` replaces the generic invalid_arguments / prepare_failed
-    # answer, and ``None`` keeps it.
-    on_invalid_correction: Callable[[dict[str, Any]], Rejected | None] | None = None
+    # correction key first. Given the raw arguments, never logged, and the
+    # names of the top-level arguments that failed validation (empty when the
+    # prepare hook raised); returning a ``Rejected`` replaces the generic
+    # invalid_arguments / prepare_failed answer, and ``None`` keeps it.
+    on_invalid_correction: Callable[[dict[str, Any], frozenset[str]], Rejected | None] | None = None
     # For a tool whose arguments do not name what it acts on -- a position in a
     # list the server offered, or the item open on screen -- the server-side
     # identity of that target, resolved without I/O. Equal arguments against

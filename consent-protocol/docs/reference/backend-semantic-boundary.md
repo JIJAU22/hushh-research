@@ -523,25 +523,35 @@ would sit on the drift list above. It is declared, and scoped, as catalog search
 - Name under review: the last `create_circle` name that passed is kept in
   `EntityContext.circle_name_baseline` for 3 minutes, across a cancel, and
   cleared once a circle is created or already exists. A proposal that shares
-  at least one word with it is a correction of it: every word it removes must
-  be declared as an `old` in `changed_words`, every word it adds as a `new` or
-  spelled in the same call, and the words it keeps must stay in order.
-  Otherwise it is refused (`name_changed`, `needs=repeat_name`) with one spoken
-  question naming the undeclared change ("This would also change GARAGE to
-  GARAZ. Is that what you want?"), and the open card is retired the same way.
-  Which words changed is the exact word comparison above; whether the person
-  asked for the change is only the model's declaration. A proposal that shares
-  no word is a different circle and is not compared. Logged as
+  at least one word with it, or whose `changed_words` names one of its words
+  as an `old`, is a correction of it. In each stretch where the names differ,
+  every word a correction adds must be declared as a `new` or spelled in the
+  same call, and every word it removes must be declared as an `old`, released
+  in `release_spelled_words`, or replaced by one of those spelled words. Each
+  declaration and each spelled word accounts for one word once (a spelled word
+  declared as a change's `new` replaces only that change's `old`), and a pair
+  naming the same words in the same order declares nothing. A moved word is
+  removed in one place and added in another, so a move is declared like any
+  other change. Otherwise the call is refused (`name_changed`,
+  `needs=repeat_name`) with one spoken question naming the undeclared change
+  ("This would also change GARAGE to GARAZ. Is that what you want?"), and the
+  open card is retired the same way. Which words changed is the exact word
+  comparison above; whether the person asked for the change is only the
+  model's declaration. A proposal that shares no word and declares no change
+  to one is a different circle and is not compared. Logged as
   `one_voice.name_lineage.refused slots=N order=kept|moved` (counts only).
 - One declaration changes a spelled word: a `changed_words` `old` the new name
   no longer has, or a word spelled in this call in an old word's place,
-  releases that spelled word. A spelled word that merely goes missing is still
-  refused.
+  releases that spelled word. Only a call that passes the comparison releases
+  anything, so a refused call leaves every spelled word kept. A spelled word
+  that merely goes missing is still refused.
 - Invalid correction: a `create_circle` call whose arguments fail validation
-  while a card is open (`ToolSpec.on_invalid_correction`) retires that card and
-  asks for the name (`invalid_spelling`, `needs=repeat_name`), failing closed
-  (`storage_unavailable`) if the card cannot be retired. Logged as
-  `one_voice.pending.retired phase=arguments|prepare`.
+  while a card is open (`ToolSpec.on_invalid_correction`) retires that card.
+  When a spelling argument is what failed it asks for that word
+  (`invalid_spelling`, `needs=repeat_name`); otherwise the refusal names the
+  argument that failed. It fails closed (`storage_unavailable`) if the card
+  cannot be retired. Logged as `one_voice.pending.retired
+  phase=arguments|prepare`.
 - Typed name: a name the person types on the card (Edit name,
   `ToolContext.typed_name`, set only by the relay's `name_edit.submit` path)
   is theirs as written. It releases every spelled word, skips both checks and

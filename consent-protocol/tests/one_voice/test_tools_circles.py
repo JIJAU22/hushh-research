@@ -990,15 +990,32 @@ def test_the_refusal_names_every_word_the_correction_did_not_declare():
         ("HUSSH GARAGE", "HUSSH GARAGE V04", [{"new": "V04"}], False),
         ("HUSSH GARAGE V04", "HUSSH V04", [], True),
         ("HUSSH GARAGE V04", "HUSSH V04", [{"old": "GARAGE"}], False),
-        # ... including one more or one fewer of a repeated word.
+        # ... including one more or one fewer of a repeated word, each declared
+        # once: one declared Go removes one Go (review NG-5).
         ("Go Go Team", "Go Team", [], True),
         ("Go Go Team", "Go Team", [{"old": "Go"}], False),
+        ("Go Go Team", "Team", [{"old": "Go"}], True),
+        ("Go Go Team", "Team", [{"old": "Go"}, {"old": "Go"}], False),
         # A declared word that did not change is not an error.
         ("HUSSH GARAGE V04", "HUSSH GARAGE V05", [*V04_TO_V05, {"old": "GARAGE"}], False),
-        # The same words in another order are never a declared change.
+        # A move is declared like any other change (review NG-3): the moved word
+        # leaves one place and arrives in another. Naming a word as its own
+        # change declares nothing.
         ("HUSSH GARAGE V04", "GARAGE HUSSH V04", [{"old": "HUSSH", "new": "HUSSH"}], True),
-        # A name sharing no word with the waiting one is a different circle.
+        (
+            "HUSSH GARAGE V04",
+            "GARAGE HUSSH V04",
+            [{"old": "HUSSH GARAGE", "new": "GARAGE HUSSH"}],
+            False,
+        ),
+        ("HUSSH GARAGE V04", "GARAGE HUSSH V04", [{"old": "HUSSH"}, {"new": "HUSSH"}], False),
+        # A name sharing no word with the waiting one is a different circle ...
         ("HUSSH GARAGE V04", "Book Club", [], False),
+        # ... unless a declared change names one of its words: then every other
+        # word is still held (review NG-2).
+        ("Hush Garage V04", "HUSSH Garaz V4", [{"old": "Hush", "new": "HUSSH"}], True),
+        ("GARAGE V04", "GARAZ V05", V04_TO_V05, True),
+        ("GARAGE V04", "GARAGE V05", V04_TO_V05, False),
     ],
 )
 def test_a_correction_declares_every_word_it_changes(waiting, proposed, declared, refused):
@@ -1019,6 +1036,68 @@ def test_a_newly_spelled_word_declares_the_word_it_replaces():
     ctx, executor = _reviewing("Hush Garage V04")
     beside = _propose_circle(ctx, executor, name="HUSSH Garaz V04", spelled_words=["HUSSH"])
     assert beside.result.reason_code == "name_changed"
+
+
+def _kept_words(ctx: ToolContext) -> list[str]:
+    return [entry.word for entry in ctx.entities.spelled_name_words]
+
+
+def test_a_spelled_change_replaces_only_its_own_word():
+    """Review NG-1: a spelled word declared as a change's new word was also
+    counted as a spare replacement, so it covered a second, untouched word."""
+    hussh = [{"old": "Hush", "new": "HUSSH"}]
+    ctx, executor = _reviewing("Hush Garage V04")
+    # "No, H U S S H. Keep the rest." -- and GARAGE goes missing.
+    dropped = _propose_circle(
+        ctx, executor, name="HUSSH V04", spelled_words=["HUSSH"], changed_words=hussh
+    )
+    assert dropped.result.reason_code == "name_changed"
+    assert dropped.result.spoken_facts == [
+        'This would change "Hush Garage" to "HUSSH". Is that what you want?'
+    ]
+    # A kept spelled word is not given up for a change to the word beside it.
+    ctx, executor = _reviewing("HUSSH GARAGE V04", spelled_words=["HUSSH"])
+    kayra = _propose_circle(
+        ctx,
+        executor,
+        name="KAYRA V04",
+        spelled_words=["KAYRA"],
+        changed_words=[{"old": "GARAGE", "new": "KAYRA"}],
+    )
+    assert kayra.result.reason_code == "name_changed"
+    assert "HUSSH" in _kept_words(ctx)
+    # Negative control: the same correction keeping the rest passes.
+    ctx, executor = _reviewing("Hush Garage V04")
+    kept = _propose_circle(
+        ctx, executor, name="HUSSH Garage V04", spelled_words=["HUSSH"], changed_words=hussh
+    )
+    assert kept.result.status == "confirmation_required"
+
+
+def test_a_refused_correction_gives_up_no_spelled_word():
+    """Review NG-4: a correction refused for an undeclared change had already
+    released HUSSH, so the next proposal could leave it out unasked."""
+    ctx, executor = _reviewing("HUSSH GARAGE V04", spelled_words=["HUSSH"])
+    refused = _propose_circle(ctx, executor, name="GARAJ V04", spelled_words=["GARAJ"])
+    assert refused.result.reason_code == "name_changed"
+    assert _kept_words(ctx) == ["HUSSH", "GARAJ"]
+
+    nxt = _propose_circle(ctx, executor, name="HUSH GARAJ")
+
+    assert nxt.result.reason_code == "spelled_word_missing"
+
+
+def test_releasing_a_spelled_word_declares_its_removal_only():
+    """Review SEC-2: the tool description offers release_spelled_words as the
+    answer to name_changed, so a released word counts as a declared removal."""
+    ctx, executor = _reviewing("HUSSH Garage", spelled_words=["HUSSH"])
+    dropped = _propose_circle(ctx, executor, name="Garage", release_spelled_words=["HUSSH"])
+    assert dropped.result.status == "confirmation_required"
+    assert dropped.result.summary == "create a circle called Garage"
+    # Negative control: it declares no added word.
+    ctx, executor = _reviewing("HUSSH Garage", spelled_words=["HUSSH"])
+    added = _propose_circle(ctx, executor, name="Garage Club", release_spelled_words=["HUSSH"])
+    assert added.result.reason_code == "name_changed"
 
 
 def test_a_name_the_person_typed_is_theirs_and_becomes_the_one_to_correct():
@@ -2468,6 +2547,13 @@ def test_a_spelling_the_schema_cannot_read_retires_the_card_it_corrected():
     assert late_yes.result.status == "not_pending"
     assert not [call for call in service.calls if call[0] == "create_circle"]
     # Negative control: a malformed call that declares no spelling gets the
-    # generic answer. The spelling question is asked only about a spelling.
+    # generic answer. The spelling question is asked only about a spelling ...
     unspelled = _propose_circle(ctx, executor, name="")
     assert unspelled.result.reason_code == "invalid_arguments"
+    # ... and only when the spelling is what failed (review NG-6): a readable
+    # spelling beside a bad kind is answered about the kind.
+    other = _propose_circle(
+        ctx, executor, name="HUSSH GARAGE V04", kind="work", spelled_words=["HUSSH"]
+    )
+    assert other.result.reason_code == "invalid_arguments"
+    assert other.result.spoken_facts == ["I'm missing kind for that."]

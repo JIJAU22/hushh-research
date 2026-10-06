@@ -278,7 +278,7 @@ class ToolExecutor:
             invalid = Rejected(reason_code="invalid_arguments", spoken_facts=facts)
             if spec.policy.needs_confirmation:
                 return await self._refuse_correction(
-                    ctx, spec, args or {}, invalid, phase="arguments"
+                    ctx, spec, args or {}, invalid, phase="arguments", failed=frozenset(missing)
                 )
             return ToolCallOutcome(result=invalid, spec=spec)
         problem = self._entity_problem(spec, ctx, parsed)
@@ -727,6 +727,7 @@ class ToolExecutor:
         phase: Literal["arguments", "prepare"],
         parsed: Any = None,
         superseded: list[PendingAction] | None = None,
+        failed: frozenset[str] = frozenset(),
     ) -> ToolCallOutcome:
         """Refuse a confirm-tier proposal that could not be read or prepared.
 
@@ -735,7 +736,8 @@ class ToolExecutor:
         yes must not reach what the person was correcting. If it cannot be
         retired, nothing is asked over it (fail closed). The answer is the
         tool's own ``on_invalid_correction`` refusal when it gives one, else
-        ``default``. ``raw_args`` go only to that hook, never to a log.
+        ``default``. ``raw_args`` go only to that hook, never to a log, with
+        ``failed``: the names of the top-level arguments that failed validation.
         """
         retired, complete = await self._retire_corrected(ctx, spec)
         if retired:
@@ -762,7 +764,7 @@ class ToolExecutor:
         result = default
         if spec.on_invalid_correction is not None:
             try:
-                specific = spec.on_invalid_correction(dict(raw_args))
+                specific = spec.on_invalid_correction(dict(raw_args), failed)
             except Exception as exc:  # noqa: BLE001 - a broken hook keeps the generic refusal
                 logger.warning(
                     "one_voice.tool.refusal_failed tool=%s error=%s",

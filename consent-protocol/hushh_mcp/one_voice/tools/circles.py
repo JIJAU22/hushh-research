@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import logging
 import os
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -839,76 +840,106 @@ def _name_changed(fact: str, *, slots: int, order: str) -> Rejected:
     )
 
 
-def _respelled_words(baseline: str | None, args: CreateCircleInput) -> list[str]:
-    """Spelled words the person changed on purpose, so they stop being kept.
+def _declared_keys(text: str) -> list[str]:
+    """The word keys one side of a declared change names. Letters spelled one
+    by one join into one word, as they do in ``spelled_words``."""
+    joined = clean_spelled_word(text)
+    return [word_key(joined)] if joined else word_keys(text)
 
-    Two declared signals, never an interpretation: a ``changed_words`` old the
-    new name no longer has, and, inside a stretch of the name under review that
-    this call rewrote, each word replaced by a word spelled in this call (the
-    person spelled the new word in the old one's place: "just one S, H U S H").
-    A word that merely went missing is not released; the checks still ask.
+
+def _declared_changes(args: CreateCircleInput) -> tuple[Counter[str], Counter[str]]:
+    """The word keys this call declares removed and added, each word once.
+
+    A ``changed_words`` pair naming the same words in the same order changed
+    nothing and declares nothing. Each ``release_spelled_words`` word declares
+    one removal: the person changed or dropped that spelled word.
     """
+    removed: Counter[str] = Counter()
+    added: Counter[str] = Counter()
+    for change in args.changed_words:
+        old, new = _declared_keys(change.old), _declared_keys(change.new)
+        if old == new:
+            continue
+        removed.update(old)
+        added.update(new)
+    removed.update(word_key(word) for word in args.release_spelled_words)
+    return removed, added
+
+
+def _use(pool: Counter[str], key: str) -> bool:
+    """Use up one ``key`` from ``pool``; False when none is left."""
+    if pool[key] <= 0:
+        return False
+    pool[key] -= 1
+    return True
+
+
+def _name_lineage(
+    baseline: str | None, args: CreateCircleInput
+) -> tuple[Rejected | None, list[str]]:
+    """Judge a proposal against the name under review. Never edits the name.
+
+    Returns a refusal, or the words of the name under review the person
+    changed on purpose, so a spelled one among them stops being kept.
+
+    ``baseline`` is the name the last passing proposal showed the person. A
+    proposal corrects it when they share a word or when a ``changed_words``
+    old names one of its words; one that does neither is a different circle
+    and is not compared. A correction passes when, in each stretch where the
+    names differ, every word it adds is declared added or spelled in this call,
+    and every word it removes is declared removed or replaced by one of those
+    spelled words. Each declaration and each spelled word accounts for one
+    word, once: a spelled word declared as a change's new word replaces only
+    that change's old word. A word that moved is removed in one stretch and
+    added in another, so a move is declared like any other change. Which words
+    changed is the spelling module's exact word comparison; whether the person
+    asked for a change is only ever the model's declaration.
+    """
+    removed, added = _declared_changes(args)
     now_keys = set(word_keys(args.name))
     released = [
-        word
+        clean_spelled_word(word) or word
         for change in args.changed_words
         for word in change.old.split()
         if word_key(word) not in now_keys
     ]
-    if baseline is None or not set(word_keys(baseline)) & now_keys:
-        return [clean_spelled_word(word) or word for word in released]
-    spelled = {word_key(word) for word in args.spelled_words}
-    for dropped, put in name_word_slots(baseline, args.name):
-        if any(word_key(word) in spelled for word in put):
-            released.extend(dropped)
-    return [clean_spelled_word(word) or word for word in released]
-
-
-def _name_change_refused(baseline: str, args: CreateCircleInput) -> Rejected | None:
-    """Refuse a correction that changes a word of the name under review without
-    declaring it, and ask instead. Never edits the name.
-
-    ``baseline`` is the name the last passing proposal showed the person. A
-    proposal sharing at least one word with it corrects it; one sharing none is
-    a different circle and is not compared. A correction passes when every word
-    it removes is declared as an ``old`` in ``changed_words``, every word it
-    adds is declared as a ``new`` or spelled in this call (a newly spelled word
-    in another's place declares that replacement), and the words it keeps stay
-    in order. A declared word that did not change is ignored. Which words
-    changed is the spelling module's exact word comparison; whether the person
-    asked for a change is only ever the model's declaration.
-    """
-    if not set(word_keys(baseline)) & set(word_keys(args.name)):
-        return None
-    _, _, order_ok = name_word_changes(baseline, args.name)
-    if not order_ok:
-        return _name_changed(
-            f'This would put the words in a different order: "{args.name}". Is that what you want?',
-            slots=0,
-            order="moved",
-        )
-    declared_old = {key for change in args.changed_words for key in word_keys(change.old)}
-    declared_new = {key for change in args.changed_words for key in word_keys(change.new)}
-    spelled = {word_key(word) for word in args.spelled_words}
+    if baseline is None:
+        return None, released
+    base_keys = set(word_keys(baseline))
+    declared_old = {key for change in args.changed_words for key in _declared_keys(change.old)}
+    if not (base_keys & now_keys or base_keys & declared_old):
+        return None, released
+    spelled = Counter(word_key(word) for word in args.spelled_words)
     slots = name_word_slots(baseline, args.name)
     undeclared: list[str] = []
     for dropped, put in slots:
-        loose_old = [word for word in dropped if word_key(word) not in declared_old]
-        loose_new = [
-            word
-            for word in put
-            if word_key(word) not in declared_new and word_key(word) not in spelled
-        ]
-        replacements = sum(1 for word in put if word_key(word) in spelled)
-        if loose_new or len(loose_old) > replacements:
+        loose_new = [word for word in put if not _use(added, word_key(word))]
+        replacements = sum(1 for word in loose_new if _use(spelled, word_key(word)))
+        loose_old = [word for word in dropped if not _use(removed, word_key(word))]
+        if len(loose_new) > replacements or len(loose_old) > replacements:
             undeclared.append(_change_phrase(dropped, put))
+        else:
+            released.extend(clean_spelled_word(word) or word for word in loose_old)
     if not undeclared:
-        return None
+        return None, released
+    if not name_word_changes(baseline, args.name)[2]:
+        return (
+            _name_changed(
+                f'This would put the words in a different order: "{args.name}". '
+                "Is that what you want?",
+                slots=len(undeclared),
+                order="moved",
+            ),
+            [],
+        )
     lead = "This would also" if len(undeclared) < len(slots) else "This would"
-    return _name_changed(
-        f"{lead} {join_names_for_speech(undeclared)}. Is that what you want?",
-        slots=len(undeclared),
-        order="kept",
+    return (
+        _name_changed(
+            f"{lead} {join_names_for_speech(undeclared)}. Is that what you want?",
+            slots=len(undeclared),
+            order="kept",
+        ),
+        [],
     )
 
 
@@ -922,16 +953,21 @@ def _owned_circle_named(rows: list[dict[str, Any]], name: str) -> dict[str, Any]
     return None
 
 
-def _invalid_create_circle_correction(raw_args: dict[str, Any]) -> Rejected | None:
-    """The refusal for a proposal that declared a spelling and could not be read
-    or prepared: ask for the spelled word again, not for a missing detail.
+_SPELLING_ARGS = frozenset({"spelled_words", "release_spelled_words", "changed_words"})
+
+
+def _invalid_create_circle_correction(
+    raw_args: dict[str, Any], failed: frozenset[str]
+) -> Rejected | None:
+    """The refusal for a correction whose spelling could not be read: ask for the
+    spelled word again, not for a missing detail.
 
     The executor has already retired the card this proposal was correcting.
-    Only whether a spelling argument is present is checked; no value is read,
-    repeated or logged. ``None`` keeps the executor's generic refusal.
+    Only which arguments failed validation is checked (their names, never their
+    values); a failure anywhere else keeps the executor's generic refusal, which
+    names the field. ``None`` keeps that refusal.
     """
-    spelling_args = ("spelled_words", "release_spelled_words", "changed_words")
-    if not any(raw_args.get(key) for key in spelling_args):
+    if not failed & _SPELLING_ARGS:
         return None
     return Rejected(
         reason_code="invalid_spelling",
@@ -1008,15 +1044,17 @@ async def prepare_create_circle(ctx: ToolContext, args: CreateCircleInput) -> Pr
     model's own name text, exactly, and asks when one is missing. It never
     edits the name.
 
-    The person's words are kept before the check, so a refused call still
+    The person's words are kept before any check, so a refused call still
     remembers how they spelled it. A proposal that passes renews every word it
     needed, so retention runs from the last proposal that used a word.
 
     Before the spelling check, a correction of the name under review (the last
     one that passed, kept the same 3 minutes and across a cancel) must declare
-    every word it changes (see ``_name_change_refused``), so an untouched word
-    cannot change whether or not it was ever declared as spelled. A proposal
-    that passes becomes the name under review.
+    every word it changes (see ``_name_lineage``), so an untouched word cannot
+    change whether or not it was ever declared as spelled. Only a call that
+    passes that check releases a spelled word, declared or respelled: a refused
+    one leaves every word for the next proposal to keep. A proposal that passes
+    becomes the name under review.
 
     A name the person typed (``ctx.typed_name``) is theirs as written: it
     releases every spelled word, skips both checks and the spelled read-back,
@@ -1028,15 +1066,12 @@ async def prepare_create_circle(ctx: ToolContext, args: CreateCircleInput) -> Pr
         ctx.entities.clear_spelled_words()
         ctx.entities.set_circle_name_baseline(args.name, now)
         return Prepared(summary=summarize_create_circle(ctx, args), snapshot={"spelled_words": []})
-    ctx.entities.release_spelled_words(args.release_spelled_words)
-    baseline = ctx.entities.live_circle_name_baseline(now)
-    ctx.entities.release_spelled_words(_respelled_words(baseline, args))
-    retained = ctx.entities.retained_spelled_words(now)
     ctx.entities.remember_spelled_words(args.spelled_words, now)
-    if baseline is not None:
-        refused = _name_change_refused(baseline, args)
-        if refused is not None:
-            return refused
+    refused, released = _name_lineage(ctx.entities.live_circle_name_baseline(now), args)
+    if refused is not None:
+        return refused
+    ctx.entities.release_spelled_words([*args.release_spelled_words, *released])
+    retained = ctx.entities.retained_spelled_words(now)
     required = unique_spelled_words([*retained, *args.spelled_words])
     missing = missing_spelled_words(args.name, required)
     if missing:
