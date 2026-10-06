@@ -3251,6 +3251,39 @@ def test_a_stored_context_written_by_a_newer_server_keeps_what_it_can():
     assert not hasattr(restored, "a_field_from_a_later_version")
 
 
+def test_spelled_name_words_survive_a_reconnect_and_an_older_row_still_restores():
+    """A spelled word must outlive the session it was said in (a cancel, a
+    reconnect), and the key must never cost an older or damaged row its people."""
+    entities = EntityContext()
+    now = entities._now().timestamp()
+    entities.remember_spelled_words(["HUSSH", "hussh", "V04"], now)
+    stored = entities.model_dump(mode="json")
+
+    restored = restore_context(EntityContext, stored)
+    assert restored.retained_spelled_words(now) == ["HUSSH", "V04"]
+
+    person = ConfirmedPerson(
+        user_id="u-priya", display_name="Priya Nair", confirmed_at=now_iso()
+    ).model_dump(mode="json")
+    older = restore_context(EntityContext, {"people": {"u-priya": person}})
+    assert "u-priya" in older.people and older.spelled_name_words == []
+
+    damaged = restore_context(
+        EntityContext,
+        {
+            "people": {"u-priya": person},
+            "spelled_name_words": [
+                {"word": "HUSSH", "at": now},
+                {"word": "h u s s h", "at": now},
+                {"word": "V04"},
+                "HUSSH",
+            ],
+        },
+    )
+    assert "u-priya" in damaged.people
+    assert damaged.retained_spelled_words(now) == ["HUSSH"]
+
+
 def test_a_genuinely_corrupt_stored_context_is_dropped_and_never_trusted():
     """Tolerating unknown keys must not become tolerating bad values."""
     assert restore_context(EntityContext, {"people": "not-a-mapping"}).people == {}

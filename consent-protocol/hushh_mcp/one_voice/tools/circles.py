@@ -14,17 +14,19 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import quote
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from hushh_mcp.one_voice.tools.base import (
     CircleRef,
     ConfirmedCircle,
+    EntityContext,
     Needs,
     PersonRef,
     Prepared,
@@ -39,6 +41,12 @@ from hushh_mcp.one_voice.tools.base import (
 )
 from hushh_mcp.one_voice.tools.people import ServiceError as PeopleServiceError
 from hushh_mcp.one_voice.tools.people import load_people_snapshot
+from hushh_mcp.one_voice.tools.spelling import (
+    clean_spelled_word,
+    missing_spelled_words,
+    spell_out,
+    unique_spelled_words,
+)
 from hushh_mcp.services.one_location_agent_service import OneLocationAgentError
 from hushh_mcp.services.one_location_circle_service import (
     OneLocationCircleError,
@@ -51,7 +59,11 @@ from hushh_mcp.services.spoken_name_resolver import (
     normalize_spoken_name,
 )
 
+logger = logging.getLogger(__name__)
+
 CIRCLE_SERVICE = "circles"
+# A proposed name dropped a word the person spelled letter by letter.
+SPELLED_WORD_MISSING = "spelled_word_missing"
 CIRCLE_JOIN_PATH = "/circle/join"
 # Client surfaces to refresh after a successful mutation (screen ids from session.py).
 REFRESH_CIRCLES = ("location_circles",)
@@ -689,14 +701,63 @@ async def list_circle_members(ctx: ToolContext, args: ListCircleMembersInput) ->
 # -- create_circle ----------------------------------------------------------------
 
 
+# At most this many spelled words per call. A bound on the list only: Vertex
+# Live refuses a schema with length bounds on array items.
+MAX_SPELLED_WORDS_PER_CALL = 4
+
+
 class CreateCircleInput(ToolInput):
-    name: str = Field(min_length=1, max_length=80, description="The circle's name.")
+    name: str = Field(
+        min_length=1,
+        max_length=80,
+        description="The circle's name, exactly as the person said or spelled it.",
+    )
     kind: CircleKind = Field(default="other")
+    spelled_words: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_SPELLED_WORDS_PER_CALL,
+        description=(
+            "Each word of this name the person spelled letter by letter, as spelled "
+            "(h u s s h -> HUSSH). Keep them in every correction."
+        ),
+    )
+    release_spelled_words: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_SPELLED_WORDS_PER_CALL,
+        description=(
+            "An earlier spelled word the person explicitly changed or dropped. "
+            "Only when they said so."
+        ),
+    )
+
+    @field_validator("spelled_words", "release_spelled_words")
+    @classmethod
+    def _one_word_each(cls, value: list[str]) -> list[str]:
+        words: list[str] = []
+        for item in value:
+            word = clean_spelled_word(item)
+            if word is None:
+                raise ValueError("each spelled word is one word of letters and digits")
+            words.append(word)
+        return words
 
 
 class CreateCircleResult(ToolResult):
     status: Literal["created", "already_exists"]
     circle: CircleSummary
+
+
+def _spelling_now() -> float:
+    """Epoch seconds on the entity context's own clock, which ``prune`` uses too."""
+    return EntityContext._now().timestamp()
+
+
+def _spelled_word_facts(missing: Sequence[str]) -> list[str]:
+    return [
+        f"You spelled {word} as {spell_out(word)}, but this name doesn't include it. "
+        f"Should the name keep {word}?"
+        for word in missing
+    ]
 
 
 def _owned_circle_named(rows: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
@@ -709,12 +770,30 @@ def _owned_circle_named(rows: list[dict[str, Any]], name: str) -> dict[str, Any]
     return None
 
 
+def _prepared_spelled_words(snapshot: dict[str, Any] | None) -> list[str]:
+    raw = snapshot.get("spelled_words") if isinstance(snapshot, dict) else None
+    if not isinstance(raw, list):
+        return []
+    return [word for word in raw if isinstance(word, str) and word]
+
+
 async def create_circle(ctx: ToolContext, args: CreateCircleInput) -> ToolResult:
+    # Defence in depth: the card was prepared with these spelled words, so a
+    # stored name that lost one is refused here too and nothing is created.
+    missing = missing_spelled_words(args.name, _prepared_spelled_words(ctx.prepared))
+    if missing:
+        logger.info("one_voice.spelling.refused missing=%d", len(missing))
+        return Rejected(
+            reason_code=SPELLED_WORD_MISSING,
+            needs="repeat_name",
+            spoken_facts=_spelled_word_facts(missing),
+        )
     service = _service(ctx)
     try:
         existing = _owned_circle_named(await _list_circle_rows(ctx), args.name)
         if existing is not None:
             circle = _remember(ctx, existing)
+            ctx.entities.clear_spelled_words()
             return CreateCircleResult(
                 status="already_exists",
                 circle=CircleSummary.from_row(existing),
@@ -727,6 +806,7 @@ async def create_circle(ctx: ToolContext, args: CreateCircleInput) -> ToolResult
         return _rejected(exc)
     row = dict(row or {})
     circle = _remember(ctx, row)
+    ctx.entities.clear_spelled_words()
     return CreateCircleResult(
         status="created",
         circle=CircleSummary.from_row(row),
@@ -740,12 +820,49 @@ def summarize_create_circle(ctx: ToolContext, args: CreateCircleInput) -> str:
     return f"create a {args.kind} circle called {args.name}"
 
 
+async def prepare_create_circle(ctx: ToolContext, args: CreateCircleInput) -> Prepared | ToolResult:
+    """Check the proposed name keeps every word the person spelled.
+
+    Which words were spelled is the model's declaration (``spelled_words``),
+    kept for the conversation so a correction or a re-proposal after a cancel
+    cannot drop one silently; ``release_spelled_words`` is the model saying the
+    person changed one. The host only compares the declared words with the
+    model's own name text, exactly, and asks when one is missing. It never
+    edits the name.
+
+    The person's words are kept before the check, so a refused call still
+    remembers how they spelled it.
+    """
+    now = _spelling_now()
+    ctx.entities.release_spelled_words(args.release_spelled_words)
+    retained = ctx.entities.retained_spelled_words(now)
+    ctx.entities.remember_spelled_words(args.spelled_words, now)
+    required = unique_spelled_words([*retained, *args.spelled_words])
+    missing = missing_spelled_words(args.name, required)
+    if missing:
+        logger.info("one_voice.spelling.refused missing=%d", len(missing))
+        return Rejected(
+            reason_code=SPELLED_WORD_MISSING,
+            needs="repeat_name",
+            spoken_facts=_spelled_word_facts(missing),
+            retire_open_proposal=True,
+        )
+    summary = summarize_create_circle(ctx, args) + "".join(
+        f", with {word} spelled {spell_out(word)}" for word in required
+    )
+    return Prepared(summary=summary, snapshot={"spelled_words": required})
+
+
 # -- rename_circle ----------------------------------------------------------------
 
 
 class RenameCircleInput(ToolInput):
     circle: CircleRef
-    name: str = Field(min_length=1, max_length=80, description="The new name.")
+    name: str = Field(
+        min_length=1,
+        max_length=80,
+        description="The new name, exactly as the person said or spelled it.",
+    )
 
 
 class RenameCircleResult(ToolResult):
@@ -2100,10 +2217,13 @@ TOOLS: tuple[ToolSpec, ...] = (
             "Create an empty circle with the given name (kind family, friends, or other). "
             "Creating a circle sends no invitations and shares no location; adding people is a "
             "separate action. Reports already_exists when the person already owns one by that name."
+            " Use the name exactly as the person said or spelled it; a word they spelled letter "
+            "by letter stays in every correction until they change it."
         ),
         handler=create_circle,
         ui_refresh=REFRESH_CIRCLES,
         summarize=summarize_create_circle,
+        prepare=prepare_create_circle,
         # A new circle names no existing person or circle, so a lookup made for
         # a follow-up ("yes, and add Priya to it") must not cancel its card.
         lookup_targets=(),

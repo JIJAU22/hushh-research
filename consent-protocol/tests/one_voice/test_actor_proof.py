@@ -742,6 +742,72 @@ def test_different_arguments_still_replace_the_open_card(monkeypatch):
     assert [row.id for row in _open_rows(store, ctx)] == [other.pending.id]
 
 
+# -- a spelled word survives every correction ----------------------------------
+#
+# UAT: after the person spelled "again h u s s h" the model cancelled the card and
+# asked for the name again. A re-proposal that drops a word the person spelled is
+# refused with a question, and the card it was correcting is retired, so no yes
+# can reach a name the person has just corrected.
+
+
+def _spelling_harness(monkeypatch):
+    from hushh_mcp.one_voice.tools import circles
+
+    create = next(tool for tool in circles.TOOLS if tool.name == "create_circle")
+    monkeypatch.setattr(registry, "get_tool", lambda name: create if name == create.name else None)
+    store = MemoryPendingStore()
+    executor = ToolExecutor(pending_store=store, actor_proof=_proof({"good": "ok"}))
+    return store, executor, _ctx("good")
+
+
+def _create(executor: ToolExecutor, ctx: ToolContext, **args: Any):
+    return asyncio.run(executor.call(ctx, "create_circle", args))
+
+
+def test_a_correction_that_drops_a_spelled_word_retires_the_card(monkeypatch):
+    store, executor, ctx = _spelling_harness(monkeypatch)
+    card = _create(executor, ctx, name="HUSSH GARAGE V04", spelled_words=["HUSSH"])
+    assert card.result.status == "confirmation_required"
+    asyncio.run(store.mark_shown(user_id=USER, pending_action_id=card.pending.id))
+
+    dropped = _create(executor, ctx, name="HUSH GARAGE V04")
+
+    assert (dropped.result.status, dropped.result.reason_code) == (
+        "rejected",
+        "spelled_word_missing",
+    )
+    assert [row.id for row in dropped.superseded] == [card.pending.id]
+    assert _open_rows(store, ctx) == []
+    late_yes = asyncio.run(
+        executor.call(ctx, "confirm_pending_action", {"pending_action_id": card.pending.id})
+    )
+    assert late_yes.result.status == "not_pending"
+
+
+def test_a_spelled_word_is_still_required_after_the_models_own_cancel(monkeypatch):
+    store, executor, ctx = _spelling_harness(monkeypatch)
+    card = _create(executor, ctx, name="HUSSH GARAGE V04", spelled_words=["HUSSH"])
+    asyncio.run(executor.call(ctx, "cancel_pending_action", {"pending_action_id": card.pending.id}))
+
+    again = _create(executor, ctx, name="HUSH GARAGE V04")
+
+    assert again.result.reason_code == "spelled_word_missing"
+    assert again.superseded == [] and _open_rows(store, ctx) == []
+
+
+def test_a_released_spelled_word_lets_the_correction_through(monkeypatch):
+    """Negative control: the person changed the word and the model said so."""
+    store, executor, ctx = _spelling_harness(monkeypatch)
+    card = _create(executor, ctx, name="HUSSH GARAGE V04", spelled_words=["HUSSH"])
+    asyncio.run(executor.call(ctx, "cancel_pending_action", {"pending_action_id": card.pending.id}))
+
+    changed = _create(executor, ctx, name="HUSH GARAGE V04", release_spelled_words=["HUSSH"])
+
+    assert changed.result.status == "confirmation_required"
+    assert changed.result.summary == "create a circle called HUSH GARAGE V04"
+    assert [row.id for row in _open_rows(store, ctx)] == [changed.pending.id]
+
+
 def test_tap_tier_duplicate_still_creates_a_new_card_and_receipt(monkeypatch):
     """A tap card's receipt is handed out once, so the guard never reuses it."""
     store, executor, ctx = _dup_harness(monkeypatch)
