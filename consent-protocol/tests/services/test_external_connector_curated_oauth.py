@@ -1591,3 +1591,66 @@ async def test_a_refresh_that_succeeds_never_revokes_anything(service, connector
     )
     await service.current_credential(connector_id="hubspot", user_id="u1")
     service._revoke.assert_not_awaited()
+
+
+# --- a connection that needs signing in again is not "never connected" -----------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row", [None, _row(status="revoked")])
+async def test_never_connected_or_disconnected_is_the_quiet_kind(service, row):
+    service.lifecycle.read = AsyncMock(return_value=row)
+    with pytest.raises(oauth.CuratedNotConnectedError):
+        await service.current_credential(connector_id="hubspot", user_id="u1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "row",
+    [_row(status="needs_reauth"), _row(status="error"), _row(envelope_version=1)],
+    ids=["needs_reauth", "error", "legacy_envelope"],
+)
+async def test_a_connection_that_stopped_working_is_not_the_quiet_kind(service, row):
+    """The provider rejected the refresh token: the person did connect it, so chat must say so."""
+    service.lifecycle.read = AsyncMock(return_value=row)
+    with pytest.raises(oauth.CuratedConnectorOAuthError, match="reconnect_required") as caught:
+        await service.current_credential(connector_id="hubspot", user_id="u1")
+    assert not isinstance(caught.value, oauth.CuratedNotConnectedError)
+    assert caught.value.status_code == 401
+
+
+# --- token endpoint rejections leave a trace -------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body", "logged"),
+    [
+        ({"error": "invalid_client"}, "error=invalid.client"),
+        ({"error": "server_error"}, "error=server.error"),
+        ({"error": "PRIVATE_PROVIDER_TEXT"}, "error=other"),
+        ({}, "error=other"),
+    ],
+)
+async def test_a_token_endpoint_rejection_is_logged_with_a_fixed_vocabulary(
+    service, connector, monkeypatch, caplog, body, logged
+):
+    def handler(request):
+        return httpx.Response(400, json=body)
+
+    _install_transport(monkeypatch, handler)
+    with caplog.at_level("WARNING", logger=oauth.logger.name):
+        with pytest.raises(oauth.CuratedConnectorOAuthError):
+            await service._post(
+                connector.oauth_token_url, token_url=connector.oauth_token_url, data={"code": "x"}
+            )
+    line = next(
+        r.getMessage() for r in caplog.records if "curated_oauth.token_endpoint" in r.getMessage()
+    )
+    assert "status=400" in line and logged in line
+    assert "mcp.hubspot.com" in line
+    assert "PRIVATE_PROVIDER_TEXT" not in caplog.text
+    # Nothing the redactor would mask: no long snake_case token in the line.
+    from mcp_modules.log_redaction import redact_log_value
+
+    assert redact_log_value(line) == line
