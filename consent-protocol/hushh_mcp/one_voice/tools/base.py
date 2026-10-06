@@ -37,6 +37,10 @@ ENTITY_CONTEXT_TTL_SECONDS = 2 * 60 * 60
 OFFER_TTL_SECONDS = 10 * 60
 # How many spelled name words a conversation keeps (see EntityContext).
 MAX_SPELLED_NAME_WORDS = 8
+# How long a spelled name word is kept after the last proposal that declared
+# or needed it. Long enough to survive a cancel and a re-proposal of the same
+# name, short enough that a different circle later on is not held to it.
+SPELLED_WORD_TTL_SECONDS = 3 * 60
 # Interim status of a device-executed Location updates step. Never success:
 # the settled result arrives later as its own tool.result once the device
 # reports back.
@@ -377,8 +381,9 @@ class EntityContext(BaseModel):
     offered_scheduled_mail: OfferedScheduledMail | None = None
     # Words the person spelled letter by letter for a name One is proposing
     # ("h u s s h"), as the model declared them. Kept across a cancel and a
-    # reconnect, for the offer window only, so a re-proposal cannot silently
-    # drop one. Words only: never the name, never who it was for.
+    # reconnect for SPELLED_WORD_TTL_SECONDS after the last proposal that
+    # declared or needed them, so a re-proposal cannot silently drop one.
+    # Words only: never the name, never who it was for.
     spelled_name_words: list[SpelledNameWord] = Field(default_factory=list)
 
     @field_validator("spelled_name_words", mode="before")
@@ -390,21 +395,23 @@ class EntityContext(BaseModel):
     def _now() -> datetime:
         return datetime.now(timezone.utc)
 
-    def retained_spelled_words(self, now: float) -> list[str]:
-        """The spelled words still inside the offer window, first seen first."""
+    def _live_spelled_words(self, now: float) -> list[SpelledNameWord]:
         return [
-            entry.word for entry in self.spelled_name_words if now - entry.at <= OFFER_TTL_SECONDS
+            entry for entry in self.spelled_name_words if now - entry.at <= SPELLED_WORD_TTL_SECONDS
         ]
+
+    def retained_spelled_words(self, now: float) -> list[str]:
+        """The spelled words still inside their retention window, first seen first."""
+        return [entry.word for entry in self._live_spelled_words(now)]
 
     def remember_spelled_words(self, words: Sequence[str], now: float) -> None:
         """Keep each word; one entry per word compared without case.
 
         The first spelling seen is kept and its time refreshed when the word is
-        declared again. Expired entries go first, then the oldest past the cap.
+        declared or needed again. Expired entries go first, then the oldest past
+        the cap.
         """
-        self.spelled_name_words = [
-            entry for entry in self.spelled_name_words if now - entry.at <= OFFER_TTL_SECONDS
-        ]
+        self.spelled_name_words = self._live_spelled_words(now)
         for word in words:
             if clean_spelled_word(word) != word:
                 continue
@@ -457,10 +464,7 @@ class EntityContext(BaseModel):
             self.offered_mail_selected_ordinal = None
         if self.offered_scheduled_mail is not None and not self.offered_scheduled_mail_is_fresh():
             self.offered_scheduled_mail = None
-        now = self._now().timestamp()
-        self.spelled_name_words = [
-            entry for entry in self.spelled_name_words if now - entry.at <= OFFER_TTL_SECONDS
-        ]
+        self.spelled_name_words = self._live_spelled_words(self._now().timestamp())
 
     def remember_person(self, person: ConfirmedPerson) -> None:
         self.people[person.user_id] = person
@@ -798,6 +802,7 @@ __all__ = [
     "PendingActionExists",
     "PersonRef",
     "Rejected",
+    "SPELLED_WORD_TTL_SECONDS",
     "ScreenContext",
     "SpelledNameWord",
     "ToolContext",

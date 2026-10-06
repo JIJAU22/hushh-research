@@ -777,7 +777,7 @@ def test_create_circle_rejects_bad_kind_and_maps_errors():
 # conversation and refuses a proposed name that drops it, asking instead.
 
 HUSSH_QUESTION = (
-    "You spelled HUSSH as H-U-S-S-H, but this name doesn't include it. Should the name keep HUSSH?"
+    "You spelled HUSSH as H-U-S-S-H, but this name doesn't include it. Should the name use HUSSH?"
 )
 
 
@@ -865,6 +865,60 @@ def test_create_circle_forgets_the_spelling_once_the_circle_exists():
     assert ctx.entities.spelled_name_words == []
     following = _propose_circle(ctx, executor, name="Book Club")
     assert following.result.status == "confirmation_required"
+
+
+def test_a_card_from_before_a_word_was_spelled_creates_nothing():
+    """A confirm that lands on a card prepared before the person spelled a word
+    (or a reused duplicate) is refused at execution, not only at proposal."""
+    from tests.one_voice.fakes import MemoryPendingStore
+
+    service = FakeCircleService()
+    ctx = make_ctx(service, confirm_family=False)
+    store = MemoryPendingStore()
+    executor = ToolExecutor(pending_store=store)
+    card = _propose_circle(ctx, executor, name="HUSH GARAGE")
+    asyncio.run(store.mark_shown(user_id=USER, pending_action_id=card.pending.id))
+    tapped = asyncio.run(
+        store.confirm(user_id=USER, pending_action_id=card.pending.id, source="http")
+    )
+    refused = _propose_circle(ctx, executor, name="HUSH GARAGE", spelled_words=["HUSSH"])
+    assert refused.result.reason_code == "spelled_word_missing"
+
+    done = asyncio.run(executor.execute_pending(ctx, tapped))
+
+    assert (done.result.status, done.result.reason_code) == ("rejected", "spelled_word_missing")
+    assert done.result.spoken_facts == [
+        "Earlier you spelled HUSSH as H-U-S-S-H. "
+        "Is this a different circle, or should the name keep HUSSH?"
+    ]
+    assert not [call for call in service.calls if call[0] == "create_circle"]
+
+
+def test_a_spelled_word_lapses_three_minutes_after_a_proposal_last_needed_it(monkeypatch):
+    """An unrelated circle later in the conversation is not held to an old
+    spelling, while every proposal that keeps the word extends it."""
+    from datetime import datetime, timedelta, timezone
+
+    from tests.one_voice.fakes import MemoryPendingStore
+
+    clock = [datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)]
+    monkeypatch.setattr(EntityContext, "_now", staticmethod(lambda: clock[0]))
+    ctx = make_ctx(confirm_family=False)
+    executor = ToolExecutor(pending_store=MemoryPendingStore())
+    first = _propose_circle(ctx, executor, name="HUSSH GARAGE", spelled_words=["HUSSH"])
+    assert first.result.status == "confirmation_required"
+
+    clock[0] += timedelta(seconds=170)
+    kept = _propose_circle(ctx, executor, name="HUSSH GARAGE V04")
+    assert kept.result.status == "confirmation_required"
+    clock[0] += timedelta(seconds=170)
+    dropped = _propose_circle(ctx, executor, name="HUSH GARAGE V04")
+    assert dropped.result.reason_code == "spelled_word_missing"
+
+    clock[0] += timedelta(seconds=181)
+    unrelated = _propose_circle(ctx, executor, name="Book Club")
+    assert unrelated.result.status == "confirmation_required"
+    assert unrelated.result.summary == "create a circle called Book Club"
 
 
 def test_rename_circle_uses_confirmed_name_and_updates_entity():

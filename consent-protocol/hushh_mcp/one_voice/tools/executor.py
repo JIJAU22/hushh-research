@@ -407,11 +407,29 @@ class ToolExecutor:
                     )
                 if isinstance(prepared, ToolResult):
                     if isinstance(prepared, Rejected) and prepared.retire_open_proposal:
+                        # The refusal asks the person a question, so the next
+                        # yes answers that question, never the card the model
+                        # cancelled earlier: that re-proposal is asked fresh.
+                        self._recent_cancels.pop(ctx.conversation_id, None)
                         # The refused proposal was a correction of the open
                         # card; a yes to that card would now act on what the
                         # person just corrected, so it is retired with the
                         # refusal and reported like any superseded card.
-                        superseded = [*superseded, *await self._retire_corrected(ctx, spec)]
+                        retired, complete = await self._retire_corrected(ctx, spec)
+                        superseded = [*superseded, *retired]
+                        if not complete:
+                            # The card may still be open, so no question is
+                            # asked over it: fail closed, as a lookup does when
+                            # it cannot retire the card it corrects.
+                            return ToolCallOutcome(
+                                result=_storage_unavailable(
+                                    "I couldn't prepare that right now. Nothing was changed. "
+                                    "Please try again in a moment."
+                                ),
+                                spec=spec,
+                                parsed=parsed,
+                                superseded=superseded,
+                            )
                     return ToolCallOutcome(
                         result=prepared, spec=spec, parsed=parsed, superseded=superseded
                     )
@@ -661,14 +679,19 @@ class ToolExecutor:
                 cancelled.append(done)
         return cancelled
 
-    async def _retire_corrected(self, ctx: ToolContext, spec: ToolSpec) -> list[PendingAction]:
+    async def _retire_corrected(
+        self, ctx: ToolContext, spec: ToolSpec
+    ) -> tuple[list[PendingAction], bool]:
         """Cancel the open cards a refused correction from ``spec`` was aimed at.
 
         Only cards that share its correction key: an unrelated card is still the
         person's to answer. Like a lookup's supersede, these cancels are not the
-        model's own and are not remembered by the recent-cancel guard. Storage
-        failing here never ends the turn: the refusal still answers, and only
-        the cards actually cancelled are reported as retired.
+        model's own and are not remembered by the recent-cancel guard.
+
+        Returns the cards actually cancelled and whether every one was reached.
+        Storage failing here never ends the session; it returns ``False`` so the
+        caller fails closed, and the cards cancelled before the failure are
+        still reported as retired.
         """
         retired: list[PendingAction] = []
         try:
@@ -684,7 +707,8 @@ class ToolExecutor:
                     retired.append(done)
         except PendingActionStorageError:
             logger.warning("one_voice.pending.storage_failed phase=retire tool=%s", spec.name)
-        return retired
+            return retired, False
+        return retired, True
 
     async def _resolve_failed(
         self,

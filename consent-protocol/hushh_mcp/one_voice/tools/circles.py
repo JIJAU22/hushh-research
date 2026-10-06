@@ -45,6 +45,7 @@ from hushh_mcp.one_voice.tools.spelling import (
     clean_spelled_word,
     missing_spelled_words,
     spell_out,
+    spelling_key,
     unique_spelled_words,
 )
 from hushh_mcp.services.one_location_agent_service import OneLocationAgentError
@@ -717,16 +718,16 @@ class CreateCircleInput(ToolInput):
         default_factory=list,
         max_length=MAX_SPELLED_WORDS_PER_CALL,
         description=(
-            "Each word of this name the person spelled letter by letter, as spelled "
-            "(h u s s h -> HUSSH). Keep them in every correction."
+            "Each word of this name the person spelled letter by letter, as one word of "
+            "letters and digits (k a y r a -> KAYRA). Keep them in every correction."
         ),
     )
     release_spelled_words: list[str] = Field(
         default_factory=list,
         max_length=MAX_SPELLED_WORDS_PER_CALL,
         description=(
-            "An earlier spelled word the person explicitly changed or dropped. "
-            "Only when they said so."
+            "An earlier spelled word the person changed or dropped, or every earlier "
+            "spelled word when they now name a different circle."
         ),
     )
 
@@ -752,12 +753,34 @@ def _spelling_now() -> float:
     return EntityContext._now().timestamp()
 
 
-def _spelled_word_facts(missing: Sequence[str]) -> list[str]:
+def _spelled_word_facts(missing: Sequence[str], declared: Sequence[str]) -> list[str]:
+    """One question per missing word, phrased by where the word came from.
+
+    A word this proposal declared itself was spelled for this name. A word kept
+    from earlier may belong to a different circle, so the question offers that
+    reading too and the model can release it in the same turn.
+    """
+    declared_keys = {spelling_key(word) for word in declared}
     return [
         f"You spelled {word} as {spell_out(word)}, but this name doesn't include it. "
-        f"Should the name keep {word}?"
+        f"Should the name use {word}?"
+        if spelling_key(word) in declared_keys
+        else f"Earlier you spelled {word} as {spell_out(word)}. "
+        f"Is this a different circle, or should the name keep {word}?"
         for word in missing
     ]
+
+
+def _spelling_refused(
+    missing: Sequence[str], declared: Sequence[str], *, retire_open_proposal: bool
+) -> Rejected:
+    logger.info("one_voice.spelling.refused missing=%d", len(missing))
+    return Rejected(
+        reason_code=SPELLED_WORD_MISSING,
+        needs="repeat_name",
+        spoken_facts=_spelled_word_facts(missing, declared),
+        retire_open_proposal=retire_open_proposal,
+    )
 
 
 def _owned_circle_named(rows: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
@@ -778,16 +801,19 @@ def _prepared_spelled_words(snapshot: dict[str, Any] | None) -> list[str]:
 
 
 async def create_circle(ctx: ToolContext, args: CreateCircleInput) -> ToolResult:
-    # Defence in depth: the card was prepared with these spelled words, so a
-    # stored name that lost one is refused here too and nothing is created.
-    missing = missing_spelled_words(args.name, _prepared_spelled_words(ctx.prepared))
+    # Defence in depth, checked again at execution: the words the card was
+    # prepared with, plus every word the person has spelled since. A card from
+    # before a word was spelled (or one reused as a duplicate) never ran that
+    # check, so it is refused here and nothing is created.
+    required = unique_spelled_words(
+        [
+            *_prepared_spelled_words(ctx.prepared),
+            *ctx.entities.retained_spelled_words(_spelling_now()),
+        ]
+    )
+    missing = missing_spelled_words(args.name, required)
     if missing:
-        logger.info("one_voice.spelling.refused missing=%d", len(missing))
-        return Rejected(
-            reason_code=SPELLED_WORD_MISSING,
-            needs="repeat_name",
-            spoken_facts=_spelled_word_facts(missing),
-        )
+        return _spelling_refused(missing, args.spelled_words, retire_open_proposal=False)
     service = _service(ctx)
     try:
         existing = _owned_circle_named(await _list_circle_rows(ctx), args.name)
@@ -831,7 +857,8 @@ async def prepare_create_circle(ctx: ToolContext, args: CreateCircleInput) -> Pr
     edits the name.
 
     The person's words are kept before the check, so a refused call still
-    remembers how they spelled it.
+    remembers how they spelled it. A proposal that passes renews every word it
+    needed, so retention runs from the last proposal that used a word.
     """
     now = _spelling_now()
     ctx.entities.release_spelled_words(args.release_spelled_words)
@@ -840,13 +867,8 @@ async def prepare_create_circle(ctx: ToolContext, args: CreateCircleInput) -> Pr
     required = unique_spelled_words([*retained, *args.spelled_words])
     missing = missing_spelled_words(args.name, required)
     if missing:
-        logger.info("one_voice.spelling.refused missing=%d", len(missing))
-        return Rejected(
-            reason_code=SPELLED_WORD_MISSING,
-            needs="repeat_name",
-            spoken_facts=_spelled_word_facts(missing),
-            retire_open_proposal=True,
-        )
+        return _spelling_refused(missing, args.spelled_words, retire_open_proposal=True)
+    ctx.entities.remember_spelled_words(required, now)
     summary = summarize_create_circle(ctx, args) + "".join(
         f", with {word} spelled {spell_out(word)}" for word in required
     )
@@ -2217,8 +2239,10 @@ TOOLS: tuple[ToolSpec, ...] = (
             "Create an empty circle with the given name (kind family, friends, or other). "
             "Creating a circle sends no invitations and shares no location; adding people is a "
             "separate action. Reports already_exists when the person already owns one by that name."
-            " Use the name exactly as the person said or spelled it; a word they spelled letter "
-            "by letter stays in every correction until they change it."
+            " Use the name exactly as the person said or spelled it; a spelled word stays in "
+            "every correction until they change it. If it answers spelled_word_missing for a "
+            "word they changed, or for a different circle, call it again with that word in "
+            "release_spelled_words."
         ),
         handler=create_circle,
         ui_refresh=REFRESH_CIRCLES,
