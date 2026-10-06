@@ -8259,7 +8259,13 @@ export function AgentChatWorkspace({ className }: AgentChatWorkspaceProps) {
       },
     });
   };
-  const handleWelcomePromptSelect = useCallback((prompt: string) => {
+  const handleWelcomePromptSelect = (prompt: string) => {
+    if (recoveryInspectionPending || isVoiceConnecting || voiceActive || isChatLoading || isStreaming) return;
+    transcriptUserScrollRef.current = false;
+    scrollToSubmittedTurnRef.current = true;
+    void enqueueGuardedTurn({ typedText: prompt, attachments: [], fromPaste: false });
+  };
+  const handlePromptDraftSelect = useCallback((prompt: string) => {
     pendingDriveSearchSelectionRef.current = null;
     setPendingDriveSearchSelection(null);
     generatedDriveSearchDraftRef.current = false;
@@ -8931,13 +8937,13 @@ export function AgentChatWorkspace({ className }: AgentChatWorkspaceProps) {
                   <AgentWelcomePanel
                     name={displayName}
                     prompts={welcomePrompts}
-                    disabled={isChatLoading || isStreaming}
+                    disabled={recoveryInspectionPending || isVoiceConnecting || isChatLoading || isStreaming}
                     onPromptSelect={handleWelcomePromptSelect}
                   />
                   {chatOnboarding.dailyTip ? (
                     <ChatOnboardingDailyTip
                       tip={chatOnboarding.dailyTip}
-                      onUse={handleWelcomePromptSelect}
+                      onUse={handlePromptDraftSelect}
                       onDismiss={chatOnboarding.dismissDailyTip}
                     />
                   ) : null}
@@ -9237,7 +9243,7 @@ export function AgentChatWorkspace({ className }: AgentChatWorkspaceProps) {
                     suggestions={visibleFollowUps(
                       message, visibleMessages.at(-1)?.id, isChatLoading || isStreaming,
                     )}
-                    onSelect={handleWelcomePromptSelect}
+                    onSelect={handlePromptDraftSelect}
                   />
                   {message.id === emailDraftAnchorMessageId
                     ? renderEmailDraftCard()
