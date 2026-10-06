@@ -747,7 +747,8 @@ class CreateCircleInput(ToolInput):
         max_length=MAX_SPELLED_WORDS_PER_CALL,
         description=(
             "Each word of this name the person spelled letter by letter, as one word of "
-            "letters and digits (k a y r a -> KAYRA). Keep them in every correction."
+            "exactly those letters and digits (k a y r a -> KAYRA), even when it is also in "
+            "changed_words. Keep them in every correction."
         ),
     )
     release_spelled_words: list[str] = Field(
@@ -763,8 +764,9 @@ class CreateCircleInput(ToolInput):
         max_length=MAX_CHANGED_WORDS_PER_CALL,
         description=(
             "When correcting the waiting card: each word you changed, added or removed — "
-            "old as on the card (empty if added), new (empty if removed). Every other word "
-            "must stay exactly as on the card."
+            "old as on the card (empty if added), new as in name (empty if removed). Every "
+            "other word must stay exactly as on the card. A word they spelled also goes in "
+            "spelled_words."
         ),
     )
 
