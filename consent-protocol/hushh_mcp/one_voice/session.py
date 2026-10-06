@@ -232,9 +232,6 @@ LiveFactory = Callable[[str, dict[str, Any]], AbstractAsyncContextManager[LiveSe
 # What a model-only continuation follows: a tool response or an injected app
 # event Live owes a reply to, or nothing. Short values: logged as-is.
 OpenedAfter = Literal["none", "tool", "event"]
-# An app event Live was handed while busy: answered after its next boundary
-# ("due"), in a continuation that has heard nothing from Live yet ("open").
-EventReply = Literal["none", "due", "open"]
 
 
 @dataclass
@@ -413,6 +410,11 @@ class VoiceSession:
         # Cards whose spoken confirm was refused as card_not_shown. When the
         # client reports one shown, the model is told (it still decides).
         self._shown_waiters: dict[str, str | None] = {}
+        # Cards the model was told about that way, with the input whose yes was
+        # refused. While that input is still the person's latest, Live's next
+        # confirm of the card answers that yes, so the hold lets it run once.
+        # Spent on that use; the person's next input drops the rest.
+        self._shown_recoveries: dict[str, str] = {}
         # A tool call can end its provider turn before Live speaks its reply.
         # Keep narration ownership through that continuation until new input
         # actually reaches Live.
@@ -424,15 +426,6 @@ class VoiceSession:
         self._reply_owed = False
         # What the owed reply answers; meaningful only while _reply_owed.
         self._reply_owed_to: OpenedAfter = "none"
-        # An app event handed to Live while it was busy (speaking, or with a
-        # tool result or input of its own to answer). Live answers the event
-        # only after its next boundary, which _reply_owed does not survive:
-        # the audio Live was already speaking, or the interruption the event
-        # itself causes, clears that. That boundary opens the continuation
-        # answering the event as "event" (see _advance_turn). Read for the hold
-        # only, never for input placement. Live calling a tool, or the person's
-        # own input, retires it.
-        self._event_reply: EventReply = "none"
         # Proposals held by ``_held_card``: how many since the input they
         # followed (new input restarts the count), and whether the reply Live
         # owes is to a held answer, with nothing real handed to it since.
@@ -1028,7 +1021,7 @@ class VoiceSession:
                 # The typed question owns this turn now; Live owes it an answer.
                 self.turn.model_only = False
             self._latest_input_turn_id = input_id
-            self._event_reply = "none"
+            self._drop_stale_recoveries()
             self._bind_turn_to_input(input_id, input_id)
             await self._send_transcript(
                 "input",
@@ -1063,8 +1056,11 @@ class VoiceSession:
                     self._bump(pending_shown_stale=1)
                 else:
                     # A spoken yes was refused because the card was not on
-                    # screen. Tell the model it is now; it decides.
+                    # screen. Tell the model it is now; it decides. Recorded
+                    # first, so the hold knows whose yes a confirm of this
+                    # card answers before Live can act on the event.
                     self._bump(pending_shown_late=1)
+                    self._record_recovery(shown.id, refused_turn_id)
                     await self._inject_event(
                         {"kind": "pending_shown", "pending_action_id": shown.id}
                     )
@@ -1148,21 +1144,10 @@ class VoiceSession:
         self._reply_owed_to = "event"
         # Live now has something real to answer, not only a held proposal.
         self._hold_chain = False
-        # Nothing in flight: Live answers the event in this very continuation.
-        idle = (
-            self.turn.model_only
-            and self.turn.opened_after == "none"
-            and not self.turn.live_spoke
-            and not self.turn.tool_calls
-        )
         # Live's reply lands in whatever turn is open; a continuation that
         # followed nothing is now answering this event.
         if self.turn.model_only and self.turn.opened_after == "none":
             self.turn.opened_after = "event"
-        if not idle:
-            # Live is busy with something else: its answer to the event may
-            # only come in the continuation after its next boundary.
-            self._event_reply = "due"
 
     def _origin_is_stale(self, origin_turn_id: str | None) -> bool:
         input_turn_id = self._turn_input_origins.get(origin_turn_id or "", origin_turn_id)
@@ -1177,6 +1162,30 @@ class VoiceSession:
                 )
             )
         )
+
+    def _record_recovery(self, card_id: str, refused_turn_id: str | None) -> None:
+        """Remember the input whose yes to ``card_id`` was refused as not shown.
+
+        Kept as the input id, resolved now: the refused confirm may have come
+        from a provider continuation bound to that input.
+        """
+        if not refused_turn_id:
+            return
+        self._shown_recoveries.pop(card_id, None)
+        if len(self._shown_recoveries) >= _SHOWN_WAITERS_MAX:
+            self._shown_recoveries.pop(next(iter(self._shown_recoveries)))
+        self._shown_recoveries[card_id] = self._turn_input_origins.get(
+            refused_turn_id, refused_turn_id
+        )
+
+    def _drop_stale_recoveries(self) -> None:
+        """The person said something new: an earlier refused yes answers nothing."""
+        latest = self._latest_input_turn_id
+        self._shown_recoveries = {
+            card_id: input_turn_id
+            for card_id, input_turn_id in self._shown_recoveries.items()
+            if input_turn_id == latest
+        }
 
     def _bind_turn_to_input(self, turn_id: str, input_turn_id: str) -> None:
         if turn_id not in self._turn_input_origins and len(self._turn_input_origins) >= 512:
@@ -2171,9 +2180,7 @@ class VoiceSession:
                 if input_turn_id != self.turn.turn_id:
                     await self._place_new_input(input_turn_id)
             self._latest_input_turn_id = input_turn_id
-            # The person's own input opens the next turn; no continuation
-            # after it answers an earlier event.
-            self._event_reply = "none"
+            self._drop_stale_recoveries()
             self._bind_turn_to_input(input_turn_id, input_turn_id)
             if input_turn_id != self._narration_origin_turn_id:
                 self._narration_owns_response = False
@@ -2386,7 +2393,10 @@ class VoiceSession:
         first), an app event, or anything the person says lets the call run
         as the model asked. Arguments are never read. A confirm or cancel of
         the waiting card made the same way is held too: only the person
-        answers a card.
+        answers a card. The one exception is the person's own yes: when their
+        confirm was refused as card_not_shown and the client then reported
+        that card shown, Live's next confirm of that card runs while their
+        yes is still the latest input (see ``_shown_recoveries``).
 
         Returns the card to hold the call on, or None to let it run. When the
         open cards cannot be read, a card answer gets a fail-closed outcome
@@ -2437,7 +2447,32 @@ class VoiceSession:
             if spec is not None and open_spec.correction_key == spec.correction_key:
                 return row
             other = other or row
+        if (
+            other is not None
+            and name == "confirm_pending_action"
+            and self._spend_recovery(other.id, origin_turn_id)
+        ):
+            return None
         return other
+
+    def _spend_recovery(self, card_id: str, origin_turn_id: str) -> bool:
+        """Whether a confirm of the waiting card answers the person's refused yes.
+
+        True once, while the input whose yes was refused is still the latest;
+        that use spends the record. Logged without the card or any words.
+        """
+        refused_input = self._shown_recoveries.get(card_id)
+        if refused_input is None or refused_input != self._latest_input_turn_id:
+            return False
+        del self._shown_recoveries[card_id]
+        self._bump(hold_recovered=1)
+        logger.info(
+            "one_voice.tool.recovered tool=confirm_pending_action after=%s session=%s turn=%s",
+            self.turn.opened_after,
+            self.session_id,
+            origin_turn_id,
+        )
+        return True
 
     async def _answer_held(
         self,
@@ -2526,22 +2561,9 @@ class VoiceSession:
         input_origin = self._turn_input_origins.get(finished_id)
         self._superseded_turn_ids.discard(finished_id)
         # Read before the owed reply is cleared below: what the next
-        # continuation, if there is one, is answering. An event handed to Live
-        # while it was busy is answered after this boundary, even when Live's
-        # audio or an interruption already cleared the owed reply. If the
-        # continuation opened for it closes with nothing from Live (an
-        # interrupted turn still ends with its turn_complete), the answer did
-        # not come in it, so the next one may carry it, once, as with an owed
-        # reply below.
-        event_reply = self._event_reply
-        self._event_reply = "none"
-        answers_event = event_reply == "due" or (event_reply == "open" and not finished.live_spoke)
+        # continuation, if there is one, is answering.
         opened_after: OpenedAfter = (
-            "tool"
-            if finished.tool_calls
-            else (
-                "event" if answers_event else (self._reply_owed_to if self._reply_owed else "none")
-            )
+            "tool" if finished.tool_calls else (self._reply_owed_to if self._reply_owed else "none")
         )
         if finished.model_only and not finished.tool_calls:
             # Live closed a turn of its own without calling a tool, so a reply
@@ -2578,12 +2600,6 @@ class VoiceSession:
             )
             if input_origin is not None:
                 self._bind_turn_to_input(self.turn.turn_id, input_origin)
-            if event_reply == "due":
-                # A turn whose tool calls came before the event (a call made
-                # after it retires it) opens a continuation that answers those
-                # calls first, so the event's answer may come in the one after.
-                # Otherwise this continuation answers the event.
-                self._event_reply = "due" if finished.tool_calls else "open"
 
     def _narration_guard(self) -> None:
         """Structural, not lexical: a turn that attempted a mutation which was
@@ -2647,9 +2663,6 @@ class VoiceSession:
         origin_turn_id: str,
     ) -> None:
         self.turn.tool_calls += 1
-        # Live is acting after any event it was handed: the continuation after
-        # this call answers the call, so the event opens none of its own.
-        self._event_reply = "none"
         self._bump(tool_calls=1)
         self._count_turn_perf(origin_turn_id, "tool_calls")
         spec = registry.get_tool(name)

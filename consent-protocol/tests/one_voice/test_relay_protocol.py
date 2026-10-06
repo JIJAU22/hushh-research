@@ -692,13 +692,15 @@ async def _live_steps(session, card: str, steps: tuple[str, ...]) -> None:
 async def test_a_confirm_answering_an_app_event_is_not_held(monkeypatch, steps):
     """Negative control for the hold, and its gap 4 regression: the person said
     yes before the card was reported shown, so that confirm was refused. When
-    the client reports the card shown, the app tells Live, and the confirm Live
-    makes next answers that event. The report can land while Live is idle,
-    while it is still speaking its reply to the refusal (the event interrupts
-    it, with or without the turn_complete that closes an interrupted turn, or
-    it finishes with or without more audio), or before it has replied at all.
-    In every case the person's yes runs the card once and nothing is held:
-    holding it lost the yes, and every retry was held again."""
+    the client reports the card shown, the app tells Live, and the relay
+    records that card with the input whose yes was refused. Live's confirm of
+    that card is the person's answer, not one made in silence. The report can
+    land while Live is idle, while it is still speaking its reply to the
+    refusal (the event interrupts it, with or without the turn_complete that
+    closes an interrupted turn, or it finishes with or without more audio), or
+    before it has replied at all. In every case the person's yes runs the card
+    once and nothing is held: holding it lost the yes, and every retry was
+    held again."""
     created = _circle_catalog(monkeypatch)
     session, transport, fake = await _relay_on_live()
     card = await _yes_refused_as_not_shown(session, transport)
@@ -710,38 +712,110 @@ async def test_a_confirm_answering_an_app_event_is_not_held(monkeypatch, steps):
     assert session._counters.get("held", 0) == 0
 
 
-@pytest.mark.parametrize(
-    "steps",
-    [
-        ("turn_complete", "audio", "shown", "interrupted", "audio", "turn_complete"),
-        (
-            "turn_complete",
-            "audio",
-            "shown",
-            "interrupted",
-            "turn_complete",
-            "audio",
-            "turn_complete",
+@pytest.mark.parametrize("silent_call", ["create_circle", "confirm_pending_action"])
+@pytest.mark.parametrize("event", ["ui_settled", "session_ending_soon"])
+@pytest.mark.parametrize("lands", ["before_its_turn_closes", "before_the_read_back"])
+async def test_an_app_event_the_person_did_not_cause_never_answers_the_card(
+    monkeypatch, lands, event, silent_call
+):
+    """The UAT 2026-10-06 incident shape with an app event nobody asked for:
+    Live navigates and proposes in the input's own turn, and the client
+    settling that navigation, or the session-ending warning, arrives before
+    Live reads the card back. The read-back answers the tool result and the
+    event together. A proposal or confirm Live then makes in silence is held:
+    the card stays pending and nothing runs. Only a person's yes refused as
+    card_not_shown lets a later confirm of that card through."""
+    created = _circle_catalog(monkeypatch)
+    session, transport, fake = await _relay_on_live()
+    await _say(session, "Open my circles and create one called hussh garage v04")
+    await session._emit_side_effects(
+        ToolCallOutcome(
+            result=ToolResult(
+                status="navigation_dispatched", gateway_action_id="route.circles", screen="circles"
+            )
         ),
-        ("shown", "turn_complete", "audio", "turn_complete", "audio", "turn_complete"),
-        ("shown", "turn_complete", "lookup", "turn_complete", "audio", "turn_complete"),
-    ],
-    ids=[
-        "answered_aloud_after_an_interruption",
-        "answered_aloud_after_an_interrupted_turn",
-        "answered_aloud_after_the_reply",
-        "acted_on_with_a_call",
-    ],
-)
-async def test_an_app_event_is_answered_in_one_continuation_not_more(monkeypatch, steps):
-    """The event Live owes a reply to keeps the hold off only until Live has
-    answered it. Once Live has (aloud, or by calling a tool), a confirm it
-    makes in a later silent continuation is held like any other: the card
-    stays pending and nothing runs."""
+        call_id="nav-1",
+        origin_turn_id=session.turn.turn_id,
+    )
+    directive_id = transport.frames("ui_directive")[-1]["directive_id"]
+    await _model_calls(session, "c1", "create_circle", {"name": "HUSSH GARAGE V04"})
+    card = transport.frames("pending_action")[-1]["pending_action_id"]
+    await session._handle_client_frame(
+        protocol.PendingShownFrame(type="pending_action.shown", pending_action_id=card)
+    )
+
+    async def _app_event() -> None:
+        if event == "ui_settled":
+            await session._handle_client_frame(
+                protocol.UiSettledFrame(
+                    type="ui.settled", directive_id=directive_id, status="opened"
+                )
+            )
+        else:
+            await session._inject_event({"kind": "session_ending_soon", "seconds_left": 60})
+
+    if lands == "before_its_turn_closes":
+        await _app_event()
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    if lands == "before_the_read_back":
+        await _app_event()
+    assert len(fake.events_sent) == 1 and event in fake.events_sent[0]
+    await _speak_and_end(session, "QUJD")
+    silent = (
+        {"name": "HUSSH GARAGE V4"}
+        if silent_call == "create_circle"
+        else {"pending_action_id": card}
+    )
+    await _model_calls(session, "c2", silent_call, silent)
+    assert [(row.id, row.status) for row in session.pending.rows.values()] == [(card, "pending")]
+    assert created == []
+    assert session._counters.get("held") == 1
+
+
+async def test_a_recovered_yes_lets_one_confirm_through(monkeypatch, caplog):
+    """The recorded yes is spent on Live's first confirm of that card. If that
+    confirm does not run the card (storage blinked), a confirm Live makes
+    later in silence is held like any other. The recovery is logged once,
+    without the card."""
     created = _circle_catalog(monkeypatch)
     session, transport, fake = await _relay_on_live()
     card = await _yes_refused_as_not_shown(session, transport)
-    await _live_steps(session, card, steps)
+    # The card shows while Live is still answering the refusal aloud.
+    await _live_steps(session, card, ("turn_complete", "audio", "shown", "audio", "turn_complete"))
+    read_row = session.pending.get
+
+    async def _fails_once(**kwargs):
+        monkeypatch.setattr(session.pending, "get", read_row)
+        raise PendingActionStorageError("unavailable")
+
+    monkeypatch.setattr(session.pending, "get", _fails_once)
+    with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
+        await _model_calls(session, "c3", "confirm_pending_action", {"pending_action_id": card})
+        assert _responses(fake, "confirm_pending_action")[-1]["reason_code"] == (
+            "storage_unavailable"
+        )
+        assert session._counters.get("held", 0) == 0
+
+        await session._handle_live_event(LiveEvent(kind="turn_complete"))
+        await _speak_and_end(session, "Q0ND")
+        await _model_calls(session, "c4", "confirm_pending_action", {"pending_action_id": card})
+    assert session.pending.rows[card].status == "pending"
+    assert created == []
+    assert session._counters.get("held") == 1
+    recovered = [r.message for r in caplog.records if "one_voice.tool.recovered" in r.message]
+    assert len(recovered) == 1 and card not in caplog.text
+
+
+async def test_a_recovered_yes_is_dropped_once_the_person_speaks_again(monkeypatch):
+    """The recorded yes answers the card only while it is the person's latest
+    input. Once they say something new and Live answers that, a confirm Live
+    makes in silence is held: the earlier yes no longer answers the card."""
+    created = _circle_catalog(monkeypatch)
+    session, transport, fake = await _relay_on_live()
+    card = await _yes_refused_as_not_shown(session, transport)
+    await _live_steps(session, card, ("turn_complete", "audio", "shown"))
+    await _say(session, "Wait")
+    await _live_steps(session, card, ("turn_complete", "audio", "turn_complete"))
     await _model_calls(session, "c3", "confirm_pending_action", {"pending_action_id": card})
     assert session.pending.rows[card].status == "pending"
     assert created == []

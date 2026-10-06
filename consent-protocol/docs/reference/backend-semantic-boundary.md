@@ -591,10 +591,19 @@ would sit on the drift list above. It is declared, and scoped, as catalog search
   or app event waiting for its reply), or right after a held answer, while a
   card already presented waits. Structural, never lexical: the call's
   arguments are never read. A tool result, an app event, or anything the
-  person says lets the next call run as the model asked. An app event handed
-  to Live while it is speaking or answering something else counts for the
-  continuation that answers it, so the confirm Live retries after
-  `pending_shown` (a yes refused because the card was not on screen yet) runs.
+  person says lets the next call run as the model asked. Once Live has
+  answered it, an app event the person did not cause (`ui_settled` for Live's
+  own navigation, `session_ending_soon`) leaves the hold in place.
+- Recovery (`_shown_recoveries`): the one exempt card answer is the person's
+  own yes. When their confirm was refused as `card_not_shown` and the client
+  then reports that card shown, the relay records the card with the input
+  whose yes was refused, before it tells Live (`[ONE_EVENT] pending_shown`).
+  While that input is still the person's latest, Live's first
+  `confirm_pending_action` whose waiting card (the card the hold found, never
+  the call's arguments) carries the record runs, however Live's reply and the
+  event interleave. That use spends the record and the person's next input
+  drops it. It is logged as `one_voice.tool.recovered after=…`, without the
+  card.
 - What the model gets: `confirmation_waiting` with `reason_code=awaiting_answer`,
   the waiting card's id and no spoken facts (from the third hold in a row, a
   note to wait for the person's answer). The card is not cancelled, replaced
@@ -606,5 +615,8 @@ would sit on the drift list above. It is declared, and scoped, as catalog search
   read as one the executor answered.
 - Not covered: Live repeating the question in speech without a tool call; a
   continuation that opens with Live's own read tool call (its result lets the
-  next call run); and an app event Live answers with silence, after which the
-  next continuation still counts as answering it.
+  next call run); an app event Live answers with silence, after which the
+  next continuation still counts as answering it; and a confirm Live makes in
+  the same input that proposed the card, refused as `card_not_shown`, which
+  is recorded like a person's yes (structure cannot tell it from a yes given
+  with the request, such as "call it Home instead, yes").
