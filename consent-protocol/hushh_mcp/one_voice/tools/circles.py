@@ -2450,9 +2450,9 @@ TOOLS: tuple[ToolSpec, ...] = (
             "Creating a circle sends no invitations and shares no location; adding people is a "
             "separate action. Reports already_exists when the person already owns one by that name."
             " Use the name exactly as the person said or spelled it. When correcting a name you "
-            "proposed, even after cancelling its card, change only what they asked: a word they "
-            "spell goes in spelled_words, and each other changed word in changed_words; a word "
-            "they spelled stays until they change it. If it answers name_changed or "
+            "proposed, even after cancelling its card, change only what they asked: the letters "
+            "they spell replace the word they correct and go in spelled_words, and each other "
+            "changed word goes in changed_words; a word they spelled stays until they change it. If it answers name_changed or "
             "spelled_word_missing for a change they did ask for, call it again with that change "
             "declared (changed_words or release_spelled_words)."
         ),
