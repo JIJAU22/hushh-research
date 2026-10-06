@@ -587,14 +587,20 @@ would sit on the drift list above. It is declared, and scoped, as catalog search
   or app event waiting for its reply), or right after a held answer, while a
   card already presented waits. Structural, never lexical: the call's
   arguments are never read. A tool result, an app event, or anything the
-  person says lets the next call run as the model asked.
+  person says lets the next call run as the model asked. An app event handed
+  to Live while it is speaking or answering something else counts for the
+  continuation that answers it, so the confirm Live retries after
+  `pending_shown` (a yes refused because the card was not on screen yet) runs.
 - What the model gets: `confirmation_waiting` with `reason_code=awaiting_answer`,
   the waiting card's id and no spoken facts (from the third hold in a row, a
   note to wait for the person's answer). The card is not cancelled, replaced
-  or sent again, and the client gets a not-ok result.
+  or sent again, and the client gets a not-ok result. If the waiting cards
+  cannot be read, a card answer made this way is refused
+  (`storage_unavailable`, nothing changed) instead of run.
 - Recorded: every hold is logged as `one_voice.tool.held tool=… after=…` and
   counted as `held` in the session's perf line, so a skipped call is never
   read as one the executor answered.
-- Not covered: Live repeating the question in speech without a tool call, and
-  a continuation that opens with a read tool call (its result lets the next
-  call run).
+- Not covered: Live repeating the question in speech without a tool call; a
+  continuation that opens with Live's own read tool call (its result lets the
+  next call run); and an app event Live answers with silence, after which the
+  next continuation still counts as answering it.
