@@ -232,6 +232,9 @@ LiveFactory = Callable[[str, dict[str, Any]], AbstractAsyncContextManager[LiveSe
 # What a model-only continuation follows: a tool response or an injected app
 # event Live owes a reply to, or nothing. Short values: logged as-is.
 OpenedAfter = Literal["none", "tool", "event"]
+# An app event Live was handed while busy: answered after its next boundary
+# ("due"), in a continuation that has heard nothing from Live yet ("open").
+EventReply = Literal["none", "due", "open"]
 
 
 @dataclass
@@ -421,6 +424,15 @@ class VoiceSession:
         self._reply_owed = False
         # What the owed reply answers; meaningful only while _reply_owed.
         self._reply_owed_to: OpenedAfter = "none"
+        # An app event handed to Live while it was busy (speaking, or with a
+        # tool result or input of its own to answer). Live answers the event
+        # only after its next boundary, which _reply_owed does not survive:
+        # the audio Live was already speaking, or the interruption the event
+        # itself causes, clears that. That boundary opens the continuation
+        # answering the event as "event" (see _advance_turn). Read for the hold
+        # only, never for input placement. Live calling a tool, or the person's
+        # own input, retires it.
+        self._event_reply: EventReply = "none"
         # Proposals held by ``_held_card``: how many since the input they
         # followed (new input restarts the count), and whether the reply Live
         # owes is to a held answer, with nothing real handed to it since.
@@ -1016,6 +1028,7 @@ class VoiceSession:
                 # The typed question owns this turn now; Live owes it an answer.
                 self.turn.model_only = False
             self._latest_input_turn_id = input_id
+            self._event_reply = "none"
             self._bind_turn_to_input(input_id, input_id)
             await self._send_transcript(
                 "input",
@@ -1135,10 +1148,21 @@ class VoiceSession:
         self._reply_owed_to = "event"
         # Live now has something real to answer, not only a held proposal.
         self._hold_chain = False
+        # Nothing in flight: Live answers the event in this very continuation.
+        idle = (
+            self.turn.model_only
+            and self.turn.opened_after == "none"
+            and not self.turn.live_spoke
+            and not self.turn.tool_calls
+        )
         # Live's reply lands in whatever turn is open; a continuation that
         # followed nothing is now answering this event.
         if self.turn.model_only and self.turn.opened_after == "none":
             self.turn.opened_after = "event"
+        if not idle:
+            # Live is busy with something else: its answer to the event may
+            # only come in the continuation after its next boundary.
+            self._event_reply = "due"
 
     def _origin_is_stale(self, origin_turn_id: str | None) -> bool:
         input_turn_id = self._turn_input_origins.get(origin_turn_id or "", origin_turn_id)
@@ -2147,6 +2171,9 @@ class VoiceSession:
                 if input_turn_id != self.turn.turn_id:
                     await self._place_new_input(input_turn_id)
             self._latest_input_turn_id = input_turn_id
+            # The person's own input opens the next turn; no continuation
+            # after it answers an earlier event.
+            self._event_reply = "none"
             self._bind_turn_to_input(input_turn_id, input_turn_id)
             if input_turn_id != self._narration_origin_turn_id:
                 self._narration_owns_response = False
@@ -2499,9 +2526,22 @@ class VoiceSession:
         input_origin = self._turn_input_origins.get(finished_id)
         self._superseded_turn_ids.discard(finished_id)
         # Read before the owed reply is cleared below: what the next
-        # continuation, if there is one, is answering.
+        # continuation, if there is one, is answering. An event handed to Live
+        # while it was busy is answered after this boundary, even when Live's
+        # audio or an interruption already cleared the owed reply. If the
+        # continuation opened for it closes with nothing from Live (an
+        # interrupted turn still ends with its turn_complete), the answer did
+        # not come in it, so the next one may carry it, once, as with an owed
+        # reply below.
+        event_reply = self._event_reply
+        self._event_reply = "none"
+        answers_event = event_reply == "due" or (event_reply == "open" and not finished.live_spoke)
         opened_after: OpenedAfter = (
-            "tool" if finished.tool_calls else (self._reply_owed_to if self._reply_owed else "none")
+            "tool"
+            if finished.tool_calls
+            else (
+                "event" if answers_event else (self._reply_owed_to if self._reply_owed else "none")
+            )
         )
         if finished.model_only and not finished.tool_calls:
             # Live closed a turn of its own without calling a tool, so a reply
@@ -2538,6 +2578,12 @@ class VoiceSession:
             )
             if input_origin is not None:
                 self._bind_turn_to_input(self.turn.turn_id, input_origin)
+            if event_reply == "due":
+                # A turn whose tool calls came before the event (a call made
+                # after it retires it) opens a continuation that answers those
+                # calls first, so the event's answer may come in the one after.
+                # Otherwise this continuation answers the event.
+                self._event_reply = "due" if finished.tool_calls else "open"
 
     def _narration_guard(self) -> None:
         """Structural, not lexical: a turn that attempted a mutation which was
@@ -2601,6 +2647,9 @@ class VoiceSession:
         origin_turn_id: str,
     ) -> None:
         self.turn.tool_calls += 1
+        # Live is acting after any event it was handed: the continuation after
+        # this call answers the call, so the event opens none of its own.
+        self._event_reply = "none"
         self._bump(tool_calls=1)
         self._count_turn_perf(origin_turn_id, "tool_calls")
         spec = registry.get_tool(name)
