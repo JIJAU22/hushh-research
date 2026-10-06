@@ -524,6 +524,30 @@ def test_spelled_name_is_scored_on_the_arguments_not_only_the_first_tool():
     assert _expected_hit(duplicate, reads)
     assert support.extra_proposals(duplicate) == []
 
+    # The executor's reuse of an open card with exactly these arguments (here
+    # from an earlier turn) is that card, still current: scored. The relay's
+    # hold answers with the same status but never ran the call, so the card it
+    # names may hold other words: never scored, and not if withdrawn either.
+    def waiting(pending_id: str, **extra: str) -> dict[str, Any]:
+        return {"status": "confirmation_waiting", "pending_action_id": pending_id, **extra}
+
+    reused = _observed(case, [("create_circle", right, waiting("p-1"))])
+    assert _expected_hit(reused, reads)
+    assert support.arg_mismatches(reused) == []
+    held = _observed(
+        case, [("create_circle", right, waiting("p-1", reason_code="awaiting_answer"))]
+    )
+    assert not _expected_hit(held, reads)
+    assert [m["reason"] for m in support.arg_mismatches(held) if m["arg"] is None] == ["status"]
+    reused_then_withdrawn = _observed(
+        case,
+        [
+            ("create_circle", right, waiting("p-1")),
+            ("cancel_pending_action", {"pending_action_id": "p-1"}, {"status": "cancelled"}),
+        ],
+    )
+    assert not _expected_hit(reused_then_withdrawn, reads)
+
 
 def test_fake_world_answers_reads_with_real_ids_and_stops_mutations_at_a_card():
     """The responder is the real executor: a read returns canonical ids, a

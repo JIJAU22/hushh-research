@@ -139,13 +139,17 @@ def _arg_matches(expected: ArgExpectation, actual: Any) -> bool:
 
 
 # Result statuses under which a scored call counts: the server took it. Every
-# other status (rejected, confirmation_waiting, pending_action_exists, ...)
-# means the call did not stand as made, so its arguments cannot score a hit.
+# other status (rejected, pending_action_exists, ...) means the call did not
+# stand as made, so its arguments cannot score a hit. confirmation_waiting
+# counts only as the executor's reuse: an open card with exactly these
+# arguments. The relay's hold (``HELD_REASON``) never ran the call, so the
+# card it names may hold other arguments.
 ACCEPTED_STATUSES = frozenset(
     {
         "ok",
         "confirmed",
         "confirmation_required",
+        "confirmation_waiting",
         "navigation_dispatched",
         "cancelled",
         "pending",
@@ -157,12 +161,26 @@ ACCEPTED_STATUSES = frozenset(
 # (the store's create cancels them), a refused correction retires the card
 # it corrected, and a lookup retires cards it made stale.
 SUPERSEDED_KEY = "superseded_pending_action_ids"
+# The reason the relay gives a confirm-tier call it held unrun (``session.py``).
+HELD_REASON = "awaiting_answer"
+# Results that put a card in front of the person: a new one, or the open one
+# the executor reused because the call matched it exactly.
+CARD_STATUSES = frozenset({"confirmation_required", "confirmation_waiting"})
+
+
+def _held(result: dict[str, Any]) -> bool:
+    return (
+        result.get("status") == "confirmation_waiting" and result.get("reason_code") == HELD_REASON
+    )
 
 
 def _open_proposals(calls: list[Call]) -> dict[int, str]:
     """Replay one turn: index of each call whose card is still open at its end.
 
-    A ``confirmation_required`` result opens a card; it closes when the model
+    A ``confirmation_required`` result opens a card, and the executor's
+    ``confirmation_waiting`` reuse names an open card holding exactly that
+    call's arguments (it may be from an earlier turn); a held call names a card
+    it never ran against, so it opens nothing. A card closes when the model
     cancels that id, or when a later result reports it superseded. Closures
     come only from what the results said, as the model saw them. A card with
     no id in its result (a hand-written triple) cannot be closed by id.
@@ -173,7 +191,7 @@ def _open_proposals(calls: list[Call]) -> dict[int, str]:
         if name == "cancel_pending_action" and result.get("status") == "cancelled":
             closed.add(str(args.get("pending_action_id") or ""))
         opened = {i: pid for i, pid in opened.items() if pid not in closed}
-        if result.get("status") == "confirmation_required":
+        if result.get("status") in CARD_STATUSES and not _held(result):
             opened[index] = str(result.get("pending_action_id") or f"#call-{index}")
     return opened
 
@@ -207,9 +225,10 @@ def arg_mismatches(obs: Observation) -> list[dict[str, Any]]:
     The LAST call of each expected tool in that turn is scored, so a call the
     executor refused and the model then corrected is judged on the
     correction. That call counts only if its result status is accepted and,
-    when it opened a card, the card is still open at the end of the turn: a
-    refused call or a withdrawn card never scores, whatever it said. No call
-    of the tool is a mismatch. Empty means all matched.
+    when it put a card in front of the person (a new one, or the executor's
+    reuse of the open one), the card is still open at the end of the turn: a
+    refused call, a held call or a withdrawn card never scores, whatever it
+    said. No call of the tool is a mismatch. Empty means all matched.
     """
     mismatches: list[dict[str, Any]] = []
     open_cards = _open_proposals(obs.calls)
@@ -217,12 +236,13 @@ def arg_mismatches(obs: Observation) -> list[dict[str, Any]]:
         index = _scored_call(obs, tool)
         last = None if index is None else obs.calls[index][1]
         if index is not None:
-            status = obs.calls[index][2].get("status")
+            result = obs.calls[index][2]
+            status = result.get("status")
             reason = (
                 "status"
-                if status not in ACCEPTED_STATUSES
+                if status not in ACCEPTED_STATUSES or _held(result)
                 else "not_current"
-                if status == "confirmation_required" and index not in open_cards
+                if status in CARD_STATUSES and index not in open_cards
                 else None
             )
             if reason is not None:
