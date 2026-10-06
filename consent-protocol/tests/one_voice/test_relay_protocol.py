@@ -509,6 +509,237 @@ async def test_confirm_tool_chained_after_a_tool_or_event_is_not_unprompted(capl
     assert "private_event_kind" not in caplog.text
 
 
+# --- a proposal Live makes on its own while a card waits --------------------
+
+ASK_1H = {"person": {"user_id": "u-priya"}, "hours": 1}
+ASK_2H = {"person": {"user_id": "u-priya"}, "hours": 2}
+
+
+def _circle_catalog(monkeypatch) -> list[str]:
+    """The real create_circle spec, prepare hook included, with a handler that
+    records what it would create instead of calling the circles service."""
+    from dataclasses import replace
+
+    from hushh_mcp.one_voice.tools import circles
+
+    created: list[str] = []
+
+    async def _create(ctx, args):
+        created.append(args.name)
+        return ToolResult(status="created", spoken_facts=["Created."])
+
+    real = next(tool for tool in circles.TOOLS if tool.name == "create_circle")
+    tools = {tool.name: tool for tool in (*TEST_TOOLS, replace(real, handler=_create))}
+    monkeypatch.setattr(registry, "get_tool", lambda name: tools.get(str(name or "")))
+    return created
+
+
+async def _card_read_back_then_silence(session, transport, call_id, name, args) -> str:
+    """One proposes in the input's own turn; Live closes that turn, reads the
+    card back in a fresh one and closes that too; the person says nothing."""
+    await _model_calls(session, call_id, name, args)
+    card = transport.frames("pending_action")[-1]["pending_action_id"]
+    await session._handle_client_frame(
+        protocol.PendingShownFrame(type="pending_action.shown", pending_action_id=card)
+    )
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    await _speak_and_end(session, "QUJD")
+    return card
+
+
+@pytest.mark.parametrize("changed", [True, False], ids=["different_args", "same_args"])
+async def test_a_proposal_live_makes_in_silence_leaves_the_waiting_card_alone(
+    monkeypatch, caplog, changed
+):
+    """UAT 2026-10-06 circle naming: 14.5 s after One read proposal 4 back, with
+    no input transcript, Live proposed again with different arguments, and that
+    proposal replaced the card the person was about to answer. A confirm-tier
+    call Live makes on its own while a card waits never reaches the executor:
+    the card and its id survive, the model is told the card is waiting, and the
+    person's yes confirms what they were shown, once."""
+    created = _circle_catalog(monkeypatch)
+    session, transport, fake = await _relay_on_live()
+    original = {"name": "HUSSH GARAGE V04", "spelled_words": ["HUSSH"]}
+    await _say(session, "Create a circle called hussh garage v04")
+    card = await _card_read_back_then_silence(session, transport, "c1", "create_circle", original)
+    silent = {"name": "HUSSH GARAGE V4", "spelled_words": ["HUSSH"]} if changed else original
+    with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
+        await _model_calls(session, "c2", "create_circle", silent)
+        session._log_session_perf()
+
+    rows = session.pending.rows
+    assert [(row.id, row.status) for row in rows.values()] == [(card, "pending")]
+    assert len(transport.frames("pending_action")) == 1
+    assert transport.frames("pending_action.resolved") == []
+    held = _responses(fake, "create_circle")[-1]
+    assert held["status"] == "confirmation_waiting" and held["needs"] == "confirmation"
+    assert held["pending_action_id"] == card and held["reason_code"] == "awaiting_answer"
+    assert held["spoken_facts"] == [] and "note" not in held
+    result = transport.frames("tool.result")[-1]
+    assert result["ok"] is False and result["result_public"]["pending_action_id"] == card
+    assert transport.frames("state")[-1]["state"] == "confirming"
+    assert session._counters.get("held") == 1
+    assert "one_voice.tool.held tool=create_circle after=none" in caplog.text
+    assert " held=1" in caplog.text
+    assert "garage" not in caplog.text.lower() and card not in caplog.text
+
+    # Live acknowledges the held answer; the person then answers the card.
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    await _speak_and_end(session, "QkJC")
+    await _say(session, "Yes")
+    await _model_calls(session, "c3", "confirm_pending_action", {"pending_action_id": card})
+    assert rows[card].status == "executed"
+    assert created == ["HUSSH GARAGE V04"]
+
+
+async def _card_waiting(session, transport):
+    await _card_read_back_then_silence(session, transport, "n0", "ask", ASK_1H)
+
+
+async def _owed_a_lookup(session, transport):
+    await _card_waiting(session, transport)
+    await _say(session, "Make it two hours")
+    await _model_calls(session, "n1", "echo", {"text": "hi"})
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+
+
+async def _lookup_answered_aloud(session, transport):
+    await _owed_a_lookup(session, transport)
+    await session._handle_live_event(LiveEvent(kind="audio", audio_b64="Q0ND"))
+
+
+async def _after_an_app_event(session, transport):
+    await _card_waiting(session, transport)
+    await session._inject_event({"kind": "ui_settled", "status": "opened"})
+
+
+async def _with_new_input(session, transport):
+    await _card_waiting(session, transport)
+    await _say(session, "No, make it two hours")
+
+
+async def _while_the_person_speaks(session, transport):
+    await _card_waiting(session, transport)
+    await session._handle_live_event(
+        LiveEvent(kind="input_transcript", text="No, make it", finished=False)
+    )
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+
+
+async def _no_card_open(session, transport):
+    await _speak_and_end(session, "QUJD")
+
+
+async def _lookup_after_a_hold(session, transport):
+    await _card_waiting(session, transport)
+    await _model_calls(session, "n1", "ask", ASK_2H)
+    assert session._counters.get("held") == 1
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    await _model_calls(session, "n2", "echo", {"text": "hi"})
+
+
+@pytest.mark.parametrize(
+    ("setup", "tool", "args", "expected"),
+    [
+        (_owed_a_lookup, "ask", ASK_2H, "confirmation_required"),
+        (_lookup_answered_aloud, "ask", ASK_2H, "confirmation_required"),
+        (_after_an_app_event, "ask", ASK_2H, "confirmation_required"),
+        (_with_new_input, "ask", ASK_2H, "confirmation_required"),
+        (_while_the_person_speaks, "ask", ASK_2H, "confirmation_required"),
+        (_no_card_open, "ask", ASK_2H, "confirmation_required"),
+        (_lookup_after_a_hold, "ask", ASK_2H, "confirmation_required"),
+        (_card_waiting, "echo", {"text": "hi"}, "ok"),
+    ],
+    ids=[
+        "reply_owed_to_a_lookup",
+        "lookup_answered_aloud_first",
+        "after_an_app_event",
+        "correction_with_new_input",
+        "while_the_person_speaks",
+        "no_card_open",
+        "lookup_after_a_hold",
+        "read_while_a_card_waits",
+    ],
+)
+async def test_calls_with_something_to_answer_are_never_held(setup, tool, args, expected):
+    """Negative controls: Live answering a tool result (even after saying a
+    word about it), an app event, or the person's own new words, a first
+    proposal with nothing waiting, and a read, all run as the model asked."""
+    session, transport, fake, _pending = await _voice_card_session()
+    await setup(session, transport)
+    held_before = session._counters.get("held", 0)
+    await _model_calls(session, "n9", tool, args)
+    answer = _responses(fake, tool)[-1]
+    assert answer["status"] == expected and answer.get("reason_code") != "awaiting_answer"
+    assert session._counters.get("held", 0) == held_before
+
+
+async def test_held_proposals_note_the_waiting_card_from_the_third_and_new_input_restarts(
+    caplog,
+):
+    """Live kept proposing in silence: from the third hold the answer also says,
+    off the spoken path, that the proposal waits for the person. The count is
+    per input; once the person speaks, a later hold starts again at one."""
+    session, transport, fake, pending = await _voice_card_session()
+    card = await _card_read_back_then_silence(session, transport, "c1", "ask", ASK_1H)
+    with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
+        # Second hold: Live's next call, before it says a word about the first.
+        await _model_calls(session, "c2", "ask", ASK_2H)
+        await session._handle_live_event(LiveEvent(kind="turn_complete"))
+        await _model_calls(session, "c3", "ask", ASK_2H)
+        await session._handle_live_event(LiveEvent(kind="turn_complete"))
+        await _speak_and_end(session, "QkJC")
+        await _model_calls(session, "c4", "ask", ASK_2H)
+    held = _responses(fake, "ask")[1:]
+    assert [answer["reason_code"] for answer in held] == ["awaiting_answer"] * 3
+    assert "note" not in held[0] and "note" not in held[1] and held[2]["note"]
+    assert all(answer["spoken_facts"] == [] for answer in held)
+    lines = [r.message for r in caplog.records if "one_voice.tool.held" in r.message]
+    assert [line.split(" session=")[0] for line in lines] == [
+        "one_voice.tool.held tool=ask after=none",
+        "one_voice.tool.held tool=ask after=tool",
+        "one_voice.tool.held tool=ask after=none",
+    ]
+
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    await _speak_and_end(session, "Q0ND")
+    await _say(session, "Sorry, what was that?")
+    await _speak_and_end(session, "RERE")
+    await _model_calls(session, "c5", "ask", ASK_2H)
+    restarted = _responses(fake, "ask")[-1]
+    assert restarted["reason_code"] == "awaiting_answer" and "note" not in restarted
+    assert session._counters["held"] == 4
+    assert [(row.id, row.status) for row in pending.rows.values()] == [(card, "pending")]
+    assert "Priya" not in caplog.text
+
+
+async def test_a_question_typed_while_the_waiting_card_is_read_gets_the_stale_answer():
+    """The open cards are read before a proposal is held. A question typed
+    during that read makes the call stale: it gets the answer every stale call
+    gets, and the waiting card is still left alone."""
+    session, transport, fake, pending = await _voice_card_session()
+    card = await _card_read_back_then_silence(session, transport, "c1", "ask", ASK_1H)
+    read_open = pending.list_open
+
+    async def _typed_during_read(**kwargs):
+        pending.list_open = read_open
+        await session._handle_client_frame(protocol.TextFrame(type="text", text="What time is it?"))
+        return await read_open(**kwargs)
+
+    pending.list_open = _typed_during_read
+    await session._handle_live_event(
+        LiveEvent(kind="tool_call", function_calls=[{"id": "c2", "name": "ask", "args": ASK_2H}])
+    )
+    assert _responses(fake, "ask")[-1] == {
+        "status": "superseded",
+        "reason_code": "newer_question",
+        "spoken_facts": [],
+    }
+    assert [(row.id, row.status) for row in pending.rows.values()] == [(card, "pending")]
+    assert len(transport.frames("pending_action")) == 1
+    assert transport.frames("pending_action.resolved") == []
+
+
 async def test_output_transcript_after_its_final_is_counted_at_turn_end(caplog):
     """The output transcript shape behind the UAT circle naming is unknown:
     count frames forwarded after a turn already forwarded an output final."""

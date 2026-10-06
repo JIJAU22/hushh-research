@@ -128,6 +128,9 @@ _NOT_SUCCESS = {
 _DIRECTIVE_MEMORY = 128
 _SHOWN_WAITERS_MAX = 32
 _PERF_TURN_MEMORY = 128
+# From this many held proposals since the person last spoke, the held answer
+# also tells the model, off the spoken path, that the card waits for them.
+_HOLD_NOTE_FROM = 3
 # How long a review card's Send may still be reported to this session, and how
 # many such cards it remembers. A send after this is still delivered and still
 # shown on the card; One just does not speak it.
@@ -323,6 +326,11 @@ class VoiceSession:
         self._reply_owed = False
         # What the owed reply answers; meaningful only while _reply_owed.
         self._reply_owed_to: OpenedAfter = "none"
+        # Proposals held by ``_held_card``: how many since the input they
+        # followed (new input restarts the count), and whether the reply Live
+        # owes is to a held answer, with nothing real handed to it since.
+        self._hold_streak: tuple[str | None, int] = (None, 0)
+        self._hold_chain = False
         # Set from the auth frame before any tool runs; UTC until then.
         self._client_timezone = "UTC"
         self.started_at = clock()
@@ -504,7 +512,7 @@ class VoiceSession:
             "one_voice.session_perf session=%s user_input_turns=%d provider_turns=%d "
             "tool_calls=%d confirmation_proposals=%d confirmation_reused=%d "
             "confirmation_cancelled=%d confirmations_completed=%d clarifications=%d "
-            "unprompted=%d chained=%d%s",
+            "unprompted=%d chained=%d held=%d%s",
             self.session_id,
             inputs,
             provider_turns,
@@ -516,6 +524,7 @@ class VoiceSession:
             self._counters.get("clarifications", 0),
             self._counters.get("unprompted", 0),
             self._counters.get("chained", 0),
+            self._counters.get("held", 0),
             ratios,
         )
 
@@ -974,6 +983,8 @@ class VoiceSession:
         # The event closes a turn of its own, so Live owes it a reply.
         self._reply_owed = True
         self._reply_owed_to = "event"
+        # Live now has something real to answer, not only a held proposal.
+        self._hold_chain = False
         # Live's reply lands in whatever turn is open; a continuation that
         # followed nothing is now answering this event.
         if self.turn.model_only and self.turn.opened_after == "none":
@@ -1989,6 +2000,132 @@ class VoiceSession:
             origin_turn_id,
         )
 
+    async def _held_card(self, spec: ToolSpec | None, origin_turn_id: str) -> PendingAction | None:
+        """The waiting card a proposal Live made on its own must leave alone.
+
+        UAT 2026-10-06: 14.5 s after a card was read back, with no input
+        transcript, Live proposed again with different arguments and replaced
+        the card the person was about to answer. Structural, never lexical:
+        a confirm-tier call in a continuation with no input of its own (bound
+        to an earlier input, with none newer and none in progress) that Live
+        opened owing nothing -- no tool result or app event waiting for its
+        reply -- while a card already presented waits for the person. A call
+        that follows a held answer, with nothing real handed to Live since, is
+        held the same way. A tool result (even one Live said a word about
+        first), an app event, or anything the person says lets the call run
+        as the model asked. Arguments are never read.
+        """
+        if spec is None or not spec.policy.needs_confirmation or not self.turn.model_only:
+            return None
+        input_turn_id = self._turn_input_origins.get(origin_turn_id)
+        if input_turn_id is None or input_turn_id == origin_turn_id:
+            return None
+        if self._origin_is_stale(origin_turn_id) or self._input_segment_id is not None:
+            # The person has spoken since, or is speaking: the call runs as
+            # asked, and the stale branch answers it if newer input owns it.
+            return None
+        follows_hold = self._hold_chain and self._hold_streak[0] == input_turn_id
+        if not follows_hold and (self._reply_owed or self.turn.opened_after != "none"):
+            return None
+        try:
+            open_rows = await self.pending.list_open(
+                user_id=self.ctx.user_id, conversation_id=self.ctx.conversation_id
+            )
+        except PendingActionStorageError as exc:
+            # Unreadable is not "nothing waiting". The executor reads the same
+            # rows and fails closed, so the call is left to it.
+            self._storage_failed("hold", exc)
+            return None
+        other: PendingAction | None = None
+        for row in open_rows:
+            open_spec = registry.get_tool(row.tool_name)
+            if open_spec is None:
+                # Nothing could confirm it any more; it waits for nobody.
+                continue
+            if open_spec.correction_key == spec.correction_key:
+                return row
+            other = other or row
+        return other
+
+    async def _answer_held(
+        self,
+        card: PendingAction,
+        spec: ToolSpec,
+        *,
+        name: str,
+        call_id: Any,
+        origin_turn_id: str,
+    ) -> None:
+        """Answer a held proposal without running it.
+
+        The executor never sees the call: no row is written and the waiting
+        card is not cancelled, replaced or sent again. The model gets that card
+        back as confirmation_waiting with nothing to say; the client gets a
+        not-ok result and stays on the card. Recorded as ``held``, so a skipped
+        call is never mistaken for one the executor answered.
+        """
+        self._bump(held=1)
+        logger.info(
+            "one_voice.tool.held tool=%s after=%s session=%s turn=%s",
+            spec.name[:80],
+            self.turn.opened_after,
+            self.session_id,
+            origin_turn_id,
+        )
+        if self._origin_is_stale(origin_turn_id):
+            # A question arrived while the cards were read: answered exactly
+            # as the stale branch answers any call, and the card left alone.
+            await self.live.send_tool_response(
+                call_id=call_id,
+                name=name,
+                response={
+                    "status": "superseded",
+                    "reason_code": "newer_question",
+                    "spoken_facts": [],
+                },
+            )
+            return
+        input_turn_id = self._turn_input_origins.get(origin_turn_id)
+        streak_input, count = self._hold_streak
+        count = count + 1 if streak_input == input_turn_id else 1
+        self._hold_streak = (input_turn_id, count)
+        waiting: dict[str, Any] = {
+            "pending_action_id": card.id,
+            "tier": card.tier,
+            "summary": card.summary,
+            "card_shown": card.shown_at is not None,
+        }
+        if count >= _HOLD_NOTE_FROM:
+            # Not a spoken fact: Live keeps proposing while the person is silent.
+            waiting["note"] = (
+                "This proposal is already waiting for the person's answer. "
+                "Wait for them to answer it."
+            )
+        result = ToolResult(
+            status=CONFIRMATION_WAITING,
+            needs="confirmation",
+            reason_code="awaiting_answer",
+            spoken_facts=[],
+        ).model_copy(update=waiting)
+        self.turn.not_ok_results += 1
+        await self._send(
+            protocol.tool_result(
+                call_id=str(call_id or "") or None,
+                tool=name,
+                result_public=result.public(),
+                turn_id=origin_turn_id,
+            )
+        )
+        await self._send(protocol.voice_state("confirming", turn_id=self.turn.turn_id))
+        await self.live.send_tool_response(
+            call_id=call_id, name=name, response=result.model_public()
+        )
+        # Live owes this answer a reply like any other, so input that arrives
+        # first waits as usual; that reply answers a held call, nothing real.
+        self._reply_owed = True
+        self._reply_owed_to = "tool"
+        self._hold_chain = True
+
     async def _advance_turn(self) -> None:
         finished = self.turn
         finished_id = finished.turn_id
@@ -2112,6 +2249,14 @@ class VoiceSession:
                 turn_id=origin_turn_id,
             )
         )
+        card = await self._held_card(spec, origin_turn_id)
+        if spec is not None and card is not None:
+            await self._answer_held(
+                card, spec, name=name, call_id=call_id, origin_turn_id=origin_turn_id
+            )
+            return
+        # Whatever this call returns is something real for Live to answer.
+        self._hold_chain = False
         await self._send(protocol.voice_state("executing", turn_id=self.turn.turn_id))
         outcome = await self.executor.call(self.ctx, name, args, origin_turn_id=origin_turn_id)
         if outcome.timings:
