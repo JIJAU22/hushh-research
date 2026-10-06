@@ -19,6 +19,8 @@ const BOUNDARY_MODULES = [
   "@/hooks/use-auth",
   "@/lib/vault/vault-context",
   "@/lib/services/wallet-service",
+  "@/lib/services/consent-center-service",
+  "@/lib/consent/use-consent-actions",
   "@/lib/pkm/secrets-vault-service",
   "@/lib/observability/client",
   "@/components/app-ui/native-test-beacon",
@@ -550,3 +552,30 @@ test("typing replaces the card-number placeholder instead of appending to Xs", a
   await input.fill("");
   expect(await input.evaluate((node) => node.matches(":placeholder-shown"))).toBe(true);
 });
+
+for (const width of [320, 390, 1440]) {
+  test(`Wallet Sharing keeps requests and grants reachable at ${width}px`, async ({ page }) => {
+    const errors = await open(page, width, "light", { cards: 3 }, { height: 844, shell: true });
+    await mount(page);
+    await expect(page.getByTestId("wallet-card-face").first()).toBeVisible();
+    await page.getByRole("tab", { name: "Sharing", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => Math.abs(
+      document.querySelector("#top-shell-wallet-panel-sharing")!.getBoundingClientRect().x -
+      document.querySelector('[data-swipe-views-root="true"]')!.getBoundingClientRect().x
+    ))).toBeLessThan(2);
+    const sharing = page.getByTestId("wallet-sharing-content");
+    await expect(sharing.getByText("Sample requester")).toBeVisible();
+    await expect(sharing.getByText("Sample recipient")).toBeVisible();
+    await expect(sharing.getByRole("button", { name: "Manage" })).toBeVisible();
+    await sharing.getByRole("button", { name: "Review" }).click();
+    await expect(page.getByRole("dialog", { name: "Review request" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect.poll(() => sharing.evaluate((el) => el.getBoundingClientRect().left)).toBeGreaterThanOrEqual(0);
+    await page.locator('[data-app-scroll-root="true"]').evaluate((el) => { el.scrollTop = 0; });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath("wallet-sharing.png") });
+    expect(errors).toEqual([]);
+  });
+}
