@@ -1,5 +1,7 @@
 "use client";
 
+import { WalletSharing } from "@/components/wallet/wallet-sharing";
+
 /**
  * Wallet workspace - the /one/wallet owner surface for the reserved
  * wallet PKM domain. Everything decrypts on this device under the
@@ -732,7 +734,9 @@ export function WalletWorkspace() {
             </div>
           ) : null}
           </div>
-          <div className="space-y-3.5 px-[var(--page-inline-gutter-standard)]" data-testid="one-wallet-sharing" />
+          <div className="space-y-3.5 px-[var(--page-inline-gutter-standard)]" data-testid="one-wallet-sharing">
+            {ready && activeTab === "sharing" ? <WalletSharing key={renderedOwnerId} /> : null}
+          </div>
           </SwipeViews>
           </div>
           </>}
