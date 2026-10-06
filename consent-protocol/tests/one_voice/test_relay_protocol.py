@@ -443,6 +443,72 @@ async def test_late_provider_end_is_not_assigned_to_the_next_transcript(caplog):
     assert "phase=provider_activity_end_to_transcript" not in caplog.text
 
 
+async def test_model_cancel_of_a_card_is_counted_as_a_cancelled_confirmation(caplog):
+    """UAT circle naming: three model cancel_pending_action calls and one
+    supersede were logged as confirmation_cancelled=1. A model cancel that
+    really cancelled a card counts; one that found nothing pending does not."""
+    session, transport, _fake, _pending = await _voice_card_session()
+    await _model_calls(session, "c1", "ask", {"person": {"user_id": "u-priya"}})
+    card = transport.frames("pending_action")[-1]["pending_action_id"]
+    with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
+        await _model_calls(session, "c2", "cancel_pending_action", {"pending_action_id": card})
+        assert session._counters.get("pending_cancelled", 0) == 1
+        # Negative control: nothing left to cancel, so nothing is counted.
+        await _model_calls(session, "c3", "cancel_pending_action", {"pending_action_id": card})
+        session._log_session_perf()
+    assert session._counters.get("pending_cancelled", 0) == 1
+    assert "confirmation_cancelled=1 " in caplog.text
+    assert "Priya" not in caplog.text and card not in caplog.text
+
+
+async def test_confirm_tool_in_a_turn_without_its_own_input_is_logged(caplog):
+    """UAT circle naming: a proposal came from a provider turn that received no
+    input of its own; the relay attributed it to the previous input silently."""
+    session, _transport, _fake, _pending = await _voice_card_session()
+    with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
+        # Negative controls: a confirm tool in the input's own turn, and a read
+        # tool in a model-only continuation, are not unprompted proposals.
+        await _model_calls(session, "c1", "ask", {"person": {"user_id": "u-priya"}})
+        await session._handle_live_event(LiveEvent(kind="turn_complete"))
+        await _model_calls(session, "c2", "echo", {"text": "private echo words"})
+        assert "one_voice.tool.no_input" not in caplog.text
+        await _model_calls(session, "c3", "delete_thing", {"thing_id": "private-thing-id"})
+        session._log_session_perf()
+    lines = [r.message for r in caplog.records if "one_voice.tool.no_input" in r.message]
+    assert len(lines) == 1 and "tool=delete_thing" in lines[0]
+    assert session._counters.get("unprompted", 0) == 1
+    assert "unprompted=1" in caplog.text
+    for private in ("Priya", "private echo words", "private-thing-id", "Ask Priya"):
+        assert private not in caplog.text
+
+
+async def test_output_transcript_after_its_final_is_counted_at_turn_end(caplog):
+    """The output transcript shape behind the UAT circle naming is unknown:
+    count frames forwarded after a turn already forwarded an output final."""
+    session, transport, _fake = await _relay_on_live()
+    with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
+        await _say(session, "private question")
+        # Negative control: partials then one final is the ordinary shape.
+        for text, finished in (("Private ", False), ("answer one.", True)):
+            await session._handle_live_event(
+                LiveEvent(kind="output_transcript", text=text, finished=finished)
+            )
+        await session._handle_live_event(LiveEvent(kind="turn_complete"))
+        assert "one_voice.transcript_shape" not in caplog.text
+        for text, finished in (("Private reply.", True), (" More private words", False)):
+            await session._handle_live_event(
+                LiveEvent(kind="output_transcript", text=text, finished=finished)
+            )
+        await session._handle_live_event(
+            LiveEvent(kind="output_transcript", text="Last private words.", finished=True)
+        )
+        await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    assert len(transport.frames("transcript.output")) == 5
+    lines = [r.message for r in caplog.records if "one_voice.transcript_shape" in r.message]
+    assert len(lines) == 1 and "after_final=2" in lines[0]
+    assert "private" not in caplog.text.lower()
+
+
 async def test_provider_audio_and_transcripts_reach_the_client():
     transport = FakeTransport([AUTH])
     fake = FakeLive(
