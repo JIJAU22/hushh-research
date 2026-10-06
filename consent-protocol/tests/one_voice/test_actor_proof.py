@@ -779,12 +779,10 @@ def test_a_correction_that_drops_a_spelled_word_retires_the_card(monkeypatch):
     assert card.result.status == "confirmation_required"
     asyncio.run(store.mark_shown(user_id=USER, pending_action_id=card.pending.id))
 
-    dropped = _create(executor, ctx, name="HUSH GARAGE V04", changed_words=HUSSH_TO_HUSH)
+    # Dropped without any declaration: neither spelled again nor listed as changed.
+    dropped = _create(executor, ctx, name="HUSH GARAGE V04")
 
-    assert (dropped.result.status, dropped.result.reason_code) == (
-        "rejected",
-        "spelled_word_missing",
-    )
+    assert (dropped.result.status, dropped.result.reason_code) == ("rejected", "name_changed")
     assert [row.id for row in dropped.superseded] == [card.pending.id]
     assert _open_rows(store, ctx) == []
     late_yes = asyncio.run(
@@ -820,7 +818,9 @@ def test_a_spelled_word_is_still_required_after_the_models_own_cancel(monkeypatc
     card = _create(executor, ctx, name="HUSSH GARAGE V04", spelled_words=["HUSSH"])
     asyncio.run(executor.call(ctx, "cancel_pending_action", {"pending_action_id": card.pending.id}))
 
-    again = _create(executor, ctx, name="HUSH GARAGE V04", changed_words=HUSSH_TO_HUSH)
+    # A different circle (no word shared with the name under review) is not a
+    # correction, but the spelled word is still kept: asked once, never dropped.
+    again = _create(executor, ctx, name="BOOK CLUB")
 
     assert again.result.reason_code == "spelled_word_missing"
     assert again.superseded == [] and _open_rows(store, ctx) == []
@@ -835,6 +835,53 @@ def test_a_spelled_word_is_still_required_after_the_models_own_cancel(monkeypatc
         "Earlier you spelled HUSSH as H-U-S-S-H. "
         "Is this a different circle, or should the name keep HUSSH?"
     ]
+
+
+@pytest.mark.parametrize(
+    ("declared", "summary"),
+    [
+        (
+            {"spelled_words": ["HUSH"]},
+            "create a circle called HUSH GARAGE V04, with HUSH spelled H-U-S-H",
+        ),
+        ({"changed_words": HUSSH_TO_HUSH}, "create a circle called HUSH GARAGE V04"),
+    ],
+    ids=["respelled_in_place", "declared_change"],
+)
+def test_an_intended_respelling_needs_one_declaration(monkeypatch, declared, summary):
+    """ "Sorry, just one S, H U S H": the person changed the word they spelled.
+    Spelling the new word in its place, or listing the change, is enough on its
+    own; the earlier spelling is no longer kept, so the card is not refused."""
+    store, executor, ctx = _spelling_harness(monkeypatch)
+    _create(executor, ctx, name="HUSSH GARAGE V04", spelled_words=["HUSSH"])
+
+    changed = _create(executor, ctx, name="HUSH GARAGE V04", **declared)
+
+    assert changed.result.status == "confirmation_required"
+    assert changed.result.summary == summary
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"name": "HUSH GARAGE V05", "changed_words": V04_TO_V05},
+        {
+            "name": "HUSH GARAGE ZOYA",
+            "spelled_words": ["ZOYA"],
+            "changed_words": [{"old": "V04", "new": "ZOYA"}],
+        },
+    ],
+    ids=["undeclared_drop", "spelled_elsewhere"],
+)
+def test_a_spelled_word_dropped_without_its_own_declaration_is_refused(monkeypatch, args):
+    """Negative controls: the UAT drop (V04 -> V05 declared, HUSSH -> HUSH not),
+    and a word spelled somewhere else in the name, release nothing."""
+    store, executor, ctx = _spelling_harness(monkeypatch)
+    _create(executor, ctx, name="HUSSH GARAGE V04", spelled_words=["HUSSH"])
+
+    refused = _create(executor, ctx, **args)
+
+    assert (refused.result.status, refused.result.reason_code) == ("rejected", "name_changed")
 
 
 def test_a_released_spelled_word_lets_the_correction_through(monkeypatch):

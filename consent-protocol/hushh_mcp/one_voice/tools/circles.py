@@ -839,6 +839,31 @@ def _name_changed(fact: str, *, slots: int, order: str) -> Rejected:
     )
 
 
+def _respelled_words(baseline: str | None, args: CreateCircleInput) -> list[str]:
+    """Spelled words the person changed on purpose, so they stop being kept.
+
+    Two declared signals, never an interpretation: a ``changed_words`` old the
+    new name no longer has, and, inside a stretch of the name under review that
+    this call rewrote, each word replaced by a word spelled in this call (the
+    person spelled the new word in the old one's place: "just one S, H U S H").
+    A word that merely went missing is not released; the checks still ask.
+    """
+    now_keys = set(word_keys(args.name))
+    released = [
+        word
+        for change in args.changed_words
+        for word in change.old.split()
+        if word_key(word) not in now_keys
+    ]
+    if baseline is None or not set(word_keys(baseline)) & now_keys:
+        return [clean_spelled_word(word) or word for word in released]
+    spelled = {word_key(word) for word in args.spelled_words}
+    for dropped, put in name_word_slots(baseline, args.name):
+        if any(word_key(word) in spelled for word in put):
+            released.extend(dropped)
+    return [clean_spelled_word(word) or word for word in released]
+
+
 def _name_change_refused(baseline: str, args: CreateCircleInput) -> Rejected | None:
     """Refuse a correction that changes a word of the name under review without
     declaring it, and ask instead. Never edits the name.
@@ -1004,9 +1029,10 @@ async def prepare_create_circle(ctx: ToolContext, args: CreateCircleInput) -> Pr
         ctx.entities.set_circle_name_baseline(args.name, now)
         return Prepared(summary=summarize_create_circle(ctx, args), snapshot={"spelled_words": []})
     ctx.entities.release_spelled_words(args.release_spelled_words)
+    baseline = ctx.entities.live_circle_name_baseline(now)
+    ctx.entities.release_spelled_words(_respelled_words(baseline, args))
     retained = ctx.entities.retained_spelled_words(now)
     ctx.entities.remember_spelled_words(args.spelled_words, now)
-    baseline = ctx.entities.live_circle_name_baseline(now)
     if baseline is not None:
         refused = _name_change_refused(baseline, args)
         if refused is not None:

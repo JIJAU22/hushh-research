@@ -835,18 +835,12 @@ def test_create_circle_lets_the_person_change_a_spelled_word():
     executor = ToolExecutor(pending_store=MemoryPendingStore())
     first = _propose_circle(ctx, executor, name="HUSSH GARAGE", spelled_words=["HUSSH"])
     assert first.result.status == "confirmation_required"
-    # The kept word is still required by a correction that leaves it out, even
-    # one that declares the change ...
-    dropped = _propose_circle(ctx, executor, name="HUSH GARAGE", changed_words=HUSSH_TO_HUSH)
-    assert dropped.result.reason_code == "spelled_word_missing"
-    # ... until the person changes it and the model says they did.
-    changed = _propose_circle(
-        ctx,
-        executor,
-        name="HUSH GARAGE",
-        spelled_words=["HUSH"],
-        release_spelled_words=["hussh"],
-    )
+    # A correction that leaves the kept word out without saying so is refused ...
+    dropped = _propose_circle(ctx, executor, name="HUSH GARAGE")
+    assert dropped.result.reason_code == "name_changed"
+    # ... while the person spelling the new word in its place changes it, with
+    # no second declaration needed.
+    changed = _propose_circle(ctx, executor, name="HUSH GARAGE", spelled_words=["HUSH"])
     assert changed.result.status == "confirmation_required"
     assert changed.result.summary.endswith(", with HUSH spelled H-U-S-H")
 
@@ -922,8 +916,8 @@ def test_a_spelled_word_lapses_three_minutes_after_a_proposal_last_needed_it(mon
     kept = _propose_circle(ctx, executor, name="HUSSH GARAGE V04", changed_words=[{"new": "V04"}])
     assert kept.result.status == "confirmation_required"
     clock[0] += timedelta(seconds=170)
-    dropped = _propose_circle(ctx, executor, name="HUSH GARAGE V04", changed_words=HUSSH_TO_HUSH)
-    assert dropped.result.reason_code == "spelled_word_missing"
+    dropped = _propose_circle(ctx, executor, name="HUSH GARAGE V04")
+    assert dropped.result.reason_code == "name_changed"
 
     clock[0] += timedelta(seconds=181)
     unrelated = _propose_circle(ctx, executor, name="Book Club")
