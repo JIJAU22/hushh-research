@@ -1,0 +1,203 @@
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from firebase_admin import auth as firebase_auth
+from slowapi.errors import RateLimitExceeded
+
+from api.middleware import require_vault_owner_token
+from api.middlewares.rate_limit import limiter, rate_limit_exceeded_handler
+from api.routes.one import business_suggestions as routes
+from hushh_mcp import runtime_settings
+from hushh_mcp.services import business_suggestion_service as service
+
+
+@pytest.fixture
+def fixture_identity(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "uat")
+    monkeypatch.setenv("ONE_BUSINESS_UAT_FIXTURE_ENABLED", "true")
+    monkeypatch.delenv("HUSHH_DEPLOY_ENV", raising=False)
+    monkeypatch.delenv("APP_RUNTIME_PROFILE", raising=False)
+    monkeypatch.setattr(service, "get_firebase_auth_app", lambda: object())
+    record = SimpleNamespace(
+        uid="owner", disabled=False, email="person@hushh.ai", email_verified=True
+    )
+    calls = []
+
+    def get_user(uid, *, app):
+        calls.append(uid)
+        return record
+
+    monkeypatch.setattr(firebase_auth, "get_user", get_user)
+    return record, calls
+
+
+@pytest.mark.asyncio
+async def test_verified_uat_owner_gets_only_synthetic_candidate(fixture_identity):
+    _, calls = fixture_identity
+    result = await service.get_business_suggestion("owner")
+    candidate = result["candidates"][0]
+    assert calls == ["owner"]
+    assert result["status"] == "suggestion_available"
+    assert result["pkm_written"] is False
+    assert candidate["synthetic"] is True
+    assert candidate["ownership_verified"] is False
+    assert candidate["claim_created"] is False
+    assert candidate["business_uid"] != "owner"
+    assert "person@" not in str(result)
+
+
+@pytest.mark.parametrize(
+    "label,value",
+    [
+        ("ENVIRONMENT", "production"),
+        ("ENVIRONMENT", "prod"),
+        ("ENVIRONMENT", "dev"),
+        ("ENVIRONMENT", ""),
+        ("HUSHH_DEPLOY_ENV", "production"),
+        ("HUSHH_DEPLOY_ENV", "prod"),
+        ("HUSHH_DEPLOY_ENV", "dev"),
+        ("APP_RUNTIME_PROFILE", "production"),
+        ("APP_RUNTIME_PROFILE", "dev"),
+        ("APP_RUNTIME_PROFILE", "unknown"),
+        ("ONE_BUSINESS_UAT_FIXTURE_ENABLED", "false"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_non_uat_and_conflicting_labels_never_read_identity(
+    fixture_identity, monkeypatch, label, value
+):
+    _, calls = fixture_identity
+    monkeypatch.setenv(label, value)
+    assert (await service.get_business_suggestion("owner"))["status"] == "disabled"
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "email,verified",
+    [
+        ("person@hushh.ai", False),
+        (None, True),
+        ("", True),
+        ("person@sub.hushh.ai", True),
+        ("person@hushh.ai.evil.test", True),
+        ("person@not-hushh.ai", True),
+        ("@hushh.ai", True),
+        ("a@b@hushh.ai", True),
+        ("person @hushh.ai", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_ineligible_email_never_builds_candidate(
+    fixture_identity, monkeypatch, email, verified
+):
+    record, _ = fixture_identity
+    record.email, record.email_verified = email, verified
+    monkeypatch.setattr(
+        service, "build_uat_business_candidate", lambda: pytest.fail("ineligible candidate")
+    )
+    result = await service.get_business_suggestion("owner")
+    assert result["status"] == "no_match"
+    assert result["candidates"] == []
+
+
+@pytest.mark.asyncio
+async def test_lookup_outage_cannot_use_cached_identity(fixture_identity, monkeypatch):
+    def failed(*args, **kwargs):
+        raise RuntimeError("private-provider-diagnostic")
+
+    monkeypatch.setattr(firebase_auth, "get_user", failed)
+    with pytest.raises(service.BusinessSuggestionUnavailable) as error:
+        await service.get_business_suggestion("owner")
+    assert "private-provider" not in str(error.value)
+
+
+@pytest.mark.parametrize("field,value", [("disabled", True), ("uid", "other-owner")])
+@pytest.mark.asyncio
+async def test_disabled_or_mismatched_identity_fails_closed(fixture_identity, field, value):
+    record, _ = fixture_identity
+    setattr(record, field, value)
+    with pytest.raises(service.BusinessSuggestionUnavailable):
+        await service.get_business_suggestion("owner")
+
+
+def test_route_uses_authenticated_subject_not_query_identity(fixture_identity):
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[require_vault_owner_token] = lambda: {"user_id": "owner"}
+    response = TestClient(app).get(
+        "/api/one/business/suggestion?user_id=other&email=other@hushh.ai"
+    )
+    assert response.status_code == 200
+    assert fixture_identity[1] == ["owner"]
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_route_denied_auth_never_calls_service(monkeypatch):
+    app = FastAPI()
+    app.include_router(routes.router)
+
+    def denied():
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    app.dependency_overrides[require_vault_owner_token] = denied
+    monkeypatch.setattr(routes, "get_business_suggestion", lambda uid: pytest.fail("auth bypass"))
+    response = TestClient(app).get("/api/one/business/suggestion")
+    assert response.status_code == 401
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_runtime_config_hydrates_default_off_switch(monkeypatch):
+    monkeypatch.delenv("ONE_BUSINESS_UAT_FIXTURE_ENABLED", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "uat")
+    monkeypatch.delenv("HUSHH_DEPLOY_ENV", raising=False)
+    monkeypatch.delenv("APP_RUNTIME_PROFILE", raising=False)
+    assert runtime_settings.one_business_uat_fixture_enabled() is False
+    monkeypatch.setenv("BACKEND_RUNTIME_CONFIG_JSON", '{"one_business_uat_fixture_enabled":true}')
+    runtime_settings.hydrate_runtime_environment()
+    assert runtime_settings.one_business_uat_fixture_enabled() is True
+
+
+def test_rate_limit_response_is_private_with_production_handler(fixture_identity, monkeypatch):
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    app.dependency_overrides[require_vault_owner_token] = lambda: {"user_id": "owner"}
+    monkeypatch.setattr(limiter, "enabled", True)
+    limiter.reset()
+    try:
+        with TestClient(app) as client:
+            responses = [client.get("/api/one/business/suggestion") for _ in range(11)]
+        assert all(response.status_code == 200 for response in responses[:10])
+        assert responses[-1].status_code == 429
+        assert responses[-1].headers["cache-control"] == "private, no-store"
+        assert len(fixture_identity[1]) == 10
+    finally:
+        limiter.reset()
+
+
+def test_provider_failure_is_retryable_not_empty_and_has_no_diagnostic(
+    fixture_identity, monkeypatch
+):
+    def failed(*args, **kwargs):
+        raise RuntimeError("private-provider-diagnostic")
+
+    monkeypatch.setattr(firebase_auth, "get_user", failed)
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[require_vault_owner_token] = lambda: {"user_id": "owner"}
+    response = TestClient(app).get("/api/one/business/suggestion")
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "BUSINESS_IDENTITY_UNAVAILABLE"
+    assert "private-provider" not in response.text
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+@pytest.mark.asyncio
+async def test_missing_admin_never_reads_provider(fixture_identity, monkeypatch):
+    monkeypatch.setattr(service, "get_firebase_auth_app", lambda: None)
+    with pytest.raises(service.BusinessSuggestionUnavailable):
+        await service.get_business_suggestion("owner")
+    assert fixture_identity[1] == []

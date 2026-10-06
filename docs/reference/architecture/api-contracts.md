@@ -761,6 +761,48 @@ server-side, then bind both actions to that source.
 
 The maintained architecture reference is [Personal Gmail Information Requests](./personal-gmail-information-requests.md).
 
+### B2B profile suggestion — Phase 1 UAT fixture
+
+`GET /api/one/business/suggestion` requires the existing `VAULT_OWNER`
+capability. The owner is derived from its validated token; query/body email,
+phone and user IDs cannot select a claimant. Responses, including auth errors,
+are private/no-store. Requests are bounded to 10/minute per existing limiter
+key (process-local unless a shared limiter backend is configured).
+
+`b2b-profile-suggestion.v1` returns `scope: "b2b"`, `status` (`disabled`,
+`no_match`, or `suggestion_available`), `candidates` (zero or one), and
+`pkm_written: false`. A provider outage is `503 BUSINESS_IDENTITY_UNAVAILABLE`,
+not `no_match`. A fresh Firebase primary email must be verified and its exact
+domain must be `hushh.ai`; a cached identity, alias or client assertion cannot
+establish eligibility. Disabled or mismatched Firebase identities fail closed.
+
+The default-off server switch `ONE_BUSINESS_UAT_FIXTURE_ENABLED=true` maps from
+`one_business_uat_fixture_enabled` in `BACKEND_RUNTIME_CONFIG_JSON`. Admission
+also requires explicit `ENVIRONMENT=uat`; any supplied `HUSHH_DEPLOY_ENV` or
+`APP_RUNTIME_PROFILE` must be `uat`. Missing runtime identity, production,
+hosted dev and conflicting labels return `disabled` before provider access,
+even if the switch is on. This change does not enable or deploy the switch.
+
+The sole candidate is **Hushh — UAT Test Business**, explicitly `synthetic`,
+with website `https://hushh.ai`, source `uat_fixture`, source key `hushh.ai:v1`,
+and stable `business_uid: urn:hushh:business:uat:hushh.ai:v1`. This test business
+UID is not the user UID and is not a production directory identity. There are
+no fabricated phone/address facts. Domain evidence grants no ownership:
+`ownership_verified` and `claim_created` remain false, and business authority
+still requires verification.
+
+The typed `BusinessSuggestionService` uses `apiJson` with no-store and caller
+owner authority, through the existing One Next proxy on web and `ApiService`
+Capacitor HTTP on native. No new screen or native plugin is introduced in this
+slice; physical-device acceptance is not claimed. The service rejects unknown
+versions and inconsistent candidate/status shapes. Consumers must call after
+setup resolves and the vault unlocks and retain the suggestion in memory only.
+
+This slice provides the read contract only: no popup, dismissal lifecycle,
+directory lookup, profile store, private-agent invocation, claim mutation or
+PKM write. Later review/confirmation must reuse the existing private agent and
+client-encrypted PKM writer; receiving a suggestion never authorizes a save.
+
 ### One Google Calendar
 
 Calendar is a live Google provider integration. Connection lifecycle uses
