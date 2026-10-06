@@ -1,5 +1,7 @@
 """Owner-bound, read-only B2B suggestion fixture; no claim or save operation."""
 
+from ipaddress import ip_address
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -48,8 +50,13 @@ async def _owner(token: dict = Depends(require_vault_owner_token)) -> str:
 @router.get("/suggestion")
 @limiter.limit("10/minute")
 async def business_suggestion(request: Request, user_id: str = Depends(_owner)) -> JSONResponse:
+    # Use the actual peer, never spoofable Forwarded/X-Forwarded-For headers.
     try:
-        result = await get_business_suggestion(user_id)
+        loopback = bool(request.client and ip_address(request.client.host).is_loopback)
+    except ValueError:
+        loopback = False
+    try:
+        result = await get_business_suggestion(user_id, local_loopback=loopback)
     except BusinessSuggestionUnavailable:
         return JSONResponse(
             {

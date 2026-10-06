@@ -491,6 +491,24 @@ def one_business_uat_fixture_enabled() -> bool:
     )
 
 
+def one_business_local_rehearsal_enabled(user_id: str, *, loopback: bool) -> bool:
+    """Default-off localhost exception for the canonical UAT reviewer only."""
+    return (
+        loopback
+        and _clean_env("ONE_BUSINESS_LOCAL_REHEARSAL_ENABLED").lower() == "true"
+        and _clean_env("APP_REVIEW_MODE").lower() == "true"
+        and _clean_env("ENVIRONMENT").lower() == "development"
+        and _clean_env("APP_RUNTIME_PROFILE").lower() == "local"
+        and not _clean_env("HUSHH_DEPLOY_ENV")
+        and not _clean_env("K_SERVICE")
+        and _clean_env("GOOGLE_CLOUD_PROJECT") == "hushh-pda-uat"
+        and _clean_env("CLOUDSQL_INSTANCE_CONNECTION_NAME") == "hushh-pda-uat:us-central1:hushh-uat-pg"
+        and _clean_env("DB_HOST") in {"localhost", "127.0.0.1"}
+        and bool(user_id)
+        and user_id == _clean_env("REVIEWER_UID")
+    )
+
+
 def get_wallet_pass_settings() -> WalletPassSettings:
     """Signing material for Apple Wallet ``.pkpass`` generation.
 

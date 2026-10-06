@@ -67,6 +67,38 @@ async def test_setup_read_failure_is_unavailable_not_no_match(fixture_identity, 
         await service.get_business_suggestion("owner")
 
 
+@pytest.mark.asyncio
+async def test_local_rehearsal_is_peer_reviewer_and_uat_resource_bound(fixture_identity, monkeypatch):
+    _, calls = fixture_identity
+    configured = {
+        "ENVIRONMENT": "development", "APP_RUNTIME_PROFILE": "local", "APP_REVIEW_MODE": "true",
+        "ONE_BUSINESS_LOCAL_REHEARSAL_ENABLED": "true", "REVIEWER_UID": "owner",
+        "GOOGLE_CLOUD_PROJECT": "hushh-pda-uat", "DB_HOST": "127.0.0.1",
+        "CLOUDSQL_INSTANCE_CONNECTION_NAME": "hushh-pda-uat:us-central1:hushh-uat-pg",
+    }
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    for key, value in configured.items():
+        monkeypatch.setenv(key, value)
+    assert (await service.get_business_suggestion("owner", local_loopback=True))["status"] == "suggestion_available"
+    calls.clear()
+    assert (await service.get_business_suggestion("owner"))["status"] == "disabled"
+    assert (await service.get_business_suggestion("other", local_loopback=True))["status"] == "disabled"
+    for key, wrong in {
+        "ENVIRONMENT": "production", "APP_RUNTIME_PROFILE": "uat", "APP_REVIEW_MODE": "false",
+        "ONE_BUSINESS_LOCAL_REHEARSAL_ENABLED": "false", "REVIEWER_UID": "other",
+        "GOOGLE_CLOUD_PROJECT": "hushh-pda", "DB_HOST": "remote.example.test",
+        "CLOUDSQL_INSTANCE_CONNECTION_NAME": "hushh-pda:us-central1:production",
+        "K_SERVICE": "hosted", "HUSHH_DEPLOY_ENV": "uat",
+    }.items():
+        monkeypatch.setenv(key, wrong)
+        assert (await service.get_business_suggestion("owner", local_loopback=True))["status"] == "disabled"
+        if key in configured:
+            monkeypatch.setenv(key, configured[key])
+        else:
+            monkeypatch.delenv(key)
+    assert calls == []
+
+
 @pytest.mark.parametrize(
     "label,value",
     [

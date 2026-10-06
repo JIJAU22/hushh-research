@@ -9,7 +9,10 @@ from starlette.concurrency import run_in_threadpool
 
 from api.utils.firebase_admin import get_firebase_auth_app
 from db.db_client import get_db
-from hushh_mcp.runtime_settings import one_business_uat_fixture_enabled
+from hushh_mcp.runtime_settings import (
+    one_business_local_rehearsal_enabled,
+    one_business_uat_fixture_enabled,
+)
 
 
 class BusinessSuggestionUnavailable(RuntimeError):
@@ -51,7 +54,7 @@ def _lookup_identity(user_id: str):
     return firebase_auth.get_user(user_id, app=app)
 
 
-async def get_business_suggestion(user_id: str) -> dict[str, Any]:
+async def get_business_suggestion(user_id: str, *, local_loopback: bool = False) -> dict[str, Any]:
     result: dict[str, Any] = {
         "contract_version": "b2b-profile-suggestion.v1",
         "scope": "b2b",
@@ -60,7 +63,8 @@ async def get_business_suggestion(user_id: str) -> dict[str, Any]:
         "pkm_written": False,
     }
     # Gate BEFORE provider access. A conflicting deployment label always wins.
-    if not one_business_uat_fixture_enabled():
+    if not (one_business_uat_fixture_enabled() or
+            one_business_local_rehearsal_enabled(user_id, loopback=local_loopback)):
         return result
     try:
         record = await asyncio.wait_for(

@@ -763,6 +763,17 @@ The maintained architecture reference is [Personal Gmail Information Requests](.
 
 ### B2B profile suggestion — UAT review and confirmation
 
+For a localhost-only rehearsal, `ONE_BUSINESS_LOCAL_REHEARSAL_ENABLED=true`
+is a process-only maintainer override. It additionally requires review mode,
+the exact canonical `REVIEWER_UID`, an actual loopback request peer (not a
+forwarded header), the `development`/`local` runtime, no hosted-runtime markers,
+and the exact UAT Cloud SQL instance with a loopback database host. It never
+relaxes the verified primary `hushh.ai` email or completed-vault checks. A
+reviewer outside that domain receives no fixture; do not alter that identity
+or waive the domain check to manufacture a passing rehearsal. Shared reviewer
+PKM writes still require explicit operator approval. This does not enable the
+fixture in production or implement real directory matching.
+
 `GET /api/one/business/suggestion` requires the existing `VAULT_OWNER`
 capability. The owner is derived from its validated token; query/body email,
 phone and user IDs cannot select a claimant. Responses, including auth errors,
