@@ -528,9 +528,13 @@ would sit on the drift list above. It is declared, and scoped, as catalog search
   every word a correction adds must be declared as a `new` or spelled in the
   same call, and every word it removes must be declared as an `old`, released
   in `release_spelled_words`, or replaced by one of those spelled words. Each
-  declaration and each spelled word accounts for one word once (a spelled word
-  declared as a change's `new` replaces only that change's `old`), and a pair
-  naming the same words in the same order declares nothing. A moved word is
+  declaration and each spelled word accounts for one word once: a spelled word
+  declared as a change's `new` replaces only that change's `old`, a word
+  declared removed or released with a spelled word in its stretch is one
+  respelling, and a pair naming the same words in the same order declares
+  nothing. A declared side is read against the name it describes (its words
+  as written when each is a word of that name, else letters joined into one
+  word). A moved word is
   removed in one place and added in another, so a move is declared like any
   other change. Otherwise the call is refused (`name_changed`,
   `needs=repeat_name`) with one spoken question naming the undeclared change

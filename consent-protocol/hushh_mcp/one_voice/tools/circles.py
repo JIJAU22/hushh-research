@@ -841,30 +841,49 @@ def _name_changed(fact: str, *, slots: int, order: str) -> Rejected:
     )
 
 
-def _declared_keys(text: str) -> list[str]:
-    """The word keys one side of a declared change names. Letters spelled one
-    by one join into one word, as they do in ``spelled_words``."""
+def _declared_words(text: str, names: set[str]) -> list[str]:
+    """The words one side of a declared change names, read against the name it
+    describes: its words as written when each is a word of that name, else
+    letters spelled one by one joined into one word, as in ``spelled_words``."""
+    words = text.split()
+    if words and all(word_key(word) in names for word in words):
+        return words
     joined = clean_spelled_word(text)
-    return [word_key(joined)] if joined else word_keys(text)
+    return [joined] if joined else words
 
 
-def _declared_changes(args: CreateCircleInput) -> tuple[Counter[str], Counter[str]]:
-    """The word keys this call declares removed and added, each word once.
+@dataclass(frozen=True)
+class _Declared:
+    """The word keys a call declares changed, each word once.
 
-    A ``changed_words`` pair naming the same words in the same order changed
-    nothing and declares nothing. Each ``release_spelled_words`` word declares
-    one removal: the person changed or dropped that spelled word.
+    ``changed`` are old words a ``changed_words`` pair gives a new word for;
+    ``dropped`` are old words declared with no new word, and the words in
+    ``release_spelled_words`` (the person changed or dropped that spelled
+    word); ``added`` are the pairs' new words.
     """
-    removed: Counter[str] = Counter()
+
+    changed: Counter[str]
+    dropped: Counter[str]
+    added: Counter[str]
+
+
+def _declared_changes(
+    args: CreateCircleInput, old_names: set[str], new_names: set[str]
+) -> _Declared:
+    """What this call declares. A ``changed_words`` pair naming the same words
+    in the same order changed nothing and declares nothing."""
+    changed: Counter[str] = Counter()
+    dropped: Counter[str] = Counter()
     added: Counter[str] = Counter()
     for change in args.changed_words:
-        old, new = _declared_keys(change.old), _declared_keys(change.new)
+        old = [word_key(word) for word in _declared_words(change.old, old_names)]
+        new = [word_key(word) for word in _declared_words(change.new, new_names)]
         if old == new:
             continue
-        removed.update(old)
+        (changed if new else dropped).update(old)
         added.update(new)
-    removed.update(word_key(word) for word in args.release_spelled_words)
-    return removed, added
+    dropped.update(word_key(word) for word in args.release_spelled_words)
+    return _Declared(changed=changed, dropped=dropped, added=added)
 
 
 def _use(pool: Counter[str], key: str) -> bool:
@@ -891,33 +910,51 @@ def _name_lineage(
     and every word it removes is declared removed or replaced by one of those
     spelled words. Each declaration and each spelled word accounts for one
     word, once: a spelled word declared as a change's new word replaces only
-    that change's old word. A word that moved is removed in one stretch and
+    that change's old word, and a word declared removed (or released) with a
+    spelled word in its stretch is one change, a respelling, so that spelled
+    word replaces nothing else. A word that moved is removed in one stretch and
     added in another, so a move is declared like any other change. Which words
     changed is the spelling module's exact word comparison; whether the person
     asked for a change is only ever the model's declaration.
     """
-    removed, added = _declared_changes(args)
     now_keys = set(word_keys(args.name))
+    base_keys = set(word_keys(baseline)) if baseline is not None else set()
     released = [
         clean_spelled_word(word) or word
         for change in args.changed_words
-        for word in change.old.split()
+        for word in _declared_words(change.old, base_keys)
         if word_key(word) not in now_keys
     ]
     if baseline is None:
         return None, released
-    base_keys = set(word_keys(baseline))
-    declared_old = {key for change in args.changed_words for key in _declared_keys(change.old)}
+    declared_old = {
+        word_key(word)
+        for change in args.changed_words
+        for word in _declared_words(change.old, base_keys)
+    }
     if not (base_keys & now_keys or base_keys & declared_old):
         return None, released
+    declared = _declared_changes(args, base_keys, now_keys)
     spelled = Counter(word_key(word) for word in args.spelled_words)
     slots = name_word_slots(baseline, args.name)
     undeclared: list[str] = []
     for dropped, put in slots:
-        loose_new = [word for word in put if not _use(added, word_key(word))]
+        loose_new = [word for word in put if not _use(declared.added, word_key(word))]
         replacements = sum(1 for word in loose_new if _use(spelled, word_key(word)))
-        loose_old = [word for word in dropped if not _use(removed, word_key(word))]
-        if len(loose_new) > replacements or len(loose_old) > replacements:
+        loose_old: list[str] = []
+        respelled = 0
+        for word in dropped:
+            key = word_key(word)
+            if _use(declared.changed, key):
+                continue
+            if _use(declared.dropped, key):
+                respelled += 1
+                continue
+            loose_old.append(word)
+        # A declared removal with a spelled word in its stretch is that word
+        # respelled: the spelled word covers it and nothing else.
+        spare = max(0, replacements - respelled)
+        if len(loose_new) > replacements or len(loose_old) > spare:
             undeclared.append(_change_phrase(dropped, put))
         else:
             released.extend(clean_spelled_word(word) or word for word in loose_old)

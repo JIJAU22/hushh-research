@@ -1074,6 +1074,71 @@ def test_a_spelled_change_replaces_only_its_own_word():
     assert kept.result.status == "confirmation_required"
 
 
+@pytest.mark.parametrize(
+    ("waiting", "kept", "proposed", "args"),
+    [
+        # "sorry, just one S, H U S H, the rest stays" -- and Garage goes missing.
+        (
+            "HUSSH Garage V04",
+            ["HUSSH"],
+            "HUSH V04",
+            {"spelled_words": ["HUSH"], "release_spelled_words": ["HUSSH"]},
+        ),
+        # The same respelling drops a second kept spelled word.
+        (
+            "MEERA HUSSH Club",
+            ["MEERA", "HUSSH"],
+            "HUSH Club",
+            {"spelled_words": ["HUSH"], "release_spelled_words": ["HUSSH"]},
+        ),
+        # A removal declared in changed_words pairs with its respelling the same way.
+        (
+            "Hush Garage V04",
+            [],
+            "HUSSH V04",
+            {"spelled_words": ["HUSSH"], "changed_words": [{"old": "Hush"}]},
+        ),
+    ],
+)
+def test_a_respelling_replaces_only_the_word_it_respells(waiting, kept, proposed, args):
+    """Verification of the review fixes: a released (or declared-removed) word
+    and the spelled word that replaced it were counted as two changes, so the
+    spelling also covered an untouched neighbour."""
+    ctx, executor = _reviewing(waiting, spelled_words=kept)
+    outcome = _propose_circle(ctx, executor, name=proposed, **args)
+    assert outcome.result.reason_code == "name_changed"
+    assert all(word in _kept_words(ctx) for word in kept)
+
+
+def test_the_respelling_itself_still_passes():
+    # Negative control for the rows above: the eval's own shape keeps the rest.
+    ctx, executor = _reviewing("HUSSH Garage V04", spelled_words=["HUSSH"])
+    outcome = _propose_circle(
+        ctx,
+        executor,
+        name="HUSH Garage V04",
+        spelled_words=["HUSH"],
+        release_spelled_words=["HUSSH"],
+    )
+    assert outcome.result.status == "confirmation_required"
+    assert _kept_words(ctx) == ["HUSH"]
+
+
+def test_a_declared_change_is_read_against_the_name_it_describes():
+    # "A B" on a card "Team A B" names two of its words, not a spelled "AB".
+    ctx, executor = _reviewing("Team A B")
+    dropped = _propose_circle(ctx, executor, name="Team", changed_words=[{"old": "A B"}])
+    assert dropped.result.status == "confirmation_required"
+    # A word the card had spelled, declared letter by letter, is released as
+    # that word, so the spelling check does not ask for it back.
+    ctx, executor = _reviewing("HUSSH GARAGE", spelled_words=["HUSSH"])
+    respelled = _propose_circle(
+        ctx, executor, name="HUSH GARAGE", changed_words=[{"old": "H U S S H", "new": "HUSH"}]
+    )
+    assert respelled.result.status == "confirmation_required"
+    assert "HUSSH" not in _kept_words(ctx)
+
+
 def test_a_refused_correction_gives_up_no_spelled_word():
     """Review NG-4: a correction refused for an undeclared change had already
     released HUSSH, so the next proposal could leave it out unasked."""
