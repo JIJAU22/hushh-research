@@ -592,6 +592,50 @@ async def test_a_proposal_live_makes_in_silence_leaves_the_waiting_card_alone(
     assert created == ["HUSSH GARAGE V04"]
 
 
+@pytest.mark.parametrize("tool", ["confirm_pending_action", "cancel_pending_action"])
+async def test_live_never_answers_the_waiting_card_in_silence(monkeypatch, caplog, tool):
+    """Only the person answers a card. A confirm made in silence would approve
+    an action nobody said yes to; a cancel made in silence would clear the way
+    for an unprompted re-proposal. Both are held like a proposal made in
+    silence: the card stays pending and the person's own yes still runs it once."""
+    created = _circle_catalog(monkeypatch)
+    session, transport, fake = await _relay_on_live()
+    original = {"name": "HUSSH GARAGE V04", "spelled_words": ["HUSSH"]}
+    await _say(session, "Create a circle called hussh garage v04")
+    card = await _card_read_back_then_silence(session, transport, "c1", "create_circle", original)
+    with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
+        await _model_calls(session, "c2", tool, {"pending_action_id": card})
+
+    assert session.pending.rows[card].status == "pending"
+    assert created == []
+    held = _responses(fake, tool)[-1]
+    assert held["status"] == "confirmation_waiting" and held["pending_action_id"] == card
+    assert held["spoken_facts"] == [] and held["reason_code"] == "awaiting_answer"
+    assert f"one_voice.tool.held tool={tool} after=none" in caplog.text
+
+    await session._handle_live_event(LiveEvent(kind="turn_complete"))
+    await _speak_and_end(session, "QkJC")
+    await _say(session, "Yes")
+    await _model_calls(session, "c3", "confirm_pending_action", {"pending_action_id": card})
+    assert session.pending.rows[card].status == "executed"
+    assert created == ["HUSSH GARAGE V04"]
+
+
+async def test_a_confirm_answering_an_app_event_is_not_held(monkeypatch):
+    """Negative control: a confirm Live makes because the app told it something
+    (the card appeared after the person already said yes) answers that event."""
+    created = _circle_catalog(monkeypatch)
+    session, transport, fake = await _relay_on_live()
+    await _say(session, "Create a circle called hussh garage v04")
+    card = await _card_read_back_then_silence(
+        session, transport, "c1", "create_circle", {"name": "HUSSH GARAGE V04"}
+    )
+    await session._inject_event({"kind": "pending_shown", "pending_action_id": card})
+    await _model_calls(session, "c2", "confirm_pending_action", {"pending_action_id": card})
+    assert session.pending.rows[card].status == "executed"
+    assert created == ["HUSSH GARAGE V04"]
+
+
 async def _card_waiting(session, transport):
     await _card_read_back_then_silence(session, transport, "n0", "ask", ASK_1H)
 

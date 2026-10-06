@@ -131,6 +131,11 @@ _PERF_TURN_MEMORY = 128
 # From this many held proposals since the person last spoke, the held answer
 # also tells the model, off the spoken path, that the card waits for them.
 _HOLD_NOTE_FROM = 3
+# Session tools that answer the waiting card for the person. Live may approve or
+# withdraw a card only when something was said or handed to it: a yes or cancel
+# made in silence is held exactly like a proposal made in silence (a cancel
+# there would otherwise clear the way for an unprompted re-proposal).
+_CARD_ANSWER_TOOLS = frozenset({"confirm_pending_action", "cancel_pending_action"})
 # How long a review card's Send may still be reported to this session, and how
 # many such cards it remembers. A send after this is still delivered and still
 # shown on the card; One just does not speak it.
@@ -2245,7 +2250,9 @@ class VoiceSession:
             origin_turn_id,
         )
 
-    async def _held_card(self, spec: ToolSpec | None, origin_turn_id: str) -> PendingAction | None:
+    async def _held_card(
+        self, spec: ToolSpec | None, origin_turn_id: str, *, name: str = ""
+    ) -> PendingAction | None:
         """The waiting card a proposal Live made on its own must leave alone.
 
         UAT 2026-10-06: 14.5 s after a card was read back, with no input
@@ -2258,9 +2265,12 @@ class VoiceSession:
         that follows a held answer, with nothing real handed to Live since, is
         held the same way. A tool result (even one Live said a word about
         first), an app event, or anything the person says lets the call run
-        as the model asked. Arguments are never read.
+        as the model asked. Arguments are never read. A confirm or cancel of
+        the waiting card made the same way is held too: only the person
+        answers a card.
         """
-        if spec is None or not spec.policy.needs_confirmation or not self.turn.model_only:
+        proposes = spec is not None and spec.policy.needs_confirmation
+        if not (proposes or name in _CARD_ANSWER_TOOLS) or not self.turn.model_only:
             return None
         input_turn_id = self._turn_input_origins.get(origin_turn_id)
         if input_turn_id is None or input_turn_id == origin_turn_id:
@@ -2287,7 +2297,7 @@ class VoiceSession:
             if open_spec is None:
                 # Nothing could confirm it any more; it waits for nobody.
                 continue
-            if open_spec.correction_key == spec.correction_key:
+            if spec is not None and open_spec.correction_key == spec.correction_key:
                 return row
             other = other or row
         return other
@@ -2295,7 +2305,6 @@ class VoiceSession:
     async def _answer_held(
         self,
         card: PendingAction,
-        spec: ToolSpec,
         *,
         name: str,
         call_id: Any,
@@ -2312,7 +2321,7 @@ class VoiceSession:
         self._bump(held=1)
         logger.info(
             "one_voice.tool.held tool=%s after=%s session=%s turn=%s",
-            spec.name[:80],
+            name[:80],
             self.turn.opened_after,
             self.session_id,
             origin_turn_id,
@@ -2497,11 +2506,9 @@ class VoiceSession:
                 turn_id=origin_turn_id,
             )
         )
-        card = await self._held_card(spec, origin_turn_id)
-        if spec is not None and card is not None:
-            await self._answer_held(
-                card, spec, name=name, call_id=call_id, origin_turn_id=origin_turn_id
-            )
+        card = await self._held_card(spec, origin_turn_id, name=name)
+        if card is not None:
+            await self._answer_held(card, name=name, call_id=call_id, origin_turn_id=origin_turn_id)
             return
         # Whatever this call returns is something real for Live to answer.
         self._hold_chain = False
