@@ -290,14 +290,70 @@ class TurnPerf:
     pending_cancelled: int = 0
 
 
+def _spaced(text: str) -> str:
+    """Whitespace-insensitive form of a transcript chunk or line.
+
+    Only compares the chunks of one line with each other; it never reads what
+    was said and never matches across lines, roles or turns.
+    """
+    return " ".join(text.split())
+
+
 @dataclass
 class TranscriptSegment:
-    """One displayed transcript line the relay owns: identity, order, text so far."""
+    """One displayed transcript line the relay owns: identity, order, text so far.
+
+    ``raw`` is the merged chunks exactly as Live sent them, leading space and
+    all, so comparisons see the provider's shape; ``text`` is the line shown.
+    The counts describe that shape, never its words, and are logged once when
+    the line ends.
+    """
 
     turn_id: str
     segment_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     seq: int = 0
     text: str = ""
+    raw: str = ""
+    last_chunk: str | None = None
+    partial: int = 0
+    final: int = 0
+    repeat: int = 0
+    extended: int = 0
+    restated: int = 0
+
+    def accept(self, chunk: str, *, finished: bool) -> None:
+        """Merge one provider chunk as the client merge did, plus final authority.
+
+        A chunk not led by a space replaces the line when it extends it
+        (whitespace aside, strictly longer) or, finished, equals it. A
+        space-led chunk continues the line by its shape ("H" + " Hussh
+        garage"), unless it is finished and resends the line byte for byte, or
+        restates it whitespace aside without only repeating the previous chunk
+        ("Shall I" + " create it?" + " Shall I create it?"). A repeated delta
+        cannot be told from repeated speech, so it appends ("S" + " S"), as
+        does anything else.
+        """
+        incoming, current = _spaced(chunk), _spaced(self.raw)
+        grows = bool(current) and len(incoming) > len(current) and incoming.startswith(current)
+        same = bool(current) and incoming == current
+        repeat = self.last_chunk is not None and incoming == self.last_chunk
+        self.repeat += repeat
+        if finished:
+            self.final += 1
+            self.restated += same or grows
+        else:
+            self.partial += 1
+            self.extended += grows
+        space_led = chunk[:1].isspace()
+        if (not space_led and (grows or (finished and same))) or (
+            finished and (chunk == self.raw or (same and not repeat))
+        ):
+            self.raw = chunk
+        else:
+            self.raw += chunk
+        self.last_chunk = incoming
+        # A line never starts or ends with the space that separates deltas.
+        self.text = self.raw.strip()
 
 
 class VoiceSession:
@@ -461,30 +517,29 @@ class VoiceSession:
     ) -> None:
         """The one place a transcript frame leaves the relay.
 
-        Live sends both directions as deltas (captured 2026-10-06: output
-        chunks lead with a space and its ``finished`` carries no text; input
-        arrives as whole finished segments). The relay owns the line so the
-        client never guesses from text shape: a stable segment id, a seq from 1,
-        the whole text so far (``cumulative``) and ``final`` when Live finishes
-        it. A finished chunk equal to the text so far restates it and is not
-        appended twice; any other chunk, a repeated letter included, is. A
-        typed echo is its own one-frame segment. Never logs text.
+        Live sends both directions as deltas (captured 2026-10-06 with
+        synthetic audio: output chunks lead with a space and its ``finished``
+        carries no text; input arrives as whole finished segments). The relay
+        owns the line so the client never guesses from text shape: a stable
+        segment id, a seq from 1, the whole text so far (``cumulative``) and
+        ``final`` when Live finishes it. The chunks merge once, here, by
+        ``TranscriptSegment.accept``. A typed echo is its own one-frame
+        segment. Never logs text.
         """
         segment = None if typed else self._transcript_segments.get(role)
-        if segment is None or segment.turn_id != turn_id:
+        if segment is not None and segment.turn_id != turn_id:
+            self._end_transcript_segment(role)
+            segment = None
+        if segment is None:
             segment = TranscriptSegment(turn_id=turn_id)
             if not typed:
                 self._transcript_segments[role] = segment
         if typed:
             segment.text = chunk
-        elif not segment.text:
-            # Leading space separates a delta from what came before; a line
-            # never starts with it.
-            segment.text = chunk.lstrip()
-        elif not (finished and chunk == segment.text):
-            segment.text += chunk
-        if finished and self._transcript_segments.get(role) is segment:
-            del self._transcript_segments[role]
+        else:
+            segment.accept(chunk, finished=finished)
+            if finished:
+                self._end_transcript_segment(role)
         if not segment.text:
             return
         segment.seq += 1
@@ -2236,6 +2291,29 @@ class VoiceSession:
                 turn.turn_id,
             )
 
+    def _end_transcript_segment(self, role: Literal["input", "output"]) -> None:
+        """Close the open line for ``role`` and log its chunk shape, once.
+
+        Counts only: chunks before the finish, finished chunks, chunks equal to
+        the previous one, chunks that extended the line before the finish, and
+        finished chunks that restated or extended it.
+        """
+        segment = self._transcript_segments.pop(role, None)
+        if segment is None:
+            return
+        logger.info(
+            "one_voice.transcript_shape role=%s partial=%d final=%d repeat=%d extended=%d"
+            " restated=%d session=%s turn=%s",
+            role,
+            segment.partial,
+            segment.final,
+            segment.repeat,
+            segment.extended,
+            segment.restated,
+            self.session_id,
+            segment.turn_id,
+        )
+
     def _log_unprompted_tool(self, spec: ToolSpec | None, origin_turn_id: str) -> None:
         """Record a confirm-tier call from a provider turn with no input of its own.
 
@@ -2395,7 +2473,7 @@ class VoiceSession:
     async def _advance_turn(self) -> None:
         # The client freezes a turn's answer line at model_end/interrupted, so
         # whatever Live says next is a new transcript line.
-        self._transcript_segments.pop("output", None)
+        self._end_transcript_segment("output")
         finished = self.turn
         finished_id = finished.turn_id
         input_origin = self._turn_input_origins.get(finished_id)

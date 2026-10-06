@@ -796,7 +796,7 @@ async def test_output_transcript_after_its_final_is_counted_at_turn_end(caplog):
                 LiveEvent(kind="output_transcript", text=text, finished=finished)
             )
         await session._handle_live_event(LiveEvent(kind="turn_complete"))
-        assert "one_voice.transcript_shape" not in caplog.text
+        assert "after_final=" not in caplog.text
         for text, finished in (("Private reply.", True), (" More private words", False)):
             await session._handle_live_event(
                 LiveEvent(kind="output_transcript", text=text, finished=finished)
@@ -812,7 +812,7 @@ async def test_output_transcript_after_its_final_is_counted_at_turn_end(caplog):
             )
         await session._handle_live_event(LiveEvent(kind="interrupted"))
     assert len(transport.frames("transcript.output")) == 7
-    lines = [r.message for r in caplog.records if "one_voice.transcript_shape" in r.message]
+    lines = [r.message for r in caplog.records if "after_final=" in r.message]
     assert len(lines) == 2 and "after_final=2" in lines[0] and "after_final=1" in lines[1]
     assert "private" not in caplog.text.lower()
 
@@ -894,6 +894,181 @@ async def test_transcript_restated_final_is_not_appended_but_a_repeated_letter_i
     # Negative control: Live sends deltas, so a repeated letter is spelling.
     await _say(session, "S", "S", "H")
     assert [f["text"] for f in transport.frames("transcript.input")][2:] == ["S", "SS", "SSH"]
+
+
+_IN, _OUT, _END = "input", "output", "end"
+
+
+async def _feed(session, steps) -> None:
+    for step in steps:
+        if step == _END:
+            await session._handle_live_event(LiveEvent(kind="turn_complete"))
+            continue
+        role, text, finished = step
+        await session._handle_live_event(
+            LiveEvent(kind=f"{role}_transcript", text=text, finished=finished)
+        )
+
+
+def _lines(transport) -> list[tuple[str, int, str, str]]:
+    """Transcript frames as (role, nth segment, kind, text), in send order."""
+    order: list[str] = []
+    rows = []
+    for frame in transport.sent:
+        if frame.get("type") not in {"transcript.input", "transcript.output"}:
+            continue
+        if frame["segment_id"] not in order:
+            order.append(frame["segment_id"])
+        role = frame["type"].removeprefix("transcript.")
+        rows.append((role, order.index(frame["segment_id"]), frame["kind"], frame["text"]))
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("steps", "expected"),
+    [
+        pytest.param(
+            [(_IN, "Hello", False)] * 3,
+            [
+                (_IN, 0, "cumulative", "Hello"),
+                (_IN, 0, "cumulative", "HelloHello"),
+                (_IN, 0, "cumulative", "HelloHelloHello"),
+            ],
+            id="A-repeated-delta-appends",
+        ),
+        pytest.param(
+            [(_IN, "Hello", False), (_IN, "Hello there", False), (_IN, "Hello there", True)],
+            [
+                (_IN, 0, "cumulative", "Hello"),
+                (_IN, 0, "cumulative", "Hello there"),
+                (_IN, 0, "final", "Hello there"),
+            ],
+            id="B-cumulative-hypotheses",
+        ),
+        pytest.param(
+            [(_IN, "Hel", False), (_IN, "lo", False), (_IN, "lo", False)],
+            [
+                (_IN, 0, "cumulative", "Hel"),
+                (_IN, 0, "cumulative", "Hello"),
+                (_IN, 0, "cumulative", "Hellolo"),
+            ],
+            id="C-repeated-chunk-appends",
+        ),
+        pytest.param(
+            [(_IN, " Hello", False), (_IN, " Hello", True)],
+            [(_IN, 0, "cumulative", "Hello"), (_IN, 0, "final", "Hello")],
+            id="D-final-resends-the-raw-line",
+        ),
+        pytest.param(
+            [
+                (_IN, "Hi there", True),
+                (_OUT, "Sure,", False),
+                (_OUT, " one", False),
+                _END,
+                (_OUT, "Sure,", False),
+                (_IN, "Hi", False),
+                (_IN, " there", True),
+            ],
+            [
+                (_IN, 0, "final", "Hi there"),
+                (_OUT, 1, "cumulative", "Sure,"),
+                (_OUT, 1, "cumulative", "Sure, one"),
+                (_OUT, 2, "cumulative", "Sure,"),
+                (_IN, 3, "cumulative", "Hi"),
+                (_IN, 3, "final", "Hi there"),
+            ],
+            id="E-no-dedupe-across-turns-or-lines",
+        ),
+        pytest.param(
+            [
+                (_IN, "Create it", True),
+                (_OUT, "Shall I", False),
+                (_OUT, " create it?", False),
+                (_OUT, " Shall I create it?", True),
+            ],
+            [
+                (_IN, 0, "final", "Create it"),
+                (_OUT, 1, "cumulative", "Shall I"),
+                (_OUT, 1, "cumulative", "Shall I create it?"),
+                (_OUT, 1, "final", "Shall I create it?"),
+            ],
+            id="F-space-led-final-restates-the-line",
+        ),
+        pytest.param(
+            [
+                (_IN, "Create it", True),
+                (_OUT, " Shall I", False),
+                (_OUT, " create it?", False),
+                (_OUT, "Shall I create it? ", True),
+            ],
+            [
+                (_IN, 0, "final", "Create it"),
+                (_OUT, 1, "cumulative", "Shall I"),
+                (_OUT, 1, "cumulative", "Shall I create it?"),
+                (_OUT, 1, "final", "Shall I create it?"),
+            ],
+            id="G-final-restates-with-other-whitespace",
+        ),
+        # Negative controls the old client merge protects: a space-led chunk
+        # that only repeats the previous one, or grows a word already heard,
+        # continues the line.
+        pytest.param(
+            [(_IN, "S", False), (_IN, " S", True)],
+            [(_IN, 0, "cumulative", "S"), (_IN, 0, "final", "S S")],
+            id="spelled-letter-repeated-with-a-space",
+        ),
+        pytest.param(
+            [(_IN, "H", False), (_IN, " Hussh garage", True)],
+            [(_IN, 0, "cumulative", "H"), (_IN, 0, "final", "H Hussh garage")],
+            id="space-led-final-never-drops-what-was-heard",
+        ),
+    ],
+)
+async def test_transcript_provider_shapes_never_double_a_restated_line(steps, expected):
+    """UAT 2026-10-06 showed "HelloHelloHello" and "Shall I create it? Shall I
+    create it?". The relay merges like the old client merge did (a chunk
+    extending the line replaces it) and lets a finished chunk restating the
+    line replace it. A repeated delta cannot be told from re-sent speech by
+    shape, so it still appends (A, C)."""
+    session, transport, _fake = await _relay_on_live()
+    await _feed(session, steps)
+    assert _lines(transport) == expected
+
+
+async def test_each_transcript_line_logs_its_chunk_shape_once_without_text(caplog):
+    """The capture used synthetic audio, so a real microphone's shape is still
+    unknown: every line logs its chunk counts once, when it ends, never words."""
+    session, _transport, _fake = await _relay_on_live()
+    with caplog.at_level(logging.INFO, logger="hushh_mcp.one_voice.session"):
+        await _feed(
+            session,
+            [
+                (_IN, "Private", False),
+                (_IN, "Private words", False),
+                (_IN, "Private words", True),
+                (_OUT, "Private", False),
+                (_OUT, " reply.", False),
+                (_OUT, " Private reply.", True),
+                _END,
+                # Captured output shape: deltas, and the line ends with the turn.
+                (_OUT, "More", False),
+                (_OUT, " private words.", False),
+                _END,
+            ],
+        )
+    shapes = [
+        dict(field.split("=", 1) for field in record.getMessage().split()[1:])
+        for record in caplog.records
+        if record.getMessage().startswith("one_voice.transcript_shape role=")
+    ]
+    counts = ("role", "partial", "final", "repeat", "extended", "restated")
+    assert [tuple(shape[key] for key in counts) for shape in shapes] == [
+        ("input", "2", "1", "1", "1", "1"),
+        ("output", "2", "1", "0", "0", "1"),
+        ("output", "2", "0", "0", "0", "0"),
+    ]
+    assert all(shape["session"] == "sess-1" and shape["turn"] for shape in shapes)
+    assert "private" not in caplog.text.lower()
 
 
 async def test_typed_echo_is_one_final_transcript_segment():
