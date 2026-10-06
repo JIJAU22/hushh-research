@@ -768,13 +768,17 @@ def _create(executor: ToolExecutor, ctx: ToolContext, **args: Any):
     return asyncio.run(executor.call(ctx, "create_circle", args))
 
 
+HUSSH_TO_HUSH = [{"old": "HUSSH", "new": "HUSH"}]
+V04_TO_V05 = [{"old": "V04", "new": "V05"}]
+
+
 def test_a_correction_that_drops_a_spelled_word_retires_the_card(monkeypatch):
     store, executor, ctx = _spelling_harness(monkeypatch)
     card = _create(executor, ctx, name="HUSSH GARAGE V04", spelled_words=["HUSSH"])
     assert card.result.status == "confirmation_required"
     asyncio.run(store.mark_shown(user_id=USER, pending_action_id=card.pending.id))
 
-    dropped = _create(executor, ctx, name="HUSH GARAGE V04")
+    dropped = _create(executor, ctx, name="HUSH GARAGE V04", changed_words=HUSSH_TO_HUSH)
 
     assert (dropped.result.status, dropped.result.reason_code) == (
         "rejected",
@@ -815,7 +819,7 @@ def test_a_spelled_word_is_still_required_after_the_models_own_cancel(monkeypatc
     card = _create(executor, ctx, name="HUSSH GARAGE V04", spelled_words=["HUSSH"])
     asyncio.run(executor.call(ctx, "cancel_pending_action", {"pending_action_id": card.pending.id}))
 
-    again = _create(executor, ctx, name="HUSH GARAGE V04")
+    again = _create(executor, ctx, name="HUSH GARAGE V04", changed_words=HUSSH_TO_HUSH)
 
     assert again.result.reason_code == "spelled_word_missing"
     assert again.superseded == [] and _open_rows(store, ctx) == []
@@ -838,11 +842,65 @@ def test_a_released_spelled_word_lets_the_correction_through(monkeypatch):
     card = _create(executor, ctx, name="HUSSH GARAGE V04", spelled_words=["HUSSH"])
     asyncio.run(executor.call(ctx, "cancel_pending_action", {"pending_action_id": card.pending.id}))
 
-    changed = _create(executor, ctx, name="HUSH GARAGE V04", release_spelled_words=["HUSSH"])
+    changed = _create(
+        executor,
+        ctx,
+        name="HUSH GARAGE V04",
+        changed_words=HUSSH_TO_HUSH,
+        release_spelled_words=["HUSSH"],
+    )
 
     assert changed.result.status == "confirmation_required"
     assert changed.result.summary == "create a circle called HUSH GARAGE V04"
     assert [row.id for row in _open_rows(store, ctx)] == [changed.pending.id]
+
+
+# -- a correction changes only what it declares ------------------------------------
+#
+# UAT 2026-10-06: "only make it V05" became HUSH GARAGE V05, and the model had not
+# declared HUSSH as spelled. The model also cancels the waiting card before it
+# re-proposes, so the card is often gone when the correction arrives: the name the
+# person was reviewing is kept on its own, for 3 minutes, and a correction is held
+# to it whether or not its card is still open.
+
+
+def test_an_undeclared_change_is_refused_and_retires_the_card(monkeypatch):
+    store, executor, ctx = _spelling_harness(monkeypatch)
+    card = _create(executor, ctx, name="HUSSH GARAGE V04")
+    asyncio.run(store.mark_shown(user_id=USER, pending_action_id=card.pending.id))
+
+    changed = _create(executor, ctx, name="HUSH GARAGE V05", changed_words=V04_TO_V05)
+
+    assert (changed.result.status, changed.result.reason_code) == ("rejected", "name_changed")
+    assert [row.id for row in changed.superseded] == [card.pending.id]
+    assert _open_rows(store, ctx) == []
+    late_yes = asyncio.run(
+        executor.call(ctx, "confirm_pending_action", {"pending_action_id": card.pending.id})
+    )
+    assert late_yes.result.status == "not_pending"
+
+
+def test_the_reviewed_name_outlives_the_models_own_cancel_for_three_minutes(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    clock = [datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)]
+    monkeypatch.setattr(EntityContext, "_now", staticmethod(lambda: clock[0]))
+    store, executor, ctx = _spelling_harness(monkeypatch)
+    card = _create(executor, ctx, name="HUSSH GARAGE V04")
+    asyncio.run(executor.call(ctx, "cancel_pending_action", {"pending_action_id": card.pending.id}))
+
+    clock[0] += timedelta(seconds=170)
+    again = _create(executor, ctx, name="HUSH GARAGE V05", changed_words=V04_TO_V05)
+
+    assert again.result.reason_code == "name_changed"
+    assert again.result.spoken_facts == [
+        'This would also change "HUSSH" to "HUSH". Is that what you want?'
+    ]
+    assert again.superseded == [] and _open_rows(store, ctx) == []
+    # Negative control: 3 minutes after the last name that passed, nothing waits.
+    clock[0] += timedelta(seconds=11)
+    later = _create(executor, ctx, name="HUSH GARAGE V05", changed_words=V04_TO_V05)
+    assert later.result.status == "confirmation_required"
 
 
 def test_tap_tier_duplicate_still_creates_a_new_card_and_receipt(monkeypatch):

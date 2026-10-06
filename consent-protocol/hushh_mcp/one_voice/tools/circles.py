@@ -44,9 +44,13 @@ from hushh_mcp.one_voice.tools.people import load_people_snapshot
 from hushh_mcp.one_voice.tools.spelling import (
     clean_spelled_word,
     missing_spelled_words,
+    name_word_changes,
+    name_word_slots,
     spell_out,
     spelling_key,
     unique_spelled_words,
+    word_key,
+    word_keys,
 )
 from hushh_mcp.services.one_location_agent_service import OneLocationAgentError
 from hushh_mcp.services.one_location_circle_service import (
@@ -65,6 +69,8 @@ logger = logging.getLogger(__name__)
 CIRCLE_SERVICE = "circles"
 # A proposed name dropped a word the person spelled letter by letter.
 SPELLED_WORD_MISSING = "spelled_word_missing"
+# A correction changed a word of the name under review that it did not declare.
+NAME_CHANGED = "name_changed"
 CIRCLE_JOIN_PATH = "/circle/join"
 # Client surfaces to refresh after a successful mutation (screen ids from session.py).
 REFRESH_CIRCLES = ("location_circles",)
@@ -705,6 +711,27 @@ async def list_circle_members(ctx: ToolContext, args: ListCircleMembersInput) ->
 # At most this many spelled words per call. A bound on the list only: Vertex
 # Live refuses a schema with length bounds on array items.
 MAX_SPELLED_WORDS_PER_CALL = 4
+# At most this many changed words per call; a bound on the list only, as above.
+MAX_CHANGED_WORDS_PER_CALL = 8
+# A changed word longer than a whole circle name is not a word of one. Checked
+# by the validator, never declared in the schema (see above).
+MAX_CHANGED_WORD_LENGTH = 80
+
+
+class ChangedWord(BaseModel):
+    """One word a correction changes: ``old`` as on the waiting card, ``new`` as
+    it becomes. An empty ``old`` is an added word, an empty ``new`` a removed one."""
+
+    model_config = ConfigDict(extra="forbid")
+    old: str = ""
+    new: str = ""
+
+    @field_validator("old", "new")
+    @classmethod
+    def _bounded(cls, value: str) -> str:
+        if len(value) > MAX_CHANGED_WORD_LENGTH:
+            raise ValueError("a changed word is at most 80 characters")
+        return value
 
 
 class CreateCircleInput(ToolInput):
@@ -728,6 +755,15 @@ class CreateCircleInput(ToolInput):
         description=(
             "An earlier spelled word the person changed or dropped, or every earlier "
             "spelled word when they now name a different circle."
+        ),
+    )
+    changed_words: list[ChangedWord] = Field(
+        default_factory=list,
+        max_length=MAX_CHANGED_WORDS_PER_CALL,
+        description=(
+            "When correcting the waiting card: each word you changed, added or removed — "
+            "old as on the card (empty if added), new (empty if removed). Every other word "
+            "must stay exactly as on the card."
         ),
     )
 
@@ -783,6 +819,74 @@ def _spelling_refused(
     )
 
 
+def _change_phrase(dropped: Sequence[str], put: Sequence[str]) -> str:
+    old, new = " ".join(dropped), " ".join(put)
+    if dropped and put:
+        return f'change "{old}" to "{new}"'
+    if dropped:
+        return f'drop "{old}"'
+    return f'add "{new}"'
+
+
+def _name_changed(fact: str, *, slots: int, order: str) -> Rejected:
+    # Counts and a short enum only: never a word of either name.
+    logger.info("one_voice.name_lineage.refused slots=%d order=%s", slots, order)
+    return Rejected(
+        reason_code=NAME_CHANGED,
+        needs="repeat_name",
+        spoken_facts=[fact],
+        retire_open_proposal=True,
+    )
+
+
+def _name_change_refused(baseline: str, args: CreateCircleInput) -> Rejected | None:
+    """Refuse a correction that changes a word of the name under review without
+    declaring it, and ask instead. Never edits the name.
+
+    ``baseline`` is the name the last passing proposal showed the person. A
+    proposal sharing at least one word with it corrects it; one sharing none is
+    a different circle and is not compared. A correction passes when every word
+    it removes is declared as an ``old`` in ``changed_words``, every word it
+    adds is declared as a ``new`` or spelled in this call (a newly spelled word
+    in another's place declares that replacement), and the words it keeps stay
+    in order. A declared word that did not change is ignored. Which words
+    changed is the spelling module's exact word comparison; whether the person
+    asked for a change is only ever the model's declaration.
+    """
+    if not set(word_keys(baseline)) & set(word_keys(args.name)):
+        return None
+    _, _, order_ok = name_word_changes(baseline, args.name)
+    if not order_ok:
+        return _name_changed(
+            f'This would put the words in a different order: "{args.name}". Is that what you want?',
+            slots=0,
+            order="moved",
+        )
+    declared_old = {key for change in args.changed_words for key in word_keys(change.old)}
+    declared_new = {key for change in args.changed_words for key in word_keys(change.new)}
+    spelled = {word_key(word) for word in args.spelled_words}
+    slots = name_word_slots(baseline, args.name)
+    undeclared: list[str] = []
+    for dropped, put in slots:
+        loose_old = [word for word in dropped if word_key(word) not in declared_old]
+        loose_new = [
+            word
+            for word in put
+            if word_key(word) not in declared_new and word_key(word) not in spelled
+        ]
+        replacements = sum(1 for word in put if word_key(word) in spelled)
+        if loose_new or len(loose_old) > replacements:
+            undeclared.append(_change_phrase(dropped, put))
+    if not undeclared:
+        return None
+    lead = "This would also" if len(undeclared) < len(slots) else "This would"
+    return _name_changed(
+        f"{lead} {join_names_for_speech(undeclared)}. Is that what you want?",
+        slots=len(undeclared),
+        order="kept",
+    )
+
+
 def _owned_circle_named(rows: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
     wanted = normalize_spoken_name(name)
     for row in rows:
@@ -820,6 +924,7 @@ async def create_circle(ctx: ToolContext, args: CreateCircleInput) -> ToolResult
         if existing is not None:
             circle = _remember(ctx, existing)
             ctx.entities.clear_spelled_words()
+            ctx.entities.clear_circle_name_baseline()
             return CreateCircleResult(
                 status="already_exists",
                 circle=CircleSummary.from_row(existing),
@@ -833,6 +938,7 @@ async def create_circle(ctx: ToolContext, args: CreateCircleInput) -> ToolResult
     row = dict(row or {})
     circle = _remember(ctx, row)
     ctx.entities.clear_spelled_words()
+    ctx.entities.clear_circle_name_baseline()
     return CreateCircleResult(
         status="created",
         circle=CircleSummary.from_row(row),
@@ -859,16 +965,37 @@ async def prepare_create_circle(ctx: ToolContext, args: CreateCircleInput) -> Pr
     The person's words are kept before the check, so a refused call still
     remembers how they spelled it. A proposal that passes renews every word it
     needed, so retention runs from the last proposal that used a word.
+
+    Before the spelling check, a correction of the name under review (the last
+    one that passed, kept the same 3 minutes and across a cancel) must declare
+    every word it changes (see ``_name_change_refused``), so an untouched word
+    cannot change whether or not it was ever declared as spelled. A proposal
+    that passes becomes the name under review.
+
+    A name the person typed (``ctx.typed_name``) is theirs as written: it
+    releases every spelled word, skips both checks and the spelled read-back,
+    and becomes the name under review.
     """
     now = _spelling_now()
+    if ctx.typed_name:
+        logger.info("one_voice.circle_name.typed")
+        ctx.entities.clear_spelled_words()
+        ctx.entities.set_circle_name_baseline(args.name, now)
+        return Prepared(summary=summarize_create_circle(ctx, args), snapshot={"spelled_words": []})
     ctx.entities.release_spelled_words(args.release_spelled_words)
     retained = ctx.entities.retained_spelled_words(now)
     ctx.entities.remember_spelled_words(args.spelled_words, now)
+    baseline = ctx.entities.live_circle_name_baseline(now)
+    if baseline is not None:
+        refused = _name_change_refused(baseline, args)
+        if refused is not None:
+            return refused
     required = unique_spelled_words([*retained, *args.spelled_words])
     missing = missing_spelled_words(args.name, required)
     if missing:
         return _spelling_refused(missing, args.spelled_words, retire_open_proposal=True)
     ctx.entities.remember_spelled_words(required, now)
+    ctx.entities.set_circle_name_baseline(args.name, now)
     summary = summarize_create_circle(ctx, args) + "".join(
         f", with {word} spelled {spell_out(word)}" for word in required
     )
@@ -2239,10 +2366,11 @@ TOOLS: tuple[ToolSpec, ...] = (
             "Create an empty circle with the given name (kind family, friends, or other). "
             "Creating a circle sends no invitations and shares no location; adding people is a "
             "separate action. Reports already_exists when the person already owns one by that name."
-            " Use the name exactly as the person said or spelled it; a spelled word stays in "
-            "every correction until they change it. If it answers spelled_word_missing for a "
-            "word they changed, or for a different circle, call it again with that word in "
-            "release_spelled_words."
+            " Use the name exactly as the person said or spelled it. When correcting the waiting "
+            "card, change only what they asked and list each changed word in changed_words; a "
+            "word they spelled stays until they change it. If it answers name_changed or "
+            "spelled_word_missing for a change they did ask for, call it again with that change "
+            "declared (changed_words or release_spelled_words)."
         ),
         handler=create_circle,
         ui_refresh=REFRESH_CIRCLES,
