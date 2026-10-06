@@ -138,16 +138,97 @@ def _arg_matches(expected: ArgExpectation, actual: Any) -> bool:
     return all(_word_key(item) in present for item in expected)
 
 
+# Result statuses under which a scored call counts: the server took it. Every
+# other status (rejected, confirmation_waiting, pending_action_exists, ...)
+# means the call did not stand as made, so its arguments cannot score a hit.
+ACCEPTED_STATUSES = frozenset(
+    {
+        "ok",
+        "confirmed",
+        "confirmation_required",
+        "navigation_dispatched",
+        "cancelled",
+        "pending",
+        "none",
+    }
+)
+# The key the relay adds to a result when the call retired open cards
+# (``session.py``): a new card replaces every open one in the conversation
+# (the store's create cancels them), a refused correction retires the card
+# it corrected, and a lookup retires cards it made stale.
+SUPERSEDED_KEY = "superseded_pending_action_ids"
+
+
+def _open_proposals(calls: list[Call]) -> dict[int, str]:
+    """Replay one turn: index of each call whose card is still open at its end.
+
+    A ``confirmation_required`` result opens a card; it closes when the model
+    cancels that id, or when a later result reports it superseded. Closures
+    come only from what the results said, as the model saw them. A card with
+    no id in its result (a hand-written triple) cannot be closed by id.
+    """
+    opened: dict[int, str] = {}
+    for index, (name, args, result) in enumerate(calls):
+        closed: set[str] = {str(item) for item in result.get(SUPERSEDED_KEY) or []}
+        if name == "cancel_pending_action" and result.get("status") == "cancelled":
+            closed.add(str(args.get("pending_action_id") or ""))
+        opened = {i: pid for i, pid in opened.items() if pid not in closed}
+        if result.get("status") == "confirmation_required":
+            opened[index] = str(result.get("pending_action_id") or f"#call-{index}")
+    return opened
+
+
+def _scored_call(obs: Observation, tool: str) -> int | None:
+    """The latest call of ``tool`` in the scored (final) turn."""
+    return next(
+        (index for index in reversed(range(len(obs.calls))) if obs.calls[index][0] == tool), None
+    )
+
+
+def _args_key(args: dict[str, Any]) -> str:
+    """Arguments as speech carries them: case, punctuation and letter spacing
+    of a spelled word do not make a second proposal."""
+    normal: dict[str, Any] = {}
+    for key, value in args.items():
+        if value in (None, "", [], {}):
+            continue
+        if isinstance(value, str):
+            normal[key] = _normalized(value)
+        elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+            normal[key] = sorted({_word_key(item) for item in value})
+        else:
+            normal[key] = value
+    return json.dumps(normal, sort_keys=True, default=str)
+
+
 def arg_mismatches(obs: Observation) -> list[dict[str, Any]]:
     """Each expected argument the scored (final) turn did not carry.
 
-    The LAST call of each expected tool in that turn is compared, so a call
-    the executor refused and the model then corrected is judged on the
-    correction. No call of the tool is a mismatch. Empty means all matched.
+    The LAST call of each expected tool in that turn is scored, so a call the
+    executor refused and the model then corrected is judged on the
+    correction. That call counts only if its result status is accepted and,
+    when it opened a card, the card is still open at the end of the turn: a
+    refused call or a withdrawn card never scores, whatever it said. No call
+    of the tool is a mismatch. Empty means all matched.
     """
     mismatches: list[dict[str, Any]] = []
+    open_cards = _open_proposals(obs.calls)
     for tool, expected_args in obs.case.expected_args_by_tool.items():
-        last = next((args for name, args, _ in reversed(obs.calls) if name == tool), None)
+        index = _scored_call(obs, tool)
+        last = None if index is None else obs.calls[index][1]
+        if index is not None:
+            status = obs.calls[index][2].get("status")
+            reason = (
+                "status"
+                if status not in ACCEPTED_STATUSES
+                else "not_current"
+                if status == "confirmation_required" and index not in open_cards
+                else None
+            )
+            if reason is not None:
+                mismatches.append(
+                    {"tool": tool, "arg": None, "reason": reason, "got": status, "called": True}
+                )
         for arg, expected in expected_args.items():
             actual = None if last is None else last.get(arg)
             if last is None or not _arg_matches(expected, actual):
@@ -155,12 +236,29 @@ def arg_mismatches(obs: Observation) -> list[dict[str, Any]]:
                     {
                         "tool": tool,
                         "arg": arg,
+                        "reason": "value" if last is not None else "not_called",
                         "expected": expected if isinstance(expected, str) else list(expected),
                         "got": actual,
                         "called": last is not None,
                     }
                 )
     return mismatches
+
+
+def extra_proposals(obs: Observation) -> list[dict[str, Any]]:
+    """Expected tools left with more than one distinct open card in the scored
+    turn: the person heard two different proposals and either could be the
+    one they answer. Identical arguments (as speech carries them) count once."""
+    open_cards = _open_proposals(obs.calls)
+    tools = {*obs.case.expected_tools, *obs.case.expected_args_by_tool}
+    extra: list[dict[str, Any]] = []
+    for tool in sorted(tools):
+        distinct = {
+            _args_key(obs.calls[index][1]) for index in open_cards if obs.calls[index][0] == tool
+        }
+        if len(distinct) > 1:
+            extra.append({"tool": tool, "open_proposals": len(distinct)})
+    return extra
 
 
 def history_report(obs: Observation) -> list[dict[str, Any]]:
