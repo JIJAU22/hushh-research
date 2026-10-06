@@ -151,3 +151,16 @@ The sharing guide and Requests/Shared with sections remain visible during reads.
 Reads that exceed 15 seconds show retry rather than an indefinite spinner; late
 results cannot replace a newer read. Recipient search and summary/details filters
 only filter displayed rows, never alter grants or the overall access counts.
+
+### Mail-aligned Wallet surfaces
+
+Cards, Add and Sharing use the shared 820px workspace measure and Mail-style
+feature surface tokens (white surface, blue accent tint, shared border, radius
+and shadow). Desktop feature headings use the same 40px/800 foundation scale.
+Physical card faces remain capped at 420px inside the wider Cards panel.
+
+Wallet onboarding uses the full-resolution preloaded artwork without a blur
+placeholder, centered with its title and Continue action. Stacked cards hide
+their separate detail links while pinned and remeasure after expansion settles;
+the card itself remains the details action. Sharing uses a labelled illustrative
+card instead of the header counters; real access remains in the lists below.

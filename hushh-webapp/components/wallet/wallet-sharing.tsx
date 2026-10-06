@@ -12,6 +12,7 @@ import { useVault } from "@/lib/vault/vault-context";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { morphyToast } from "@/lib/morphy-ux/morphy";
 import styles from "./wallet-sharing.module.css";
+import { WALLET_DEMO_CARDS, WalletDemoCardFace } from "./wallet-demo-cards";
 import { CONSENT_ACTION_COMPLETE_EVENT, CONSENT_STATE_CHANGED_EVENT } from "@/lib/consent/consent-events";
 import { loadWalletSharing, walletSharingKind } from "@/lib/services/wallet-sharing-service";
 import type { ConsentCenterEntry } from "@/lib/services/consent-center-service";
@@ -120,7 +121,7 @@ export function WalletSharing() {
     (entry.counterpart_label || "Requester").toLowerCase().includes(query.trim().toLowerCase());
   const renderGroup = (title: string, entries: ConsentCenterEntry[], active: boolean) => (
     <section className="space-y-3" aria-label={title}>
-      <h3 className="text-base font-semibold">{title} <span className="ml-1 text-sm font-normal text-muted-foreground">{current && !current.error ? entries.length : "—"}</span></h3>
+      <h3 className="text-xl font-semibold">{title} <span className="ml-1 text-sm font-normal text-muted-foreground">{current && !current.error ? entries.length : "—"}</span></h3>
       <div className={styles.group}>
         {!current || current.error ? <div className={styles.empty}><ShieldCheck aria-hidden="true" className="size-6 shrink-0 text-muted-foreground" /><p className="text-sm text-muted-foreground">{current?.error ? "Access status unavailable. Retry to load this section." : active ? "Checking existing access…" : "Checking incoming requests…"}</p></div> : entries.length ? entries.map((entry) => {
           const details = walletSharingKind(entry) === "details";
@@ -145,27 +146,27 @@ export function WalletSharing() {
     </section>
   );
 
-  return <div className="motion-step-enter mx-auto w-full max-w-[420px] space-y-6 py-4" data-testid="wallet-sharing-content">
+  return <div className={`${styles.content} motion-step-enter mx-auto w-full max-w-[820px] space-y-6 py-4`} data-testid="wallet-sharing-content">
     <section className={styles.hero}>
       <div className={styles.heroTop}><span>WALLET SHARING</span><ShieldCheck aria-hidden="true" className="size-5" /></div>
       <h2>Your cards.<br />Your control.</h2>
       <p>You choose who can access your Wallet information.</p>
-      <div className={styles.stats}>
-        <div><strong>{current && !current.error ? current.requests.length : "—"}</strong><span>Pending requests</span></div>
-        <div><strong>{current && !current.error ? current.grants.length : "—"}</strong><span>Active permissions</span></div>
-      </div>
+      <figure className={styles.heroCard}>
+        <WalletDemoCardFace summary={WALLET_DEMO_CARDS[0]!} />
+        <figcaption>Illustrative card · Your saved details stay private</figcaption>
+      </figure>
     </section>
     <section className="space-y-3" aria-label="Sharing guide">
-      <h3 className="text-base font-semibold">What you can share</h3>
+      <h3 className="text-xl font-semibold">What you can share</h3>
       <div className={styles.guide}>
         <details><summary><span className={styles.guideIcon}><ShieldCheck aria-hidden="true" className="size-5" /></span><span>Card summary<small>Everyday details, without the full number</small></span><span aria-hidden="true">+</span></summary><p>Includes network, last four digits, expiry, nickname and issuing region. Approval covers Wallet summaries, not just one selected card.</p></details>
         <details><summary><span className={styles.guideIcon}><Lock aria-hidden="true" className="size-5" /></span><span>Full card details<small>Sensitive access. Always review first.</small></span><span aria-hidden="true">+</span></summary><p>Includes full card numbers and saved security details across your Wallet. Review the requester and duration carefully. Approval requires your unlocked Wallet.</p></details>
       </div>
     </section>
     <section className="space-y-3" aria-label="Access controls">
-      <div className="flex items-center justify-between gap-2"><h3 className="text-base font-semibold">Your sharing activity</h3><Button size="compact" variant="ghost" disabled={!current || busy} onClick={() => setRevision(value => value + 1)}>Refresh access</Button></div>
+      <div className="flex items-center justify-between gap-2"><h3 className="text-xl font-semibold">Your sharing activity</h3><Button size="compact" variant="ghost" disabled={!current || busy} onClick={() => setRevision(value => value + 1)}>Refresh access</Button></div>
       <label className="block text-sm"><span className="sr-only">Search recipients</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search by name" className={styles.duration} /></label>
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter permissions">{(["all", "summary", "details"] as const).map(value => <Button key={value} size="compact" variant={filter === value ? "secondary" : "ghost"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === "all" ? "All access" : value === "summary" ? "Summaries" : "Full details"}</Button>)}</div>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter permissions">{(["all", "summary", "details"] as const).map(value => <Button key={value} size="compact" variant={filter === value ? "secondary" : "ghost"} className={styles.filter} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === "all" ? "All access" : value === "summary" ? "Summaries" : "Full details"}</Button>)}</div>
     </section>
     {!current ? <p role="status" className="text-sm text-muted-foreground">Checking Wallet sharing...</p> : current.error ? <div role="alert" className="space-y-3 rounded-2xl border border-border p-5"><p className="text-sm">We couldn&apos;t check Wallet access. Try again to see the current status.</p><Button variant="secondary" size="compact" onClick={() => setRevision((value) => value + 1)}>Try again</Button></div> : null}
     {renderGroup("Requests", current && !current.error ? current.requests.filter(matches) : [], false)}
