@@ -12,7 +12,7 @@ import type { FeedItem } from "@/lib/services/feed-service";
 // trusted-circle green even when it is delivered through the Location domain.
 const FEED_ICON_COLOR: Record<string, string> = {
   Consent: "#F97316",
-  Location: "#007AFF",
+  Location: "var(--app-accent)",
   Finance: "#10B981",
   KYC: "#2563EB",
   "Connected systems": "#0284C7",
