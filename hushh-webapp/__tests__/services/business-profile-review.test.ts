@@ -34,6 +34,19 @@ const args = (cards = [card()]) => ({ job: createBusinessReviewJob("owner", cand
   isCurrent: () => true, sharingImpactAcknowledged: false });
 
 describe("business profile reviewed-memory boundary", () => {
+  it("isolates real business checkpoints and preserves real provenance on retry", async () => {
+    const real: BusinessCandidate = { ...candidate, synthetic: false,
+      businessUid: `urn:hushh:business:directory:hotel:${"a".repeat(64)}`,
+      sourceIdentity: { source: "directory", sourceKey: '{"id":"1"}', vertical: "hotel" } };
+    const input = { ...args(), job: createBusinessReviewJob("owner", real, "Reviewed public details", [card()]) };
+    expect(await saveBusinessReview(input)).toEqual({ saved: 1, remaining: 0 });
+    expect(mocks.read.mock.calls[0]![0].resourceKey).toContain(encodeURIComponent(real.businessUid));
+    expect(mocks.persist.mock.calls.every(([value]) => value.resourceKey.includes(encodeURIComponent(real.businessUid)))).toBe(true);
+    expect(JSON.stringify(input.job.cards)).toContain('"synthetic":false');
+    checkpoint = { version: 1, job: input.job };
+    await expect(loadBusinessReview("owner", "key", candidate.businessUid)).rejects.toThrow();
+    expect(businessDraftMessage(real, "Example", "")).not.toContain("synthetic UAT");
+  });
   it("keeps immutable business identity on the semantic entity without altering its domain or ID", () => {
     const original = card(); const result = attachBusinessOrigin(original, candidate);
     expect(result.target_domain).toBe("professional"); expect(result.target_entity_id).toBe("mem_one");

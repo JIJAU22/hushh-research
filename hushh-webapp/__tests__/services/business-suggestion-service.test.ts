@@ -12,6 +12,30 @@ const empty = {
 describe("business suggestion transport", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
+  it("admits real candidates only in v2 and preserves independent branch identities", async () => {
+    const real = { business_uid: `urn:hushh:business:directory:hotel:${"a".repeat(64)}`, synthetic: false,
+      source_identity: { source: "directory", source_key: '{"id":"1"}', vertical: "hotel" },
+      match_evidence: [{ kind: "verified_phone" }], draft: { name: "Example branch", website: "", phone: "2025550123" },
+      ownership_verified: false, claim_created: false, verification_required: ["business_authority"] };
+    const response = { ...empty, contract_version: "b2b-profile-suggestion.v2", status: "suggestion_available", coverage_incomplete: true,
+      candidates: [real, { ...real, business_uid: `urn:hushh:business:directory:hotel:${"b".repeat(64)}`,
+        source_identity: { ...real.source_identity, source_key: '{"id":"2"}' } }] };
+    apiJson.mockResolvedValue(response);
+    const result = await BusinessSuggestionService.get("owner-token");
+    expect(result.coverageIncomplete).toBe(true);
+    expect(result.candidates.map(candidate => candidate.businessUid)).toHaveLength(2);
+    expect(result.candidates.every(candidate => !candidate.synthetic && !candidate.ownershipVerified)).toBe(true);
+    for (const invalid of [
+      { ...response, contract_version: "b2b-profile-suggestion.v1" },
+      { ...response, candidates: [real, real] },
+      { ...response, candidates: [{ ...real, ownership_verified: true }] },
+      { ...response, candidates: [{ ...real, source_identity: { ...real.source_identity, vertical: "ria" } }] },
+    ]) {
+      apiJson.mockResolvedValue(invalid);
+      await expect(BusinessSuggestionService.get("owner-token")).rejects.toThrow();
+    }
+  });
+
   it("uses the existing platform transport without a client identity or persistence", async () => {
     apiJson.mockResolvedValue(empty);
     const controller = new AbortController();

@@ -761,7 +761,52 @@ server-side, then bind both actions to that source.
 
 The maintained architecture reference is [Personal Gmail Information Requests](./personal-gmail-information-requests.md).
 
-### B2B profile suggestion — UAT review and confirmation
+### B2B profile suggestion — directory discovery, review and confirmation
+
+Real mode is independently default-off: `ONE_BUSINESS_DIRECTORY_ENABLED=true`
+(runtime JSON key `one_business_directory_enabled`). It takes precedence over
+the fixture and never falls back to synthetic information. It returns
+`b2b-profile-suggestion.v2`; v1 remains the synthetic UAT contract below.
+Fresh primary Firebase email control and Firebase/account-OTP verified phone
+control supply independent lookup signals, never caller query parameters or
+unverified profile fields. Consumer email domains and non-US phones are omitted,
+not coerced. A failed canonical phone read is unavailable, not missing.
+
+The server invokes the protected directory at its pinned Cloud Run origin using
+workload OIDC; browsers receive no invocation credential. Local rehearsal uses
+the explicit Workspace gcloud account only under the existing peer/reviewer/
+UAT-resource gate, without changing CLI defaults or ADC. HTTP redirects are
+refused, response size is capped at 512 KB, token acquisition is off the event
+loop, and request I/O has a 40-second total budget. Contact lookup does not scan
+or write PKM or directory tables. Contacts and returned records are not logged.
+
+The adapter validates `b2b-onboarding.v1`, native table/identity shapes and
+unverified-ownership posture; claimed phone/domain evidence must match the
+returned public fields. Directory UIDs are
+`urn:hushh:business:directory:{vertical}:{sha256(canonical_native_identity_json)}`.
+Native identity JSON is sorted, compact and UTF-8. IDs are scoped to hotel,
+healthcare, RIA, insurance or business, not claimant IDs or inferred company
+ownership. Distinct branches remain distinct even with shared contacts.
+
+v2 statuses add `insufficient_signals` and `unavailable`. No usable verified
+signal (or an older deployed service rejecting independent contacts) is not
+`no_match`. `coverage_incomplete` accompanies partial failures/truncation;
+available records may still be reviewed individually but never auto-selected
+or auto-saved. Up to 100 candidates are supported, each with a separate review,
+decision and encrypted recovery key. Editing invalidates prepared proposals;
+explicit Save is still required, with exact-card idempotency and sharing checks.
+Real immutable provenance uses `synthetic:false` inside encrypted memory only.
+
+Verified 2026-10-07: a read-only production-directory smoke test returned one
+real hotel candidate through this adapter with incomplete coverage reported.
+This proves directory transport/projection, not a real owner's encrypted save.
+The deployed upstream currently requires both contacts; the independent-contact
+extension in HusshOne source needs deployment. The directory service's observed
+service-level invoker policy does not list the UAT app runtime service account
+`consent-protocol-runtime@hushh-pda-uat.iam.gserviceaccount.com`; its effective
+invocation access must be proven or a narrowly scoped invoker grant approved
+before hosted rollout. No IAM policy was changed. Vault-unlocked real-owner
+selection, save/readback and cold-session recovery still need acceptance.
 
 For a localhost-only rehearsal, `ONE_BUSINESS_LOCAL_REHEARSAL_ENABLED=true`
 is a process-only maintainer override. It additionally requires review mode,
@@ -842,9 +887,8 @@ job and cannot overwrite saved. Only acknowledged numeric revisions count as sav
 Lock, account/session change and expired authority fence every effect and hide
 old content. Recovering a pending save requires another explicit Save action.
 
-This is a UAT synthetic vertical slice, not a production business claim system.
-Real directory matching, business-authority verification, cross-device lifecycle
-and deployment acceptance remain separate gates. Source/unit tests do not certify
+This is not a business ownership claim system. Business-authority verification,
+cross-device lifecycle and deployment acceptance remain separate gates. Source/unit tests do not certify
 live model quality or physical-device behavior. Receiving a suggestion never
 authorizes a save.
 
@@ -859,8 +903,8 @@ client email, employee accounts, recycled phones, changed domains and stale
 directory rows require explicit disambiguation and provenance. Generic personal
 email providers are not business domains. No-match must remain distinct from
 provider failure; never fabricate a candidate to fill a coverage gap.
-The current UAT response deliberately admits only the single synthetic fixture;
-these broader production matching cases are not implemented by that fixture.
+The v1 UAT response deliberately admits only the single synthetic fixture;
+v2 handles real directory candidates without widening that fixture contract.
 At the encrypted writer, an existing semantic entity can only be updated by the
 same business UID. A different or unidentified origin fails closed rather than
 merging two businesses merely because their names or contact details overlap.

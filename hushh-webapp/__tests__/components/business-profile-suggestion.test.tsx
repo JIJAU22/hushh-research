@@ -29,6 +29,18 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); publishValidatedAuthSessionOwner(null); });
 describe("post-onboarding business suggestion", () => {
+  it("offers multiple businesses separately; rejecting one keeps the other available", async () => {
+    const second = { ...candidate, businessUid: "second", draft: { name: "Second business", website: "https://second.test" } };
+    mocks.get.mockResolvedValue({ candidates: [candidate, second] });
+    render(<BusinessProfileSuggestion {...props} />);
+    await screen.findByText("Second business");
+    expect(screen.getAllByRole("button", { name: "Review details", exact: true })).toHaveLength(2);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByRole("button", { name: "Not my business", exact: true })[0]!);
+    await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith(expect.objectContaining({ businessUid: candidate.businessUid })));
+    expect(screen.getByText("Second business")).toBeTruthy();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
   it("opens a visibly synthetic nudge; discovery and preparation never save", async () => {
     render(<BusinessProfileSuggestion {...props} />);
     expect(await screen.findByRole("region", { name: "Is this your business?" })).toBeTruthy();

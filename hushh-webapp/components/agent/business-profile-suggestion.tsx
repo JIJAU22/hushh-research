@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "@/lib/morphy-ux/button";
 import { morphyToast } from "@/lib/morphy-ux/morphy";
 import { Input } from "@/components/ui/input";
@@ -25,8 +25,45 @@ type Review = {
   phase: "offer" | "preparing" | "review" | "saving";
 };
 
-/** On-demand, post-setup UAT suggestion. No automatic memory mutation. */
+/** On-demand discovery; each distinct business has an independent review. */
 export function BusinessProfileSuggestion(props: Props) {
+  const [discovery, setDiscovery] = useState<{ ownerId: string; token: string; key: string;
+    candidates: BusinessCandidate[]; incomplete: boolean; status: string } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const { ownerId, vaultKey, vaultOwnerToken, enabled, tokenExpiresAt } = props;
+  useEffect(() => {
+    const abort = new AbortController();
+    setDiscovery(null);
+    const guard = createAgentPkmCaptureGuard({ userId: ownerId || "", signal: abort.signal,
+      isEnabled: () => enabled && !!ownerId && !!vaultKey && !!vaultOwnerToken && tokenExpiresAt !== null && Date.now() < tokenExpiresAt });
+    if (guard.isCurrent()) void (async () => {
+      try {
+        const result = await BusinessSuggestionService.get(vaultOwnerToken!, abort.signal);
+        await guard.assertCurrent();
+        setDiscovery({ ownerId: ownerId!, token: vaultOwnerToken!, key: vaultKey!, candidates: result.candidates,
+          incomplete: result.coverageIncomplete === true, status: result.status });
+      } catch {
+        if (guard.isCurrent()) setDiscovery({ ownerId: ownerId!, token: vaultOwnerToken!, key: vaultKey!,
+          candidates: [], incomplete: true, status: "unavailable" });
+      }
+    })();
+    return () => abort.abort();
+  }, [ownerId, vaultKey, vaultOwnerToken, enabled, tokenExpiresAt, attempt]);
+  if (!enabled || !ownerId || !vaultKey || !vaultOwnerToken || tokenExpiresAt === null || Date.now() >= tokenExpiresAt ||
+    discovery?.ownerId !== ownerId || discovery.token !== vaultOwnerToken || discovery.key !== vaultKey) return null;
+  return <div className="space-y-[var(--app-form-section-gap)]">
+    {discovery.incomplete && <div className="space-y-[var(--app-form-field-gap)]">
+      <HelperText>Business lookup is incomplete. Available suggestions may not include every business.</HelperText>
+      <Button variant="link" size="standard" onClick={() => setAttempt(value => value + 1)}>Retry business lookup</Button>
+    </div>}
+    {discovery.status === "insufficient_signals" && <HelperText>Your verified contacts could not be used for business lookup yet. Nothing has been saved.</HelperText>}
+    {discovery.candidates.length > 1 && <HelperText>I found several possible businesses. Review each one separately; you can save more than one.</HelperText>}
+    {discovery.candidates.map(candidate => <BusinessCandidateReview key={candidate.businessUid} {...props} candidate={candidate} />)}
+  </div>;
+}
+
+function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate }) {
+  const fieldId = useId();
   const { ownerId, vaultKey, vaultOwnerToken, enabled, tokenExpiresAt } = props;
   const context = useMemo(() => ({ ownerId, vaultKey, vaultOwnerToken, enabled, tokenExpiresAt }),
     // Expiry is checked at every effect, including while the UI is idle.
@@ -47,15 +84,12 @@ export function BusinessProfileSuggestion(props: Props) {
 
   useEffect(() => {
     const abort = new AbortController(); controller.current = abort; busy.current = false;
-    setAcknowledging(false); setOpen(false); setEditing(false);
+    setState(null); setAcknowledging(false); setOpen(false); setEditing(false);
     const guard = createAgentPkmCaptureGuard({ userId: context.ownerId || "", signal: abort.signal, isEnabled: eligible });
     if (guard.isCurrent()) void (async () => {
       try {
-        const suggestion = await BusinessSuggestionService.get(context.vaultOwnerToken!, abort.signal);
-        await guard.assertCurrent();
-        const candidate = suggestion.candidates[0];
-        if (!candidate) return;
-        const checkpoint = await loadBusinessReview(context.ownerId!, context.vaultKey!);
+        const candidate = props.candidate;
+        const checkpoint = await loadBusinessReview(context.ownerId!, context.vaultKey!, candidate.businessUid);
         await guard.assertCurrent();
         if (checkpoint?.decision === "not_me" || checkpoint?.decision === "saved" ||
           (checkpoint?.decision === "later" && (checkpoint.until || 0) > Date.now())) return;
@@ -78,7 +112,7 @@ export function BusinessProfileSuggestion(props: Props) {
     await guard.assertCurrent();
     const fresh = await BusinessSuggestionService.get(context.vaultOwnerToken!, controller.current?.signal);
     await guard.assertCurrent();
-    if (!review || fresh.candidates[0]?.businessUid !== review.candidate.businessUid)
+    if (!review || !fresh.candidates.some(candidate => candidate.businessUid === review.candidate.businessUid))
       throw new Error("The suggestion is no longer available. Nothing new was saved.");
   };
   const update = (next: Review) => setState({ context, review: next });
@@ -120,7 +154,7 @@ export function BusinessProfileSuggestion(props: Props) {
         vaultOwnerToken: context.vaultOwnerToken!, sharingImpactAcknowledged });
       await guard.assertCurrent();
       if (!result || result.remaining) {
-        const checkpoint = await loadBusinessReview(context.ownerId!, context.vaultKey!);
+        const checkpoint = await loadBusinessReview(context.ownerId!, context.vaultKey!, review.candidate.businessUid);
         await guard.assertCurrent();
         update({ ...review, job: checkpoint?.job || job, cards: job.cards,
           selected: job.cards.map(card => card.card_id), phase: "review" });
@@ -136,7 +170,7 @@ export function BusinessProfileSuggestion(props: Props) {
       if (guard.isCurrent()) {
         // The checkpoint may exist even if a transport response was lost.
         try {
-          const checkpoint = await loadBusinessReview(context.ownerId!, context.vaultKey!);
+          const checkpoint = await loadBusinessReview(context.ownerId!, context.vaultKey!, review.candidate.businessUid);
           await guard.assertCurrent();
           const job = checkpoint?.job || attemptedJob;
           update({ ...review, job, cards: job?.cards || review.cards,
@@ -152,7 +186,7 @@ export function BusinessProfileSuggestion(props: Props) {
     busy.current = true;
     try {
       await guard.assertCurrent();
-      const result = await decideBusinessReview({ ownerId: context.ownerId!, vaultKey: context.vaultKey!, decision,
+      const result = await decideBusinessReview({ ownerId: context.ownerId!, vaultKey: context.vaultKey!, decision, businessUid: review.candidate.businessUid,
         assertCurrent: guard.assertCurrent });
       if (result === null) throw new Error("A review is already being saved.");
       await guard.assertCurrent(); setState(null); setOpen(false);
@@ -180,15 +214,20 @@ export function BusinessProfileSuggestion(props: Props) {
         </div>
         <div className="space-y-[var(--app-form-field-gap)]">
           {review.candidate.synthetic && <HelperText className="font-semibold text-foreground">UAT test suggestion</HelperText>}
-          <HelperText className="leading-relaxed text-foreground/80">Why this appeared: your verified email domain matches Hushh. Business ownership has not been verified.</HelperText>
+          <HelperText className="leading-relaxed text-foreground/80">Why this appeared: {review.candidate.synthetic ? "your verified email domain matches the UAT test business" :
+            review.candidate.matchEvidence.map(item => item.kind === "verified_phone" ? "your linked phone matches the directory phone" : "your verified email domain matches the business website").join("; ")}. Business ownership has not been verified.</HelperText>
+          {!review.candidate.synthetic && <HelperText>Public directory · {review.candidate.sourceIdentity.vertical}</HelperText>}
+          {!review.candidate.synthetic && Object.entries(review.candidate.draft).filter(([key, value]) => !["name", "website"].includes(key) && value).map(([key, value]) =>
+            <p key={key} className="ui-text-row-description break-words text-foreground"><span className="capitalize">{key.replaceAll("_", " ")}</span>: {value}</p>)}
         </div>
         {editing && !review.job && <div className="space-y-[var(--app-form-section-gap)]">
-          <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor="business-review-name">Business name</Label>
-            <Input id="business-review-name" maxLength={160} value={review.name} disabled={pending}
+          <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor={`${fieldId}-name`}>Business name</Label>
+            <Input id={`${fieldId}-name`} maxLength={160} value={review.name} disabled={pending}
               onChange={event => update({ ...review, name: event.target.value, cards: [], selected: [], phase: "offer" })} /></div>
-          <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor="business-review-website">Website</Label>
-            <Input id="business-review-website" type="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={512} value={review.website} disabled={pending}
+          <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor={`${fieldId}-website`}>Website</Label>
+            <Input id={`${fieldId}-website`} type="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={512} value={review.website} disabled={pending}
               onChange={event => update({ ...review, website: event.target.value, cards: [], selected: [], phase: "offer" })} /></div>
+          <HelperText>Website is optional. Use an HTTPS address or clear it before reviewing.</HelperText>
         </div>}
         <HelperText className="leading-relaxed text-foreground/80">Review first, then choose what to save. Nothing is published and no ownership claim is created.</HelperText>
         {pending && <p role="status" className="text-sm">{review.phase === "preparing" ? "Preparing details for review…" : "Saving approved details…"}</p>}
@@ -199,7 +238,7 @@ export function BusinessProfileSuggestion(props: Props) {
           onSave={() => void save()} onDismiss={() => setOpen(false)} />}
         {(review.phase === "offer" || review.phase === "preparing") ? <FlowActionGroup separateSecondary={false}
           primary={<Button size="standard" loading={review.phase === "preparing"}
-            disabled={pending || !review.name.trim() || !review.website.trim()}
+            disabled={pending || !review.name.trim()}
             onClick={() => void prepare()}>Review details</Button>}
           secondary={<Button variant="muted" size="standard" disabled={pending} onClick={() => void defer("later")}>Later</Button>}
           tertiary={<Button variant="link" size="standard" disabled={pending} onClick={() => void defer("not_me")}>Not my business</Button>} />

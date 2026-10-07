@@ -2,9 +2,7 @@ import { z } from "zod";
 
 import { apiJson } from "@/lib/services/api-client";
 
-// Phase 1 admits only a labelled fixture. Real directory candidates require a
-// subsequent contract revision; they must not masquerade as synthetic records.
-const candidateSchema = z.object({
+const fixtureCandidateSchema = z.object({
   business_uid: z.literal("urn:hushh:business:uat:hushh.ai:v1"),
   synthetic: z.literal(true),
   source_identity: z.object({
@@ -19,25 +17,49 @@ const candidateSchema = z.object({
   claim_created: z.literal(false),
   verification_required: z.array(z.literal("business_authority")).length(1),
 });
+const directoryCandidateSchema = z.object({
+  business_uid: z.string().regex(/^urn:hushh:business:directory:(hotel|healthcare|ria|insurance|business):[a-f0-9]{64}$/),
+  synthetic: z.literal(false),
+  source_identity: z.object({ source: z.literal("directory"), source_key: z.string().min(1).max(2048),
+    vertical: z.enum(["hotel", "healthcare", "ria", "insurance", "business"]) }),
+  match_evidence: z.array(z.union([
+    z.object({ kind: z.literal("verified_email_domain"), domain: z.string().min(3).max(253) }),
+    z.object({ kind: z.literal("verified_phone") }),
+  ])).min(1).max(2),
+  draft: z.object({ name: z.string().min(1).max(160), website: z.string().max(512),
+    phone: z.string().max(512).optional(), formatted_address: z.string().max(512).optional(),
+    address_line1: z.string().max(512).optional(), street1: z.string().max(512).optional(),
+    city: z.string().max(512).optional(), zip: z.string().max(512).optional(),
+    state: z.string().max(512).optional(), category: z.string().max(512).optional() }),
+  ownership_verified: z.literal(false), claim_created: z.literal(false),
+  verification_required: z.array(z.literal("business_authority")).length(1),
+}).refine(value => value.business_uid.includes(`:directory:${value.source_identity.vertical}:`));
+const candidateSchema = z.union([fixtureCandidateSchema, directoryCandidateSchema]);
 
 const responseSchema = z.object({
-  contract_version: z.literal("b2b-profile-suggestion.v1"),
+  contract_version: z.enum(["b2b-profile-suggestion.v1", "b2b-profile-suggestion.v2"]),
   scope: z.literal("b2b"),
-  status: z.enum(["disabled", "no_match", "suggestion_available"]),
-  candidates: z.array(candidateSchema).max(1),
+  status: z.enum(["disabled", "no_match", "suggestion_available", "insufficient_signals", "unavailable"]),
+  candidates: z.array(candidateSchema).max(100),
+  coverage_incomplete: z.boolean().optional(),
   pkm_written: z.literal(false),
-}).refine((value) => (value.status === "suggestion_available") === (value.candidates.length === 1));
+}).refine(value => (value.status === "suggestion_available") === (value.candidates.length > 0)
+  && new Set(value.candidates.map(candidate => candidate.business_uid)).size === value.candidates.length
+  && value.candidates.every(candidate => candidate.synthetic === (value.contract_version === "b2b-profile-suggestion.v1")));
 
 export type BusinessSuggestion = {
-  contractVersion: "b2b-profile-suggestion.v1";
+  contractVersion: "b2b-profile-suggestion.v1" | "b2b-profile-suggestion.v2";
   scope: "b2b";
-  status: "disabled" | "no_match" | "suggestion_available";
+  status: "disabled" | "no_match" | "suggestion_available" | "insufficient_signals" | "unavailable";
+  coverageIncomplete?: boolean;
   candidates: Array<{
     businessUid: string;
-    synthetic: true;
-    sourceIdentity: { source: "uat_fixture"; sourceKey: "hushh.ai:v1" };
-    matchEvidence: Array<{ kind: "verified_email_domain"; domain: "hushh.ai" }>;
-    draft: { name: string; website: string };
+    synthetic: boolean;
+    sourceIdentity: { source: "uat_fixture" | "directory"; sourceKey: string;
+      vertical?: "hotel" | "healthcare" | "ria" | "insurance" | "business" };
+    matchEvidence: Array<{ kind: "verified_email_domain"; domain: string } | { kind: "verified_phone" }>;
+    draft: { name: string; website: string; phone?: string; formatted_address?: string;
+      address_line1?: string; street1?: string; city?: string; zip?: string; state?: string; category?: string };
     ownershipVerified: false;
     claimCreated: false;
     verificationRequired: Array<"business_authority">;
@@ -60,10 +82,12 @@ export const BusinessSuggestionService = {
       scope: value.scope,
       status: value.status,
       pkmWritten: value.pkm_written,
+      ...(value.coverage_incomplete === undefined ? {} : { coverageIncomplete: value.coverage_incomplete }),
       candidates: value.candidates.map((candidate) => ({
         businessUid: candidate.business_uid,
         synthetic: candidate.synthetic,
-        sourceIdentity: { source: candidate.source_identity.source, sourceKey: candidate.source_identity.source_key },
+        sourceIdentity: { source: candidate.source_identity.source, sourceKey: candidate.source_identity.source_key,
+          ...("vertical" in candidate.source_identity ? { vertical: candidate.source_identity.vertical } : {}) },
         matchEvidence: candidate.match_evidence,
         draft: candidate.draft,
         ownershipVerified: candidate.ownership_verified,

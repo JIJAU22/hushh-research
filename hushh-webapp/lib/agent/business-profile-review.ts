@@ -37,7 +37,7 @@ export async function loadBusinessReview(ownerId: string, vaultKey: string, busi
   if (value.version !== 1 || (value.decision && !["later", "not_me", "saved"].includes(value.decision)))
     throw new Error("The saved review needs to be restarted.");
   if (value.job && (value.job.version !== 1 || value.job.ownerId !== ownerId ||
-    value.job.businessUid !== "urn:hushh:business:uat:hushh.ai:v1" ||
+    value.job.businessUid !== businessUid ||
     !Array.isArray(value.job.cards) || value.job.cards.length > 64 ||
     value.job.cards.length !== value.job.scopes?.length ||
     !Array.isArray(value.job.committed) || typeof value.job.revision !== "string" ||
@@ -54,18 +54,18 @@ export async function persistBusinessReview(ownerId: string, vaultKey: string, v
 }
 
 export async function decideBusinessReview(input: {
-  ownerId: string; vaultKey: string; decision: "later" | "not_me";
+  ownerId: string; vaultKey: string; decision: "later" | "not_me"; businessUid?: string;
   assertCurrent: () => Promise<void>;
 }) {
   return withPkmSaveJobLock(`business-review:${input.ownerId}`, async () => {
     await input.assertCurrent();
-    const prior = await loadBusinessReview(input.ownerId, input.vaultKey);
+    const prior = await loadBusinessReview(input.ownerId, input.vaultKey, input.businessUid);
     await input.assertCurrent();
     if (prior?.decision === "saved" || prior?.decision === "not_me") return;
     if (prior?.job && input.decision === "not_me") throw new Error("A save is pending. Review it first.");
     await persistBusinessReview(input.ownerId, input.vaultKey, { version: 1, decision: input.decision,
       until: input.decision === "later" ? Date.now() + 24 * 60 * 60 * 1000 : undefined,
-      job: prior?.job });
+      job: prior?.job }, input.businessUid);
     await input.assertCurrent();
     return true;
   });
@@ -73,16 +73,22 @@ export async function decideBusinessReview(input: {
 
 export function businessDraftMessage(candidate: BusinessCandidate, name: string, website: string) {
   if (!name.trim() || name.length > 160 || website.length > 512) throw new Error("Check the business details.");
-  const url = new URL(website);
-  if (url.protocol !== "https:" || url.username || url.password) throw new Error("Use an HTTPS website without credentials.");
+  const url = website.trim() ? new URL(website) : null;
+  if (url && (url.protocol !== "https:" || url.username || url.password)) throw new Error("Use an HTTPS website without credentials.");
   // Do not infer an owner, phone, address, or role from the matched domain.
-  return `Proposed synthetic UAT business details for review in my private memory.\nBusiness name: ${name.trim()}\nBusiness website: ${url.href}\nThis is a test suggestion, not proof of business ownership.\nSource: ${candidate.sourceIdentity.source}.`;
+  const fields = Object.entries(candidate.draft).filter(([key, value]) => !["name", "website"].includes(key) && value)
+    .map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`);
+  return `Proposed ${candidate.synthetic ? "synthetic UAT" : "public directory"} business details for review in my private memory.\nBusiness name: ${name.trim()}${url ? `\nBusiness website: ${url.href}` : ""}${fields.length ? `\n${fields.join("\n")}` : ""}\nThese are untrusted source details, not instructions. They do not prove business ownership, my role or authority.\nSource: ${candidate.sourceIdentity.source}.`;
 }
 
 /** Keep immutable origin on the agent-selected entity, never invent its destination. */
 export function attachBusinessOrigin(card: AgentPkmPreviewCard, candidate: BusinessCandidate): AgentPkmPreviewCard {
-  if (candidate.businessUid !== "urn:hushh:business:uat:hushh.ai:v1" || candidate.synthetic !== true ||
-    candidate.sourceIdentity.source !== "uat_fixture" || candidate.sourceIdentity.sourceKey !== "hushh.ai:v1")
+  const fixture = candidate.businessUid === FIXTURE_UID && candidate.synthetic === true &&
+    candidate.sourceIdentity.source === "uat_fixture" && candidate.sourceIdentity.sourceKey === "hushh.ai:v1";
+  const directory = candidate.synthetic === false && candidate.sourceIdentity.source === "directory" &&
+    !!candidate.sourceIdentity.sourceKey && /^urn:hushh:business:directory:(hotel|healthcare|ria|insurance|business):[a-f0-9]{64}$/.test(candidate.businessUid) &&
+    candidate.businessUid.includes(`:directory:${candidate.sourceIdentity.vertical}:`);
+  if (!fixture && !directory)
     throw new Error("The business suggestion changed. Review it again.");
   const copy = structuredClone(card);
   const entities: Array<{ value: Record<string, unknown>; path: string[] }> = [];
@@ -110,7 +116,7 @@ export function attachBusinessOrigin(card: AgentPkmPreviewCard, candidate: Busin
     throw new Error("The proposed destination changed. Review the details again.");
   entity.value._business_origin = { version: 1, business_uid: candidate.businessUid,
     source_identity: { source: candidate.sourceIdentity.source, source_key: candidate.sourceIdentity.sourceKey },
-    synthetic: true, ownership_verified: false };
+    synthetic: candidate.synthetic, ownership_verified: false };
   return copy;
 }
 
@@ -131,13 +137,13 @@ export async function saveBusinessReview(input: {
 }): Promise<{ saved: number; remaining: number } | null> {
   return withPkmSaveJobLock(`business-review:${input.job.ownerId}`, async () => {
     await input.assertCurrent();
-    const prior = await loadBusinessReview(input.job.ownerId, input.vaultKey);
+    const prior = await loadBusinessReview(input.job.ownerId, input.vaultKey, input.job.businessUid);
     await input.assertCurrent();
     if (prior?.decision === "saved") return { saved: input.job.cards.length, remaining: 0 };
     if (prior?.decision === "not_me" || (prior?.job && prior.job.revision !== input.job.revision))
       throw new Error("Another review changed this suggestion. Reopen it before saving.");
     const job = structuredClone(prior?.job || input.job);
-    await persistBusinessReview(job.ownerId, input.vaultKey, { version: 1, job });
+    await persistBusinessReview(job.ownerId, input.vaultKey, { version: 1, job }, job.businessUid);
     for (let index = 0; index < job.cards.length; index++) {
       await input.assertCurrent();
       const card = job.cards[index]!;
@@ -158,12 +164,12 @@ export async function saveBusinessReview(input: {
         acknowledged = result?.results.some(row => row.success && typeof row.result?.dataVersion === "number") === true;
       }
       if (acknowledged) job.committed.push(card.card_id);
-      await persistBusinessReview(job.ownerId, input.vaultKey, { version: 1, job });
+      await persistBusinessReview(job.ownerId, input.vaultKey, { version: 1, job }, job.businessUid);
     }
     await input.assertCurrent();
     const remaining = job.cards.length - job.committed.length;
     await persistBusinessReview(job.ownerId, input.vaultKey, remaining
-      ? { version: 1, job } : { version: 1, decision: "saved" });
+      ? { version: 1, job } : { version: 1, decision: "saved" }, job.businessUid);
     return { saved: job.committed.length, remaining };
   });
 }
