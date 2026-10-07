@@ -51,8 +51,7 @@ WITH participants AS (
   WHERE drive_share_requests.user_id=:user
     OR drive_share_requests.recipient_user_id=:user
   UNION ALL
-  SELECT request_id,revocation_revision,created_at,'share','incoming','management_only',
-    NULL::text,
+  SELECT request_id,revocation_revision,created_at,'share','incoming',NULL::text,'management_only',
     NULL::text,NULL::text,FALSE,FALSE,FALSE,FALSE,NULL::text,NULL::integer,NULL::text,NULL::boolean,FALSE,NULL::timestamptz
   FROM drive_share_management_contexts
   WHERE user_id=:user AND private_request_erased_at IS NOT NULL{queries}
