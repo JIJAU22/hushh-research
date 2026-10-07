@@ -205,6 +205,19 @@ describe("projectFeedDriveProgress", () => {
     expect(projectFeedDrivePayments([payment])[0]?.status).toBe("link_expired");
   });
 
+  it("does not resurrect a paid order from its historical Checkout deadline", () => {
+    const payment = entry({ kind: "outgoing_request", metadata: {
+      ...entry().metadata,
+      direction: "outgoing",
+      paymentStatus: "paid",
+      paymentLinkExpired: true,
+      checkoutExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+      paymentAmountCents: 1000,
+      paymentCurrency: "usd",
+    } });
+    expect(projectFeedDrivePayments([payment])).toEqual([]);
+  });
+
   it("keeps separate payment rows for separate requests", () => {
     const first = entry({ id: "document_share_request:11111111-1111-4111-8111-111111111111", kind: "outgoing_request", metadata: {
       ...entry().metadata, direction: "outgoing", paymentStatus: "awaiting_payment",

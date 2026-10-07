@@ -93,6 +93,14 @@ function paymentState(entry: ConsentCenterEntry, now = Date.now()): FeedDrivePay
   );
   const isOpenRequest = entry.kind === "outgoing_request" && requestStatus === "pending";
   if (!isOpenRequest) return null;
+  // A completed/refunded order can retain the original Checkout expiry for
+  // audit history. Never turn that historical timestamp back into a payment
+  // action while the request projection is catching up.
+  if (
+    paymentStatus !== "awaiting_payment" &&
+    paymentStatus !== "checkout_open" &&
+    paymentStatus !== "expired"
+  ) return null;
   if (
     checkoutExpired ||
     (checkoutExpiresAt !== null && checkoutExpiresAt <= now)
@@ -101,7 +109,6 @@ function paymentState(entry: ConsentCenterEntry, now = Date.now()): FeedDrivePay
   // otherwise-open request that status means the Checkout link expired; the
   // request itself can still be paid through a replacement link.
   if (paymentStatus === "expired" && isOpenRequest) return "link_expired";
-  if (paymentStatus !== "awaiting_payment" && paymentStatus !== "checkout_open") return null;
   return "ready";
 }
 
