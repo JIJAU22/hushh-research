@@ -169,6 +169,13 @@ for (const viewport of CASES) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mount(page, viewport.keyboard);
     const before = await measure(page);
+    expect(
+      await page
+        .locator("[data-contact-invite-list] li")
+        .first()
+        .getByText(/Contact person/)
+        .textContent(),
+    ).toBe("Contact person 1");
 
     // The sheet sits inside the space above the keyboard...
     expect(before.sheetTop).toBeGreaterThanOrEqual(0);
