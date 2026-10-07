@@ -28,10 +28,7 @@ _PROJECTION = """
 WITH participants AS (
   SELECT request_id,revision,created_at,'share' AS source,
     CASE WHEN recipient_user_id=:user THEN 'outgoing' ELSE 'incoming' END AS direction,
-    CASE WHEN recipient_user_id=:user
-      THEN COALESCE(NULLIF(owner_identity.display_name,''), 'Document request')
-      ELSE COALESCE(NULLIF(recipient_identity.display_name,''), 'Document request')
-    END AS counterpart_label,
+    {counterpart_label} AS counterpart_label,
     CASE WHEN status IN ('pending','preparing','review_ready') AND expires_at<=now()
       THEN 'expired'
       WHEN recipient_user_id=:user AND status IN ('preparing','review_ready') THEN 'pending'
@@ -50,11 +47,9 @@ WITH participants AS (
     {payment_link_expired} AS payment_link_expired,
     {checkout_expires_at} AS checkout_expires_at
   FROM drive_share_requests
-  LEFT JOIN actor_identity_cache owner_identity
-    ON owner_identity.user_id=drive_share_requests.user_id
-  LEFT JOIN actor_identity_cache recipient_identity
-    ON recipient_identity.user_id=drive_share_requests.recipient_user_id
-  WHERE user_id=:user OR recipient_user_id=:user
+  {identity_joins}
+  WHERE drive_share_requests.user_id=:user
+    OR drive_share_requests.recipient_user_id=:user
   UNION ALL
   SELECT request_id,revocation_revision,created_at,'share','incoming','management_only',
     NULL::text,
@@ -203,11 +198,31 @@ _TRUSTED_RECOVERY_NEEDED = """EXISTS (
     AND effect.attempts=0 AND effect.receipt_envelope IS NULL
 )"""
 
+_COUNTERPART_LABEL = """CASE WHEN drive_share_requests.recipient_user_id=:user
+  THEN COALESCE(NULLIF(owner_identity.display_name,''), 'Document request')
+  ELSE COALESCE(NULLIF(recipient_identity.display_name,''), 'Document request')
+END"""
+
+_IDENTITY_JOINS = """LEFT JOIN actor_identity_cache owner_identity
+    ON owner_identity.user_id=drive_share_requests.user_id
+  LEFT JOIN actor_identity_cache recipient_identity
+    ON recipient_identity.user_id=drive_share_requests.recipient_user_id"""
+
 
 def _projection(
-    queries: bool, owner_search: bool, bulk: bool, background: bool, payments: bool
+    queries: bool,
+    owner_search: bool,
+    bulk: bool,
+    background: bool,
+    payments: bool,
+    identity_cache: bool,
 ) -> str:
     projection = _PROJECTION.replace("{queries}", _QUERIES if queries else "")
+    projection = projection.replace("{identity_joins}", _IDENTITY_JOINS if identity_cache else "")
+    projection = projection.replace(
+        "{counterpart_label}",
+        _COUNTERPART_LABEL if identity_cache else "'Document request'::text",
+    )
     for name, expression in {
         "owner_search_state": _OWNER_SEARCH_STATE if owner_search else "'unavailable'::text",
         "trusted_authority_ready": _TRUSTED_AUTHORITY_READY if background else "FALSE",
@@ -450,6 +465,17 @@ class DriveSharingCenterContributor(ExternalConnectorLifecycleStore):
         )
 
     @staticmethod
+    def _identity_cache_installed(connection) -> bool:
+        # Test fixtures and rolling deployments can predate the optional
+        # identity cache. Keep the metadata projection available with its
+        # generic label until that table is installed.
+        return bool(
+            connection.execute(
+                text("SELECT to_regclass('actor_identity_cache') IS NOT NULL")
+            ).scalar_one()
+        )
+
+    @staticmethod
     def _params(user_id: str, *, query: str = "", bucket: str = "") -> dict[str, Any]:
         return {
             "user": user_id,
@@ -489,6 +515,7 @@ class DriveSharingCenterContributor(ExternalConnectorLifecycleStore):
                         self._bulk_installed(connection),
                         self._background_installed(connection),
                         self._payments_installed(connection),
+                        self._identity_cache_installed(connection),
                     )  # nosec B608
                     + "SELECT bucket,count(*) AS total FROM filtered GROUP BY bucket"
                 ),
@@ -523,6 +550,7 @@ class DriveSharingCenterContributor(ExternalConnectorLifecycleStore):
                             self._bulk_installed(connection),
                             self._background_installed(connection),
                             self._payments_installed(connection),
+                            self._identity_cache_installed(connection),
                         )  # nosec B608
                         + """
                         SELECT totals.total,page.* FROM (SELECT count(*) AS total FROM filtered) totals
@@ -572,6 +600,7 @@ class DriveSharingCenterContributor(ExternalConnectorLifecycleStore):
                         self._bulk_installed(connection),
                         self._background_installed(connection),
                         self._payments_installed(connection),
+                        self._identity_cache_installed(connection),
                     )  # nosec B608
                     + """
                     , ranked AS (
