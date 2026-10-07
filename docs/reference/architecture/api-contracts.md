@@ -808,6 +808,14 @@ invocation access must be proven or a narrowly scoped invoker grant approved
 before hosted rollout. No IAM policy was changed. Vault-unlocked real-owner
 selection, save/readback and cold-session recovery still need acceptance.
 
+Read-only database diagnosis also confirmed that healthcare and insurance have
+no website column or normalized-phone index. Healthcare's phone query timed out
+with SQLSTATE 57014 after five seconds; ZIP-filtered reads still succeeded for
+both databases. Domain-only matching cannot cover records with no website.
+HusshOne contains separately reviewed concurrent phone-index scripts; these
+were not applied, and ingestion/matching timeouts were not increased. Index
+approval, valid/ready state checks and query-plan acceptance are rollout gates.
+
 For a localhost-only rehearsal, `ONE_BUSINESS_LOCAL_REHEARSAL_ENABLED=true`
 is a process-only maintainer override. It additionally requires review mode,
 the exact canonical `REVIEWER_UID`, an actual loopback request peer (not a
