@@ -634,6 +634,20 @@
       ]
     },
     {
+      "route": "/one/messages",
+      "classification": "native-required-functional",
+      "initialRoute": "/login?redirect=%2Fone%2Fmessages",
+      "expectedMarker": "native-route-direct-messages",
+      "expectedRoute": "/one/messages",
+      "autoReviewerLogin": true,
+      "expectedAuth": "authenticated",
+      "allowedDataStates": [
+        "loaded",
+        "empty-valid",
+        "unavailable-valid"
+      ]
+    },
+    {
       "route": "/one/marketplace",
       "classification": "native-required-functional",
       "initialRoute": "/login?redirect=%2Fone%2Fmarketplace",
