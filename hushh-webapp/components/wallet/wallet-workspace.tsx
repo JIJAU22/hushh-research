@@ -72,6 +72,7 @@ import {
   WalletService,
   type WalletCardSummary,
 } from "@/lib/services/wallet-service";
+import { WalletCardService } from "@/lib/services/wallet-card-service";
 import { cn } from "@/lib/utils";
 import { useVault } from "@/lib/vault/vault-context";
 import { CARD_CORNER_RADIUS_RATIO } from "@/lib/wallet/wallet-card-presentation";
@@ -207,6 +208,7 @@ export function WalletWorkspace() {
     };
   }, [renderedOwnerId]);
   const { vaultKey, getVaultOwnerToken } = useVault();
+  const [demoProfile, setDemoProfile] = useState<{ displayName: string | null; shareUrl: string | null } | null>(null);
   // Read the token getter through a ref: its identity changes with the vault
   // context, and putting it in effect deps re-ran the list load on every render.
   const getVaultOwnerTokenRef = useRef(getVaultOwnerToken);
@@ -319,6 +321,27 @@ export function WalletWorkspace() {
     if (!user?.uid || !vaultKey || !token) return null;
     return { userId: user.uid, vaultKey, vaultOwnerToken: token };
   }, [user?.uid, vaultKey]);
+  useEffect(() => {
+    if (!user?.uid) { setDemoProfile(null); return; }
+    let cancelled = false;
+    const load = async () => {
+      const fallbackName = user.displayName?.trim() || null;
+      const token = getVaultOwnerTokenRef.current();
+      if (!token) {
+        if (!cancelled) setDemoProfile({ displayName: fallbackName, shareUrl: null });
+        return;
+      }
+      try {
+        const state = await WalletCardService.getCard({ userId: user.uid, vaultOwnerToken: token });
+        if (cancelled) return;
+        const payloadName = state.card?.cardPayload.full_name?.trim() || null;
+        setDemoProfile({ displayName: payloadName || state.card?.displayName?.trim() || user.displayName?.trim() || null, shareUrl: state.shareUrl });
+      } catch { if (!cancelled) setDemoProfile({ displayName: fallbackName, shareUrl: null }); }
+    };
+    void load();
+    const timer = window.setInterval(load, 15000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [user?.uid, user?.displayName, vaultKey]);
   // Decryption is asynchronous; whether the vault is still open is re-read
   // from the latest render when it settles, never from the tap that began it.
   const vaultContextRef = useRef(vaultContext);
@@ -702,7 +725,7 @@ export function WalletWorkspace() {
 
           {hasCards && searchOpen && deferredQuery ? <ul className="mx-auto w-full max-w-[820px] space-y-2" aria-label="Card search results">{filteredCards.map((card) => <li key={card.cardId}><Button variant="secondary" size="standard" className="w-full justify-start" onClick={() => selectCard(card.cardId)}>{card.nickname || cardNetworkLabel(card.brand)} · {cardNetworkLabel(card.brand)} ending {card.last4}</Button></li>)}</ul> : null}
           {ready && !(searchOpen && deferredQuery) ? (
-            <WalletCardBrowser ownerId={renderedOwnerId || undefined}
+            <WalletCardBrowser demoProfile={demoProfile} ownerId={renderedOwnerId || undefined}
               key={renderedOwnerId}
               cards={cards}
               selectedCardId={selectedDeckCardId}
