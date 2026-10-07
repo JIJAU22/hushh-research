@@ -28,11 +28,7 @@
   );
   border: 0;
   border-radius: 0;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.page[data-chat-open="true"] .inbox {
-  display: none;
+  grid-template-columns: minmax(15.625rem, 0.8fr) minmax(0, 1.45fr);
 }
 
 /* A selected connection projects its composer into the same persistent dock
@@ -68,6 +64,41 @@
   gap: 0.75rem;
   padding: 1rem;
   border-bottom: 1px solid var(--one-chat-divider);
+}
+
+.inboxSearch {
+  padding: 0.75rem 0.75rem 0.375rem;
+}
+
+.inboxSearchField {
+  display: flex;
+  min-height: 2.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--one-chat-canvas) 84%, var(--one-chat-sidebar));
+  color: var(--muted-foreground);
+}
+
+.inboxSearchField:focus-within {
+  outline: 2px solid color-mix(in oklab, var(--app-accent) 42%, transparent);
+  outline-offset: 1px;
+}
+
+.inboxSearchField input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.inboxSearchField input::placeholder {
+  color: var(--muted-foreground);
 }
 
 .inboxHeader h1,
@@ -200,7 +231,7 @@
 
 .threadHeaderContent {
   display: flex;
-  width: min(100%, var(--app-bottom-shell-max-width, 48rem));
+  width: 100%;
   min-height: 3.5rem;
   align-items: center;
   gap: 0.5rem;
@@ -227,6 +258,12 @@
   color: var(--app-accent);
 }
 
+/* The desktop shell uses the inbox as navigation. Keep the back affordance
+   for the compact single-column mobile route only. */
+.backButton {
+  display: none;
+}
+
 .backButton:hover,
 .backButton:focus-visible {
   background: color-mix(in oklab, var(--app-accent) 12%, transparent);
@@ -240,26 +277,9 @@
   gap: 0.625rem;
 }
 
-.threadAvatarPresence {
-  position: relative;
-  display: inline-flex;
-  flex: 0 0 auto;
-}
-
 .threadAvatar {
   width: 2.5rem;
   height: 2.5rem;
-}
-
-.connectionStatus {
-  position: absolute;
-  right: -0.0625rem;
-  bottom: -0.0625rem;
-  width: 0.75rem;
-  height: 0.75rem;
-  border: 2px solid var(--one-chat-canvas);
-  border-radius: 999px;
-  background: #34c759;
 }
 
 .threadTitle {
@@ -282,35 +302,16 @@
   line-height: 1.15;
 }
 
-.threadHeaderActions {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  margin-left: auto;
-}
-
-.headerAction {
-  background: color-mix(in oklab, var(--muted) 65%, transparent);
-  color: color-mix(in oklab, var(--foreground) 70%, transparent);
-}
-
-.headerAction:hover,
-.headerAction:focus-visible {
-  background: color-mix(in oklab, var(--muted) 88%, transparent);
-  color: var(--foreground);
-  outline: none;
-}
-
 .messageList {
   display: flex;
-  width: min(100%, var(--app-bottom-shell-max-width, 48rem));
+  width: 100%;
   min-height: 0;
   flex: 1;
   flex-direction: column;
   gap: 0.5rem;
   box-sizing: border-box;
   margin-inline: auto;
-  padding: 1rem var(--app-bottom-shell-inline-inset, 0.75rem) 1.25rem;
+  padding: 1rem clamp(1rem, 4vw, 4rem) 1.25rem;
   background-color: color-mix(in oklab, var(--one-chat-canvas) 96%, var(--one-chat-raised));
   background-image:
     radial-gradient(
@@ -883,6 +884,10 @@ article[data-message-role="user"] .messageActionError {
     display: none;
   }
 
+  .page[data-chat-open="true"] .inbox {
+    display: none;
+  }
+
   .inbox {
     border-right: 0;
   }
@@ -895,6 +900,10 @@ article[data-message-role="user"] .messageActionError {
 
   .threadHeaderContent {
     padding-inline: 0.625rem 0.875rem;
+  }
+
+  .backButton {
+    display: inline-grid;
   }
 
   .messageList {

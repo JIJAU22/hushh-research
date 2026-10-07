@@ -41,8 +41,9 @@ import {
   Mic,
   MoreVertical,
   Pencil,
-  Phone,
   Quote,
+  RefreshCw,
+  Search,
   Send,
   Trash2,
 } from "@/components/icons";
@@ -110,6 +111,32 @@ function formatMessageFeedMarker(value: string | null | undefined): string {
     day: "numeric",
     year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
   });
+}
+
+function formatConversationTime(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function conversationLabel(conversation: DirectMessageConversation): string {
+  return conversation.peerDisplayName || "Connection";
+}
+
+function conversationPreview(conversation: DirectMessageConversation): string {
+  const latest = conversation.latestMessage;
+  if (!latest) return "Start a conversation";
+  if (latest.deletedForEveryoneAt) return "Message deleted";
+  const prefix = latest.senderIsViewer ? "You: " : "";
+  return `${prefix}${latest.content}`;
 }
 
 function isNewMessageDay(
@@ -194,6 +221,10 @@ export function DirectMessagesPage() {
   ).trim();
   const [thread, setThread] = useState<ThreadState>(EMPTY_THREAD);
   const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [inboxItems, setInboxItems] = useState<DirectMessageConversation[]>([]);
+  const [inboxSearch, setInboxSearch] = useState("");
+  const [loadingInbox, setLoadingInbox] = useState(false);
+  const [inboxError, setInboxError] = useState<string | null>(null);
   const [loadingThread, setLoadingThread] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -214,12 +245,36 @@ export function DirectMessagesPage() {
     message: string;
   } | null>(null);
   const loadGeneration = useRef(0);
+  const inboxLoadGeneration = useRef(0);
   const loadedRouteKey = useRef<string | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   const activeConversationId = thread.conversation?.id ?? null;
   const hasRouteSelection = Boolean(requestedPersonRef || requestedConversationId);
+
+  const loadInbox = useCallback(
+    async (options?: { preserveItems?: boolean }) => {
+      if (!user) return;
+      const generation = ++inboxLoadGeneration.current;
+      if (!options?.preserveItems) setLoadingInbox(true);
+      setInboxError(null);
+      try {
+        const idToken = await user.getIdToken();
+        const inbox = await DirectMessagesService.listConversations({ idToken });
+        if (generation !== inboxLoadGeneration.current) return;
+        setInboxItems(inbox.items);
+      } catch {
+        if (generation !== inboxLoadGeneration.current) return;
+        if (!options?.preserveItems) {
+          setInboxError("Conversations could not be loaded. Check your connection and try again.");
+        }
+      } finally {
+        if (generation === inboxLoadGeneration.current) setLoadingInbox(false);
+      }
+    },
+    [user],
+  );
 
   const openOneVoiceChat = useCallback(() => {
     requestAgentConversationAfterRoute(ROUTES.HOME);
@@ -368,6 +423,9 @@ export function DirectMessagesPage() {
   useEffect(() => {
     if (!user) {
       loadedRouteKey.current = null;
+      inboxLoadGeneration.current += 1;
+      setInboxItems([]);
+      setInboxError(null);
       setThread(EMPTY_THREAD);
       setMessages([]);
       return;
@@ -376,12 +434,18 @@ export function DirectMessagesPage() {
 
   useEffect(() => {
     if (!user) return;
+    void loadInbox();
+  }, [loadInbox, user]);
+
+  useEffect(() => {
+    if (!user) return;
     void loadThread();
   }, [loadThread, user]);
 
   const refresh = useCallback(() => {
+    void loadInbox({ preserveItems: true });
     if (hasRouteSelection) void loadThread({ preserveMessages: true });
-  }, [hasRouteSelection, loadThread]);
+  }, [hasRouteSelection, loadInbox, loadThread]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -481,9 +545,24 @@ export function DirectMessagesPage() {
   const selectedLabel =
     thread.peerDisplayName || thread.conversation?.peerDisplayName || "Conversation";
   const visibleMessages = messages;
+  const normalizedInboxSearch = inboxSearch.trim().toLocaleLowerCase();
+  const visibleConversations = normalizedInboxSearch
+    ? inboxItems.filter((conversation) =>
+        [conversationLabel(conversation), conversationPreview(conversation)]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(normalizedInboxSearch),
+      )
+    : inboxItems;
+
+  const openConversation = (conversation: DirectMessageConversation) => {
+    router.replace(buildDirectMessageRoute({ conversationId: conversation.id }), {
+      scroll: false,
+    });
+  };
 
   const backToConnections = () => {
-    router.replace(ROUTES.CONNECT, { scroll: false });
+    router.replace(ROUTES.ONE_MESSAGES, { scroll: false });
   };
 
   const sendDraft = async (event?: FormEvent<HTMLFormElement>) => {
@@ -518,6 +597,12 @@ export function DirectMessagesPage() {
           canSend: true,
         }),
       );
+      setInboxItems((current) => {
+        const withoutConversation = current.filter(
+          (conversation) => conversation.id !== result.conversation.id,
+        );
+        return [result.conversation, ...withoutConversation];
+      });
       dispatchDirectMessagesUpdated({
         userId: user.uid,
         conversationId: result.conversation.id,
@@ -687,17 +772,126 @@ export function DirectMessagesPage() {
   }
 
   return (
-    <AppPageShell width="agent" fitContent={false}>
+    <AppPageShell width="expanded" fitContent={false}>
       <section
         className={styles.page}
         data-one-chat-surface
-        data-chat-open="true"
+        data-chat-open={hasRouteSelection ? "true" : "false"}
         data-direct-message-composer-docked={
           hasRouteSelection && thread.canSend ? "true" : undefined
         }
         data-native-route="native-route-direct-messages"
       >
+        <aside className={styles.inbox} aria-label="Conversations">
+          <header className={styles.inboxHeader}>
+            <div>
+              <h1>Chats</h1>
+              <p>{inboxItems.length ? `${inboxItems.length} conversations` : "Your conversations"}</p>
+            </div>
+            <button
+              type="button"
+              className={styles.refreshButton}
+              aria-label="Refresh conversations"
+              onClick={() => void loadInbox()}
+              disabled={loadingInbox}
+            >
+              <RefreshCw
+                className={cn("h-4 w-4", loadingInbox && "animate-spin motion-reduce:animate-none")}
+                aria-hidden="true"
+              />
+            </button>
+          </header>
+          <div className={styles.inboxSearch}>
+            <label className={styles.inboxSearchField}>
+              <Search className="h-4 w-4" aria-hidden="true" />
+              <span className="sr-only">Search conversations</span>
+              <input
+                type="search"
+                value={inboxSearch}
+                onChange={(event) => setInboxSearch(event.target.value)}
+                placeholder="Search or start a new chat"
+                aria-label="Search conversations"
+              />
+            </label>
+          </div>
+          <nav className={styles.conversationList} aria-label="Conversation list">
+            {loadingInbox && inboxItems.length === 0 ? (
+              <p className={styles.loading}>Loading conversations…</p>
+            ) : null}
+            {inboxError && inboxItems.length === 0 ? (
+              <div className={styles.errorState} role="alert">
+                <p>{inboxError}</p>
+                <Button
+                  type="button"
+                  variant="none"
+                  effect="fade"
+                  onClick={() => void loadInbox()}
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : null}
+            {!loadingInbox && !inboxError && visibleConversations.length === 0 ? (
+              <div className={styles.emptyInbox}>
+                <MessageCircle className="h-7 w-7" aria-hidden="true" />
+                <h2>{inboxSearch ? "No matching chats" : "No chats yet"}</h2>
+                <p>{inboxSearch ? "Try another name or message." : "Choose a connection to start chatting."}</p>
+              </div>
+            ) : null}
+            {visibleConversations.map((conversation) => {
+              const active =
+                activeConversationId === conversation.id ||
+                (Boolean(requestedPersonRef) &&
+                  requestedPersonRef === conversation.peerPersonRef);
+              const lastMessageAt =
+                conversation.lastMessageAt || conversation.latestMessage?.createdAt;
+              return (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  className={styles.conversationRow}
+                  data-active={active ? "true" : undefined}
+                  onClick={() => openConversation(conversation)}
+                >
+                  <ConnectionPersonAvatar
+                    label={conversationLabel(conversation)}
+                    photoUrl={conversation.peerPhotoUrl}
+                    size="list"
+                    className={styles.conversationAvatar}
+                  />
+                  <span className={styles.conversationCopy}>
+                    <span className={styles.conversationName}>
+                      {conversationLabel(conversation)}
+                    </span>
+                    <span className={styles.conversationPreview}>
+                      {conversationPreview(conversation)}
+                    </span>
+                  </span>
+                  <span className={styles.conversationMeta}>
+                    <time dateTime={lastMessageAt || undefined}>
+                      {formatConversationTime(lastMessageAt)}
+                    </time>
+                    {conversation.unreadCount > 0 ? (
+                      <span className={styles.unreadCount} aria-label={`${conversation.unreadCount} unread`}>
+                        {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
         <main className={styles.thread} aria-live="polite">
+          {!hasRouteSelection ? (
+            <section className={styles.selectThread} aria-label="Select a conversation">
+              <MessageCircle className="h-9 w-9" aria-hidden="true" />
+              <h2>Your messages</h2>
+              <p>Select a conversation to see the chat here.</p>
+            </section>
+          ) : null}
+          {hasRouteSelection ? (
+            <>
               <header className={styles.threadHeader}>
                 <div className={styles.threadHeaderContent}>
                   <button
@@ -709,36 +903,15 @@ export function DirectMessagesPage() {
                     <ArrowLeft className="h-6 w-6" aria-hidden="true" />
                   </button>
                   <div className={styles.threadIdentity}>
-                    <span className={styles.threadAvatarPresence}>
-                      <ConnectionPersonAvatar
-                        label={selectedLabel}
-                        photoUrl={thread.peerPhotoUrl}
-                        size="list"
-                        className={styles.threadAvatar}
-                      />
-                      {thread.canSend ? (
-                        <span
-                          className={styles.connectionStatus}
-                          aria-label="Connected"
-                        />
-                      ) : null}
-                    </span>
+                    <ConnectionPersonAvatar
+                      label={selectedLabel}
+                      photoUrl={thread.peerPhotoUrl}
+                      size="list"
+                      className={styles.threadAvatar}
+                    />
                     <div className={styles.threadTitle}>
                       <h2 title={selectedLabel}>{selectedLabel}</h2>
-                      <p>{thread.canSend ? "Connected on One" : "Conversation"}</p>
                     </div>
-                  </div>
-                  <div className={styles.threadHeaderActions}>
-                    <button
-                      type="button"
-                      className={styles.headerAction}
-                      aria-label="Audio calls are not available in Messages yet"
-                      onClick={() =>
-                        morphyToast.info("Calls are not available in Messages yet.")
-                      }
-                    >
-                      <Phone className="h-4 w-4" aria-hidden="true" />
-                    </button>
                   </div>
                 </div>
               </header>
@@ -1123,6 +1296,8 @@ export function DirectMessagesPage() {
                   </form>
                 ) : null}
               </AgentDockPortal>
+            </>
+          ) : null}
               <AlertDialog
                 open={Boolean(deleteRequest)}
                 onOpenChange={(open) => {

@@ -23,11 +23,13 @@ const mocks = vi.hoisted(() => {
 
   return {
     router: { push: vi.fn(), replace: vi.fn() },
+    query: "person=person-1",
     user: {
       uid: "viewer-1",
       getIdToken: vi.fn().mockResolvedValue("test-token"),
     },
     conversation,
+    listConversations: vi.fn(),
     getConversationWithPerson: vi.fn(),
     getConversationMessages: vi.fn(),
     markConversationRead: vi.fn(),
@@ -43,7 +45,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("next/navigation", () => ({
   useRouter: () => mocks.router,
-  useSearchParams: () => new URLSearchParams("person=person-1"),
+  useSearchParams: () => new URLSearchParams(mocks.query),
 }));
 
 vi.mock("@/hooks/use-auth", () => ({
@@ -81,6 +83,7 @@ vi.mock("@/lib/morphy-ux/morphy", () => ({
 vi.mock("@/lib/services/direct-messages-service", () => ({
   DIRECT_MESSAGE_MAX_LENGTH: 2_000,
   DirectMessagesService: {
+    listConversations: (...args: unknown[]) => mocks.listConversations(...args),
     getConversationWithPerson: (...args: unknown[]) =>
       mocks.getConversationWithPerson(...args),
     getConversationMessages: (...args: unknown[]) =>
@@ -112,7 +115,12 @@ describe("DirectMessagesPage", () => {
   beforeEach(() => {
     mocks.router.push.mockReset();
     mocks.router.replace.mockReset();
+    mocks.query = "person=person-1";
     mocks.user.getIdToken.mockClear();
+    mocks.listConversations.mockResolvedValue({
+      items: [mocks.conversation],
+      unreadCount: 0,
+    });
     mocks.getConversationWithPerson.mockResolvedValue({
       conversation: mocks.conversation,
       peerPersonRef: "person-1",
@@ -164,7 +172,7 @@ describe("DirectMessagesPage", () => {
       readAt: null,
       reactions: [{ emoji: "😀", count: 1, reactedByViewer: true }],
     });
-  });
+    });
 
   afterEach(() => {
     vi.useRealTimers();
@@ -174,6 +182,7 @@ describe("DirectMessagesPage", () => {
   it("uses the shared Chat dock while sending to the selected connection", async () => {
     renderConnectionThread();
 
+    expect(await screen.findByRole("button", { name: /Ankit Kumar Singh/ })).toBeVisible();
     const composer = await screen.findByRole("textbox", {
       name: "Message Ankit Kumar Singh",
     });
@@ -192,6 +201,22 @@ describe("DirectMessagesPage", () => {
         content: "Hello Ankit",
         recipientPersonRef: "person-1",
       }),
+    );
+  });
+
+  it("keeps the inbox available and opens a selected chat from its row", async () => {
+    mocks.query = "";
+    renderConnectionThread();
+
+    expect(await screen.findByRole("heading", { name: "Chats" })).toBeVisible();
+    expect(screen.getByLabelText("Search conversations")).toBeVisible();
+    expect(screen.getByText("Select a conversation to see the chat here.")).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: /Message/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Ankit Kumar Singh/ }));
+    expect(mocks.router.replace).toHaveBeenCalledWith(
+      "/one/messages?conversation=conversation-1",
+      { scroll: false },
     );
   });
 
