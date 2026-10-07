@@ -509,6 +509,8 @@ test("expanded cards stack with scroll and unwind on return", async ({ page }) =
   const stack = page.getByTestId("wallet-preview-stack");
   if (await page.getByRole("button", { name: "View all 3 cards", exact: true }).count()) await page.getByRole("button", { name: "View all 3 cards", exact: true }).click();
   await expect(stack).toHaveAttribute("data-expanded", "true");
+  await expect.poll(() => page.getByTestId("wallet-card-browser").evaluate(el => el.getAnimations({ subtree: true }).filter(animation => animation.playState === "running").length)).toBe(0);
+  await expect.poll(() => page.locator('[data-swipe-views-root="true"]').evaluate(el => Math.abs(el.getBoundingClientRect().height - document.querySelector('#top-shell-wallet-panel-cards')!.getBoundingClientRect().height))).toBeLessThan(1);
   const motion = stack.locator("[data-card-motion]").first();
   const translation = () => motion.evaluate((el) => new DOMMatrix(getComputedStyle(el).transform).m42);
   await page.locator("[data-app-scroll-root]").evaluate((root) => {
@@ -623,6 +625,8 @@ test("Wallet sharp onboarding and stacked detail links", async ({ page }) => {
   await expect(page.getByTestId("wallet-card-face").first()).toBeVisible();
   const scrollRoot = page.locator('[data-app-scroll-root="true"]');
   await page.getByRole("button", { name: "View all 3 cards", exact: true }).click();
+  await expect.poll(() => page.getByTestId("wallet-card-browser").evaluate(el => el.getAnimations({ subtree: true }).filter(animation => animation.playState === "running").length)).toBe(0);
+  await expect.poll(() => page.locator('[data-swipe-views-root="true"]').evaluate(el => Math.abs(el.getBoundingClientRect().height - document.querySelector('#top-shell-wallet-panel-cards')!.getBoundingClientRect().height))).toBeLessThan(1);
   const max = await scrollRoot.evaluate(el => el.scrollHeight - el.clientHeight);
   let hiddenSeen = false;
   for (let y = 0; y <= max + 180; y += 180) {
