@@ -1444,7 +1444,6 @@ export function useFeedActionables(): UseFeedActionablesResult {
     locationRequests,
     receivedGrants,
     sentPayments,
-    paymentClockNow,
     circleMemberInvites,
     locationRefresh,
     openAnalysis,
