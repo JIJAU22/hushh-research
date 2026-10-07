@@ -25,7 +25,9 @@ import requests
 
 BACKEND_ORIGIN = "https://api.uat.hushh.ai"
 FRONTEND_ORIGIN = "https://hushh-webapp-f2gsa4kfsq-uc.a.run.app"
-FIREBASE_EXCHANGE = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken"
+FIREBASE_EXCHANGE = (
+    "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken"
+)
 BACKEND_PATHS = (
     "/api/one/feed/unread-count",
     "/api/consent/center/summary",
@@ -72,7 +74,15 @@ def _validate_origin(origin: str, *, service: str) -> str:
 
 def _secret(name: str, project: str) -> str:
     result = subprocess.run(
-        ["gcloud", "secrets", "versions", "access", "latest", f"--secret={name}", f"--project={project}"],
+        [
+            "gcloud",
+            "secrets",
+            "versions",
+            "access",
+            "latest",
+            f"--secret={name}",
+            f"--project={project}",
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -106,7 +116,9 @@ def _reviewer_firebase_token(origin: str, project: str) -> str:
         timeout=20,
     )
     if exchanged.status_code != 200:
-        raise RuntimeError(f"Firebase token exchange failed: HTTP {exchanged.status_code}")
+        raise RuntimeError(
+            f"Firebase token exchange failed: HTTP {exchanged.status_code}"
+        )
     token = exchanged.json().get("idToken")
     if not isinstance(token, str) or not token:
         raise RuntimeError("Firebase token exchange returned no ID token")
@@ -121,7 +133,9 @@ def _session() -> requests.Session:
     return session
 
 
-def _request(origin: str, path: str, headers: dict[str, str], scheduled: float) -> Sample:
+def _request(
+    origin: str, path: str, headers: dict[str, str], scheduled: float
+) -> Sample:
     started = time.monotonic()
     try:
         response = _session().get(
@@ -136,22 +150,40 @@ def _request(origin: str, path: str, headers: dict[str, str], scheduled: float) 
     # Include generator queueing in end-to-end latency. If the probe cannot
     # sustain its requested arrival rate, its reported p95 must fail closed.
     elapsed = (time.monotonic() - scheduled) * 1000
-    return Sample(path, status, round(elapsed, 2), round(max(0, started - scheduled) * 1000, 2), transport_error)
+    return Sample(
+        path,
+        status,
+        round(elapsed, 2),
+        round(max(0, started - scheduled) * 1000, 2),
+        transport_error,
+    )
 
 
-def _summarize(samples: list[Sample], service: str, rps: float, duration: int) -> dict[str, object]:
+def _summarize(
+    samples: list[Sample], service: str, rps: float, duration: int
+) -> dict[str, object]:
     by_path: dict[str, list[Sample]] = defaultdict(list)
     for sample in samples:
         by_path[sample.path].append(sample)
     routes = {}
     passed = True
     for path, route_samples in sorted(by_path.items()):
-        latencies = [sample.elapsed_ms for sample in route_samples if 200 <= sample.status < 400]
+        latencies = [
+            sample.elapsed_ms for sample in route_samples if 200 <= sample.status < 400
+        ]
         statuses = Counter(str(sample.status) for sample in route_samples)
         p95 = percentile(latencies, 0.95)
         p99 = percentile(latencies, 0.99)
-        route_passed = bool(latencies) and p95 is not None and p95 <= 2000 and p99 is not None and p99 <= 5000
-        route_passed = route_passed and all(200 <= sample.status < 400 for sample in route_samples)
+        route_passed = (
+            bool(latencies)
+            and p95 is not None
+            and p95 <= 2000
+            and p99 is not None
+            and p99 <= 5000
+        )
+        route_passed = route_passed and all(
+            200 <= sample.status < 400 for sample in route_samples
+        )
         passed = passed and route_passed
         routes[path] = {
             "count": len(route_samples),
@@ -166,19 +198,30 @@ def _summarize(samples: list[Sample], service: str, rps: float, duration: int) -
         "duration_seconds": duration,
         "scheduled_requests": math.floor(rps * duration),
         "completed_requests": len(samples),
-        "max_schedule_lag_ms": max((sample.schedule_lag_ms for sample in samples), default=0),
+        "max_schedule_lag_ms": max(
+            (sample.schedule_lag_ms for sample in samples), default=0
+        ),
         "routes": routes,
         "http_gate_passed": passed and len(samples) == math.floor(rps * duration),
         "note": "Cloud Run CPU, memory, instances, SQL connections, and pool wait require separate Monitoring checks.",
     }
 
 
-def _run(origin: str, paths: tuple[str, ...], headers: dict[str, str], rps: float, duration: int, workers: int) -> list[Sample]:
+def _run(
+    origin: str,
+    paths: tuple[str, ...],
+    headers: dict[str, str],
+    rps: float,
+    duration: int,
+    workers: int,
+) -> list[Sample]:
     # Preflight prevents a long load run against a broken or unauthorized route.
     for path in paths:
         sample = _request(origin, path, headers, time.monotonic())
         if not 200 <= sample.status < 400:
-            raise RuntimeError(f"Read-only preflight failed for {path}: HTTP {sample.status}")
+            raise RuntimeError(
+                f"Read-only preflight failed for {path}: HTTP {sample.status}"
+            )
     total = math.floor(rps * duration)
     start = time.monotonic()
     futures = []
@@ -188,14 +231,21 @@ def _run(origin: str, paths: tuple[str, ...], headers: dict[str, str], rps: floa
             delay = scheduled - time.monotonic()
             if delay > 0:
                 time.sleep(delay)
-            futures.append(executor.submit(_request, origin, paths[index % len(paths)], headers, scheduled))
+            futures.append(
+                executor.submit(
+                    _request, origin, paths[index % len(paths)], headers, scheduled
+                )
+            )
         return [future.result() for future in as_completed(futures)]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--service", choices=("backend", "frontend"), required=True)
-    parser.add_argument("--origin", help="UAT HTTPS origin; defaults to the canonical backend or direct frontend Cloud Run URL")
+    parser.add_argument(
+        "--origin",
+        help="UAT HTTPS origin; defaults to the canonical backend or direct frontend Cloud Run URL",
+    )
     parser.add_argument("--rps", type=float, required=True)
     parser.add_argument("--duration-seconds", type=int, default=600)
     parser.add_argument("--workers", type=int, default=80)
@@ -203,21 +253,43 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if not 0 < args.rps <= 46 or not 1 <= args.duration_seconds <= 600 or not 1 <= args.workers <= 100:
-        parser.error("Use 0 < rps <= 46, 1 <= duration-seconds <= 600, and 1 <= workers <= 100")
+    if (
+        not 0 < args.rps <= 46
+        or not 1 <= args.duration_seconds <= 600
+        or not 1 <= args.workers <= 100
+    ):
+        parser.error(
+            "Use 0 < rps <= 46, 1 <= duration-seconds <= 600, and 1 <= workers <= 100"
+        )
     default = BACKEND_ORIGIN if args.service == "backend" else FRONTEND_ORIGIN
     origin = _validate_origin(args.origin or default, service=args.service)
     paths = BACKEND_PATHS if args.service == "backend" else FRONTEND_PATHS
     if args.dry_run:
-        print(json.dumps({"service": args.service, "origin": origin, "paths": paths, "rps": args.rps, "duration_seconds": args.duration_seconds}))
+        print(
+            json.dumps(
+                {
+                    "service": args.service,
+                    "origin": origin,
+                    "paths": paths,
+                    "rps": args.rps,
+                    "duration_seconds": args.duration_seconds,
+                }
+            )
+        )
         return 0
     headers = {"Cache-Control": "no-cache", "User-Agent": "hushh-capacity-probe/1"}
     if args.service == "backend":
-        headers["Authorization"] = f"Bearer {_reviewer_firebase_token(origin, args.secret_project)}"
-    samples = _run(origin, paths, headers, args.rps, args.duration_seconds, args.workers)
+        headers["Authorization"] = (
+            f"Bearer {_reviewer_firebase_token(origin, args.secret_project)}"
+        )
+    samples = _run(
+        origin, paths, headers, args.rps, args.duration_seconds, args.workers
+    )
     report = _summarize(samples, args.service, args.rps, args.duration_seconds)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(report, sort_keys=True))
     return 0 if report["http_gate_passed"] else 1
 

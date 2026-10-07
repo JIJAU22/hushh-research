@@ -17,36 +17,67 @@ CONNECTION = "hushh-pda-uat:us-central1:hushh-uat-pg"
 SETTINGS = {
     "container": "backend",
     "workers_per_instance": 2,
-    "candidate": {"max_instances": 5, "workers_per_instance": 2, "asyncpg_pool_max": 4,
-                  "sqlalchemy_pool_size": 3, "sqlalchemy_max_overflow": 0},
+    "candidate": {
+        "max_instances": 5,
+        "workers_per_instance": 2,
+        "asyncpg_pool_max": 4,
+        "sqlalchemy_pool_size": 3,
+        "sqlalchemy_max_overflow": 0,
+    },
 }
 
 
-def revision(name: str, *, max_instances: int = 5, overflow: int = 0, created: str = "2026-10-01") -> dict:
+def revision(
+    name: str, *, max_instances: int = 5, overflow: int = 0, created: str = "2026-10-01"
+) -> dict:
     return {
-        "metadata": {"name": name, "creationTimestamp": created,
-                     "annotations": {"autoscaling.knative.dev/maxScale": str(max_instances),
-                                     "run.googleapis.com/cloudsql-instances": CONNECTION}},
-        "spec": {"containers": [{"name": "backend", "env": [
-            {"name": "DB_POOL_MAX_SIZE", "value": "4"},
-            {"name": "DB_SQLALCHEMY_POOL_SIZE", "value": "3"},
-            {"name": "DB_SQLALCHEMY_MAX_OVERFLOW", "value": str(overflow)},
-        ]}]},
+        "metadata": {
+            "name": name,
+            "creationTimestamp": created,
+            "annotations": {
+                "autoscaling.knative.dev/maxScale": str(max_instances),
+                "run.googleapis.com/cloudsql-instances": CONNECTION,
+            },
+        },
+        "spec": {
+            "containers": [
+                {
+                    "name": "backend",
+                    "env": [
+                        {"name": "DB_POOL_MAX_SIZE", "value": "4"},
+                        {"name": "DB_SQLALCHEMY_POOL_SIZE", "value": "3"},
+                        {"name": "DB_SQLALCHEMY_MAX_OVERFLOW", "value": str(overflow)},
+                    ],
+                }
+            ]
+        },
     }
 
 
 class RuntimeCapacityBudgetTest(unittest.TestCase):
     def test_tagged_zero_traffic_and_rollback_are_counted_once(self) -> None:
-        service = {"status": {"traffic": [
-            {"revisionName": "app-serving", "percent": 100},
-            {"revisionName": "app-tagged", "tag": "candidate"},
-        ], "latestReadyRevisionName": "app-serving"}}
-        revisions = [revision("app-serving"), revision("app-tagged", overflow=2),
-                     revision("app-rollback", created="2026-09-30")]
+        service = {
+            "status": {
+                "traffic": [
+                    {"revisionName": "app-serving", "percent": 100},
+                    {"revisionName": "app-tagged", "tag": "candidate"},
+                ],
+                "latestReadyRevisionName": "app-serving",
+            }
+        }
+        revisions = [
+            revision("app-serving"),
+            revision("app-tagged", overflow=2),
+            revision("app-rollback", created="2026-09-30"),
+        ]
         rows = budget.service_budget("app", SETTINGS, service, revisions, CONNECTION)
-        self.assertEqual({row["name"] for row in rows}, {"app-serving", "app-tagged", "app-rollback"})
+        self.assertEqual(
+            {row["name"] for row in rows}, {"app-serving", "app-tagged", "app-rollback"}
+        )
         self.assertEqual(sum(row["connections"] for row in rows), 70 + 90 + 70)
-        self.assertEqual(budget.candidate_connections("app", SETTINGS)["connections"], 70)
+        self.assertEqual(
+            budget.candidate_connections("app", SETTINGS)["connections"], 70
+        )
 
     def test_missing_revision_max_or_pool_fails_closed(self) -> None:
         source = revision("app-serving")
@@ -59,35 +90,97 @@ class RuntimeCapacityBudgetTest(unittest.TestCase):
             budget.revision_connections(source, "app", SETTINGS, CONNECTION)
 
     def test_job_parallelism_and_overlap_are_conservative(self) -> None:
-        job = {"metadata": {"name": "db-job"}, "spec": {"template": {
-            "metadata": {"annotations": {"run.googleapis.com/cloudsql-instances": CONNECTION}},
-            "spec": {"taskCount": 4, "parallelism": 3, "template": {"spec": {"containers": [
-                {"env": [{"name": "DB_POOL_MAX_SIZE", "value": "5"},
-                         {"name": "DB_SQLALCHEMY_POOL_SIZE", "value": "4"},
-                         {"name": "DB_SQLALCHEMY_MAX_OVERFLOW", "value": "1"}]}
-            ]}}},
-        }}}
-        row = budget.job_budget(job, {"connections_per_task": 8, "concurrent_executions": 2}, CONNECTION)
+        job = {
+            "metadata": {"name": "db-job"},
+            "spec": {
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "run.googleapis.com/cloudsql-instances": CONNECTION
+                        }
+                    },
+                    "spec": {
+                        "taskCount": 4,
+                        "parallelism": 3,
+                        "template": {
+                            "spec": {
+                                "containers": [
+                                    {
+                                        "env": [
+                                            {"name": "DB_POOL_MAX_SIZE", "value": "5"},
+                                            {
+                                                "name": "DB_SQLALCHEMY_POOL_SIZE",
+                                                "value": "4",
+                                            },
+                                            {
+                                                "name": "DB_SQLALCHEMY_MAX_OVERFLOW",
+                                                "value": "1",
+                                            },
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                    },
+                }
+            },
+        }
+        row = budget.job_budget(
+            job, {"connections_per_task": 8, "concurrent_executions": 2}, CONNECTION
+        )
         self.assertEqual(row["connections"], 3 * 2 * 10)
 
     def test_budget_fails_when_cloud_sql_limit_has_not_been_verified(self) -> None:
-        profile = {"schema_version": 1, "region": "us-central1", "database_max_connections": 1000,
-                   "admission_limit": 800, "administrative_reserve": 100,
-                   "environments": {"uat": {"project": "hushh-pda-uat", "database_instance": "hushh-uat-pg",
-                                            "services": {}, "jobs": {}}}}
+        profile = {
+            "schema_version": 1,
+            "region": "us-central1",
+            "database_max_connections": 1000,
+            "admission_limit": 800,
+            "administrative_reserve": 100,
+            "environments": {
+                "uat": {
+                    "project": "hushh-pda-uat",
+                    "database_instance": "hushh-uat-pg",
+                    "services": {},
+                    "jobs": {},
+                }
+            },
+        }
         with self.assertRaisesRegex(budget.BudgetError, "max_connections is 100"):
-            budget.evaluate(profile, "uat", {"database_max_connections": 100,
-                                              "services": {}, "jobs": {}})
+            budget.evaluate(
+                profile,
+                "uat",
+                {"database_max_connections": 100, "services": {}, "jobs": {}},
+            )
 
     def test_optional_service_still_reserves_candidate_and_enforces_limit(self) -> None:
-        optional = {"container": "drive-worker", "workers_per_instance": 1, "optional_existing": True,
-                    "candidate": {"max_instances": 2, "workers_per_instance": 1,
-                                  "asyncpg_pool_max": 2, "sqlalchemy_pool_size": 1,
-                                  "sqlalchemy_max_overflow": 0}}
-        profile = {"schema_version": 1, "region": "us-central1", "database_max_connections": 1000,
-                   "admission_limit": 800, "administrative_reserve": 100,
-                   "environments": {"production": {"project": "hushh-pda", "database_instance": "hushh-vault-db",
-                                                   "services": {"drive-worker": optional}, "jobs": {}}}}
+        optional = {
+            "container": "drive-worker",
+            "workers_per_instance": 1,
+            "optional_existing": True,
+            "candidate": {
+                "max_instances": 2,
+                "workers_per_instance": 1,
+                "asyncpg_pool_max": 2,
+                "sqlalchemy_pool_size": 1,
+                "sqlalchemy_max_overflow": 0,
+            },
+        }
+        profile = {
+            "schema_version": 1,
+            "region": "us-central1",
+            "database_max_connections": 1000,
+            "admission_limit": 800,
+            "administrative_reserve": 100,
+            "environments": {
+                "production": {
+                    "project": "hushh-pda",
+                    "database_instance": "hushh-vault-db",
+                    "services": {"drive-worker": optional},
+                    "jobs": {},
+                }
+            },
+        }
         inventory = {"database_max_connections": 1000, "services": {}, "jobs": {}}
         report = budget.evaluate(profile, "production", inventory)
         self.assertEqual(report["projected_connections"], 106)
