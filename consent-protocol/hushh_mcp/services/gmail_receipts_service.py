@@ -1463,6 +1463,10 @@ class GmailReceiptsService:
         """Check provider delivery admission without refreshing or returning tokens."""
 
         row = await asyncio.to_thread(self._fetch_connection_row, user_id=user_id)
+        self._assert_send_row_ready(row)
+
+    def _assert_send_row_ready(self, row: dict[str, Any] | None) -> None:
+        """One admission check shared by observations and actual token rows."""
         if not row or self._derive_connection_state(row) != "connected":
             raise GmailApiError(
                 "Gmail is not connected for this user",
@@ -1482,11 +1486,44 @@ class GmailReceiptsService:
                 code="GMAIL_SEND_DISABLED",
             )
 
-    async def get_send_access_token(self, *, user_id: str) -> str:
+    def _send_grant_identity(self, row: dict[str, Any]) -> dict[str, Any]:
+        self._assert_send_row_ready(row)
+        sub = _clean_text(row.get("google_sub"))
+        label = _clean_text(row.get("google_email"))
+        generation = row.get("send_grant_generation")
+        if not sub or not label or type(generation) is not int or generation < 0:
+            raise GmailApiError(
+                "Review the connected Gmail account before sending.",
+                status_code=409,
+                code="GMAIL_SENDER_UNAVAILABLE",
+            )
+        return {"google_sub": sub, "grant_generation": generation, "account_label": label}
+
+    async def send_grant_identity(self, *, user_id: str) -> dict[str, Any]:
+        """Private review identity; stable across token refresh, not grant changes."""
+        row = await asyncio.to_thread(self._fetch_connection_row, user_id=user_id)
+        self._assert_send_row_ready(row)
+        return self._send_grant_identity(row or {})
+
+    async def get_send_access_token(
+        self, *, user_id: str, expected_sender: dict[str, Any] | None = None
+    ) -> str:
         """Use the canonical receipt connector token only after provider admission."""
 
         await self.assert_send_ready(user_id=user_id)
-        access_token, _row = await self._ensure_access_token(user_id=user_id)
+        access_token, row = await self._ensure_access_token(user_id=user_id)
+        # Admission checked before refresh is not authority for a different
+        # connection returned by refresh. Bind the token's actual row itself.
+        self._assert_send_row_ready(row)
+        if expected_sender is not None:
+            actual = self._send_grant_identity(row)
+            current = await self.send_grant_identity(user_id=user_id)
+            if actual != expected_sender or current != expected_sender:
+                raise GmailApiError(
+                    "The sending account or permission changed. Review the email again.",
+                    status_code=409,
+                    code="GMAIL_SENDER_CHANGED",
+                )
         return access_token
 
     async def get_compose_access_token(self, *, user_id: str) -> str:
@@ -1583,11 +1620,20 @@ class GmailReceiptsService:
             str(row["grant_revision"]),
         )
 
-    async def get_read_access_token(self, *, user_id: str) -> str:
-        """Admit owner-bound Gmail reads without granting send authority."""
+    async def get_read_access_token(self, *, user_id: str, force_refresh: bool = False) -> str:
+        """Admit owner-bound Gmail reads without granting send authority.
+
+        ``force_refresh`` is for a caller whose token Google just rejected
+        before its recorded expiry; it never widens the granted scopes.
+        """
 
         await self.assert_read_ready(user_id=user_id)
-        access_token, current_row = await self._ensure_access_token(user_id=user_id)
+        if force_refresh:
+            access_token, current_row = await self._ensure_access_token(
+                user_id=user_id, force_refresh=True
+            )
+        else:
+            access_token, current_row = await self._ensure_access_token(user_id=user_id)
         if _GMAIL_READONLY_SCOPE not in self._granted_scopes(current_row):
             raise GmailApiError(
                 "Reconnect Gmail to grant email reading permission.",
@@ -1867,6 +1913,7 @@ class GmailReceiptsService:
                 access_token_expires_at = EXCLUDED.access_token_expires_at,
                 auto_sync_enabled = TRUE,
                 send_enabled = EXCLUDED.send_enabled,
+                send_grant_generation = kai_gmail_connections.send_grant_generation + 1,
                 revoked = FALSE,
                 history_id = COALESCE(EXCLUDED.history_id, kai_gmail_connections.history_id),
                 watch_status = EXCLUDED.watch_status,
@@ -2292,7 +2339,9 @@ class GmailReceiptsService:
             return False
         return _clean_text(result.data[0].get("status")) in {"queued", "running"}
 
-    async def _ensure_access_token(self, *, user_id: str) -> tuple[str, dict[str, Any]]:
+    async def _ensure_access_token(
+        self, *, user_id: str, force_refresh: bool = False
+    ) -> tuple[str, dict[str, Any]]:
         row = await asyncio.to_thread(self._fetch_connection_row, user_id=user_id)
         if not row:
             raise GmailApiError("Gmail is not connected for this user", status_code=404)
@@ -2308,7 +2357,12 @@ class GmailReceiptsService:
         )
         expires_at = _parse_iso(row.get("access_token_expires_at"))
 
-        if access_token and expires_at and expires_at > (_utcnow() + timedelta(seconds=90)):
+        if (
+            not force_refresh
+            and access_token
+            and expires_at
+            and expires_at > (_utcnow() + timedelta(seconds=90))
+        ):
             return access_token, row
 
         refresh_token = self._decrypt_token(

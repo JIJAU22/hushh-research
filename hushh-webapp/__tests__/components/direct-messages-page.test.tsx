@@ -33,6 +33,10 @@ const mocks = vi.hoisted(() => {
     markConversationRead: vi.fn(),
     openEvents: vi.fn(),
     sendMessage: vi.fn(),
+    editMessage: vi.fn(),
+    deleteMessage: vi.fn(),
+    reactToMessage: vi.fn(),
+    morphyToast: { error: vi.fn(), info: vi.fn(), promise: vi.fn() },
     requestAgentConversationAfterRoute: vi.fn(),
   };
 });
@@ -68,6 +72,10 @@ vi.mock("@/lib/agent/agent-voice-settings", () => ({
     mocks.requestAgentConversationAfterRoute(...args),
 }));
 
+vi.mock("@/lib/morphy-ux/morphy", () => ({
+  morphyToast: mocks.morphyToast,
+}));
+
 vi.mock("@/lib/services/direct-messages-service", () => ({
   DIRECT_MESSAGE_MAX_LENGTH: 2_000,
   DirectMessagesService: {
@@ -79,6 +87,9 @@ vi.mock("@/lib/services/direct-messages-service", () => ({
       mocks.markConversationRead(...args),
     openEvents: (...args: unknown[]) => mocks.openEvents(...args),
     sendMessage: (...args: unknown[]) => mocks.sendMessage(...args),
+    editMessage: (...args: unknown[]) => mocks.editMessage(...args),
+    deleteMessage: (...args: unknown[]) => mocks.deleteMessage(...args),
+    reactToMessage: (...args: unknown[]) => mocks.reactToMessage(...args),
   },
 }));
 
@@ -117,6 +128,9 @@ describe("DirectMessagesPage", () => {
     });
     mocks.markConversationRead.mockResolvedValue({ readCount: 0, readAt: null });
     mocks.openEvents.mockImplementation(() => new Promise(() => undefined));
+    mocks.morphyToast.error.mockReset();
+    mocks.morphyToast.info.mockReset();
+    mocks.morphyToast.promise.mockReset();
     mocks.sendMessage.mockResolvedValue({
       conversation: mocks.conversation,
       message: {
@@ -127,6 +141,26 @@ describe("DirectMessagesPage", () => {
         createdAt: "2026-10-06T10:01:00.000Z",
         readAt: null,
       },
+    });
+    mocks.editMessage.mockResolvedValue({
+      id: "message-1",
+      conversationId: "conversation-1",
+      senderIsViewer: true,
+      content: "Edited message",
+      createdAt: "2026-10-06T10:01:00.000Z",
+      readAt: null,
+      editedAt: "2026-10-06T10:02:00.000Z",
+      reactions: [],
+    });
+    mocks.deleteMessage.mockResolvedValue({ scope: "me", message: null });
+    mocks.reactToMessage.mockResolvedValue({
+      id: "message-1",
+      conversationId: "conversation-1",
+      senderIsViewer: true,
+      content: "Hello Ankit",
+      createdAt: "2026-10-06T10:01:00.000Z",
+      readAt: null,
+      reactions: [{ emoji: "😀", count: 1, reactedByViewer: true }],
     });
   });
 
@@ -182,5 +216,96 @@ describe("DirectMessagesPage", () => {
       ROUTES.HOME,
     );
     expect(mocks.router.push).toHaveBeenCalledWith(ROUTES.HOME);
+  });
+
+  it("exposes message reactions and replies after a bubble is tapped", async () => {
+    const message = {
+      id: "message-1",
+      conversationId: "conversation-1",
+      senderIsViewer: true,
+      content: "Hello Ankit",
+      createdAt: "2026-10-06T10:01:00.000Z",
+      readAt: null,
+      reactions: [],
+    };
+    mocks.getConversationMessages.mockResolvedValue({
+      conversation: mocks.conversation,
+      items: [message],
+      canSend: true,
+      disconnectedNotice: null,
+      nextBefore: null,
+    });
+
+    renderConnectionThread();
+    fireEvent.click(await screen.findByText("Hello Ankit"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose a reaction" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Use 😀" })[0]!);
+    await waitFor(() =>
+      expect(mocks.reactToMessage).toHaveBeenCalledWith({
+        idToken: "test-token",
+        conversationId: "conversation-1",
+        messageId: "message-1",
+        emoji: "😀",
+      }),
+    );
+    expect(mocks.morphyToast.promise).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reply" }));
+    expect(screen.getByText("Replying to yourself")).toBeVisible();
+
+    const composer = screen.getByRole("textbox", {
+      name: "Message Ankit Kumar Singh",
+    });
+    fireEvent.change(composer, { target: { value: "Thanks" } });
+    fireEvent.submit(composer.closest("form")!);
+
+    await waitFor(() =>
+      expect(mocks.sendMessage).toHaveBeenCalledWith({
+        idToken: "test-token",
+        content: "Thanks",
+        recipientPersonRef: "person-1",
+        replyToMessageId: "message-1",
+      }),
+    );
+  });
+
+  it("keeps a failed reply in the composer without a toast", async () => {
+    const message = {
+      id: "message-1",
+      conversationId: "conversation-1",
+      senderIsViewer: false,
+      content: "Can you review this?",
+      createdAt: "2026-10-06T10:01:00.000Z",
+      readAt: null,
+      reactions: [],
+    };
+    mocks.getConversationMessages.mockResolvedValue({
+      conversation: mocks.conversation,
+      items: [message],
+      canSend: true,
+      disconnectedNotice: null,
+      nextBefore: null,
+    });
+    mocks.sendMessage.mockRejectedValueOnce(new Error("temporary failure"));
+
+    renderConnectionThread();
+    fireEvent.click(await screen.findByText("Can you review this?"));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reply" }));
+
+    const composer = screen.getByRole("textbox", {
+      name: "Message Ankit Kumar Singh",
+    });
+    fireEvent.change(composer, { target: { value: "Yes, I can." } });
+    fireEvent.submit(composer.closest("form")!);
+
+    expect(
+      await screen.findByText("Couldn’t send this reply. Your message is ready to try again."),
+    ).toBeVisible();
+    expect(composer).toHaveValue("Yes, I can.");
+    expect(screen.getByText("Replying to Ankit Kumar Singh")).toBeVisible();
+    expect(mocks.morphyToast.error).not.toHaveBeenCalled();
   });
 });

@@ -16,12 +16,13 @@ import asyncio
 import hashlib
 import logging
 import os
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import quote
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from hushh_mcp.one_voice.tools.base import (
     CircleRef,
@@ -39,14 +40,19 @@ from hushh_mcp.one_voice.tools.base import (
     Unsupported,
     now_iso,
 )
+from hushh_mcp.one_voice.tools.name_parts import NamePart, render_name_input, spelled_part_words
 from hushh_mcp.one_voice.tools.people import ServiceError as PeopleServiceError
 from hushh_mcp.one_voice.tools.people import load_people_snapshot
 from hushh_mcp.one_voice.tools.spelling import (
     clean_spelled_word,
     missing_spelled_words,
+    name_word_changes,
+    name_word_slots,
     spell_out,
     spelling_key,
     unique_spelled_words,
+    word_key,
+    word_keys,
 )
 from hushh_mcp.services.one_location_agent_service import OneLocationAgentError
 from hushh_mcp.services.one_location_circle_service import (
@@ -65,6 +71,8 @@ logger = logging.getLogger(__name__)
 CIRCLE_SERVICE = "circles"
 # A proposed name dropped a word the person spelled letter by letter.
 SPELLED_WORD_MISSING = "spelled_word_missing"
+# A correction changed a word of the name under review that it did not declare.
+NAME_CHANGED = "name_changed"
 CIRCLE_JOIN_PATH = "/circle/join"
 # Client surfaces to refresh after a successful mutation (screen ids from session.py).
 REFRESH_CIRCLES = ("location_circles",)
@@ -705,31 +713,82 @@ async def list_circle_members(ctx: ToolContext, args: ListCircleMembersInput) ->
 # At most this many spelled words per call. A bound on the list only: Vertex
 # Live refuses a schema with length bounds on array items.
 MAX_SPELLED_WORDS_PER_CALL = 4
+# At most this many changed words per call; a bound on the list only, as above.
+MAX_CHANGED_WORDS_PER_CALL = 8
+# A changed word longer than a whole circle name is not a word of one. Checked
+# by the validator, never declared in the schema (see above).
+MAX_CHANGED_WORD_LENGTH = 80
+
+
+class ChangedWord(BaseModel):
+    """One word a correction changes: ``old`` as on the waiting card, ``new`` as
+    it becomes. An empty ``old`` is an added word, an empty ``new`` a removed one."""
+
+    model_config = ConfigDict(extra="forbid")
+    old: str = ""
+    new: str = ""
+
+    @field_validator("old", "new")
+    @classmethod
+    def _bounded(cls, value: str) -> str:
+        if len(value) > MAX_CHANGED_WORD_LENGTH:
+            raise ValueError("a changed word is at most 80 characters")
+        return value
 
 
 class CreateCircleInput(ToolInput):
+    name_parts: list[NamePart] = Field(
+        default_factory=list,
+        min_length=1,
+        max_length=16,
+        exclude=True,
+        description=(
+            "Spelled name: ordered parts, including spaces and untouched words. Omit name."
+        ),
+    )
     name: str = Field(
+        default="",
+        validate_default=True,
         min_length=1,
         max_length=80,
-        description="The circle's name, exactly as the person said or spelled it.",
+        description="The circle's complete name. Omit when supplying name_parts.",
     )
     kind: CircleKind = Field(default="other")
     spelled_words: list[str] = Field(
         default_factory=list,
+        validate_default=True,
         max_length=MAX_SPELLED_WORDS_PER_CALL,
         description=(
-            "Each word of this name the person spelled letter by letter, as one word of "
-            "letters and digits (k a y r a -> KAYRA). Keep them in every correction."
+            "Legacy spelled words (k a y r a -> KAYRA). name_parts retains these automatically."
         ),
     )
     release_spelled_words: list[str] = Field(
         default_factory=list,
         max_length=MAX_SPELLED_WORDS_PER_CALL,
         description=(
-            "An earlier spelled word the person changed or dropped, or every earlier "
-            "spelled word when they now name a different circle."
+            "Earlier spelled words explicitly changed/dropped; release all for a different circle."
         ),
     )
+    changed_words: list[ChangedWord] = Field(
+        default_factory=list,
+        max_length=MAX_CHANGED_WORDS_PER_CALL,
+        description=(
+            "Unspelled corrections, even after cancel: old as reviewed (empty for addition), "
+            "new as proposed (empty for removal). Keep every undeclared word."
+        ),
+    )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _render_name(cls, value: Any, info: ValidationInfo) -> str:
+        return render_name_input(value, info.data.get("name_parts") or None)
+
+    @field_validator("spelled_words", mode="before")
+    @classmethod
+    def _retain_parts(cls, value: Any, info: ValidationInfo) -> Any:
+        if not isinstance(value, list):
+            return value
+        return [*value, *spelled_part_words(info.data.get("name_parts"))]
 
     @field_validator("spelled_words", "release_spelled_words")
     @classmethod
@@ -783,6 +842,184 @@ def _spelling_refused(
     )
 
 
+def _change_phrase(dropped: Sequence[str], put: Sequence[str]) -> str:
+    old, new = " ".join(dropped), " ".join(put)
+    if dropped and put:
+        return f'change "{old}" to "{new}"'
+    if dropped:
+        return f'drop "{old}"'
+    return f'add "{new}"'
+
+
+def _name_changed(fact: str, *, slots: int, order: str) -> Rejected:
+    # Counts and a short enum only: never a word of either name.
+    logger.info("one_voice.name_lineage.refused slots=%d order=%s", slots, order)
+    return Rejected(
+        reason_code=NAME_CHANGED,
+        needs="repeat_name",
+        spoken_facts=[fact],
+        retire_open_proposal=True,
+    )
+
+
+def _declared_words(text: str, names: set[str]) -> list[str]:
+    """The words one side of a declared change names, read against the name it
+    describes: its words as written when each is a word of that name, else
+    letters spelled one by one joined into one word, as in ``spelled_words``."""
+    words = text.split()
+    if words and all(word_key(word) in names for word in words):
+        return words
+    joined = clean_spelled_word(text)
+    return [joined] if joined else words
+
+
+@dataclass(frozen=True)
+class _Declared:
+    """The word keys a call declares changed, each word once.
+
+    ``changed`` are old words a ``changed_words`` pair gives a new word for;
+    ``dropped`` are old words declared with no new word, and the words in
+    ``release_spelled_words`` (the person changed or dropped that spelled
+    word); ``added`` are the pairs' new words.
+    """
+
+    changed: Counter[str]
+    dropped: Counter[str]
+    added: Counter[str]
+
+
+def _declared_changes(
+    args: CreateCircleInput, old_names: set[str], new_names: set[str]
+) -> _Declared:
+    """What this call declares. A ``changed_words`` pair naming the same words
+    in the same order changed nothing and declares nothing."""
+    changed: Counter[str] = Counter()
+    dropped: Counter[str] = Counter()
+    added: Counter[str] = Counter()
+    for change in args.changed_words:
+        old = [word_key(word) for word in _declared_words(change.old, old_names)]
+        new = [word_key(word) for word in _declared_words(change.new, new_names)]
+        if old == new:
+            continue
+        (changed if new else dropped).update(old)
+        added.update(new)
+    dropped.update(word_key(word) for word in args.release_spelled_words)
+    return _Declared(changed=changed, dropped=dropped, added=added)
+
+
+def _use(pool: Counter[str], key: str) -> bool:
+    """Use up one ``key`` from ``pool``; False when none is left."""
+    if pool[key] <= 0:
+        return False
+    pool[key] -= 1
+    return True
+
+
+def _corrects_circle_name(baseline: str, args: CreateCircleInput) -> bool:
+    base_keys = set(word_keys(baseline))
+    declared_old = {
+        word_key(word)
+        for change in args.changed_words
+        for word in _declared_words(change.old, base_keys)
+    }
+    return bool(base_keys & set(word_keys(args.name)) or base_keys & declared_old)
+
+
+def retained_creation_kind(ctx: ToolContext, args: CreateCircleInput) -> CircleKind | None:
+    """Keep an omitted kind through a rejected correction's existing baseline.
+
+    This is a default for related proposals only. An explicit kind is always
+    the model's field, and an unrelated name uses the ordinary new-circle default.
+    """
+    name = ctx.entities.live_circle_name_baseline(_spelling_now())
+    baseline = ctx.entities.circle_name_baseline
+    if name is None or baseline is None or not _corrects_circle_name(name, args):
+        return None
+    return baseline.kind
+
+
+def _name_lineage(
+    baseline: str | None, args: CreateCircleInput
+) -> tuple[Rejected | None, list[str]]:
+    """Judge a proposal against the name under review. Never edits the name.
+
+    Returns a refusal, or the words of the name under review the person
+    changed on purpose, so a spelled one among them stops being kept.
+
+    ``baseline`` is the name the last passing proposal showed the person. A
+    proposal corrects it when they share a word or when a ``changed_words``
+    old names one of its words; one that does neither is a different circle
+    and is not compared. A correction passes when, in each stretch where the
+    names differ, every word it adds is declared added or spelled in this call,
+    and every word it removes is declared removed or replaced by one of those
+    spelled words. Each declaration and each spelled word accounts for one
+    word, once: a spelled word declared as a change's new word replaces only
+    that change's old word, and a word declared removed (or released) with a
+    spelled word in its stretch is one change, a respelling, so that spelled
+    word replaces nothing else. A word that moved is removed in one stretch and
+    added in another, so a move is declared like any other change. Which words
+    changed is the spelling module's exact word comparison; whether the person
+    asked for a change is only ever the model's declaration.
+    """
+    now_keys = set(word_keys(args.name))
+    base_keys = set(word_keys(baseline)) if baseline is not None else set()
+    released = [
+        clean_spelled_word(word) or word
+        for change in args.changed_words
+        for word in _declared_words(change.old, base_keys)
+        if word_key(word) not in now_keys
+    ]
+    if baseline is None:
+        return None, released
+    if not _corrects_circle_name(baseline, args):
+        return None, released
+    declared = _declared_changes(args, base_keys, now_keys)
+    spelled = Counter(word_key(word) for word in args.spelled_words)
+    slots = name_word_slots(baseline, args.name)
+    undeclared: list[str] = []
+    for dropped, put in slots:
+        loose_new = [word for word in put if not _use(declared.added, word_key(word))]
+        replacements = sum(1 for word in loose_new if _use(spelled, word_key(word)))
+        loose_old: list[str] = []
+        respelled = 0
+        for word in dropped:
+            key = word_key(word)
+            if _use(declared.changed, key):
+                continue
+            if _use(declared.dropped, key):
+                respelled += 1
+                continue
+            loose_old.append(word)
+        # A declared removal with a spelled word in its stretch is that word
+        # respelled: the spelled word covers it and nothing else.
+        spare = max(0, replacements - respelled)
+        if len(loose_new) > replacements or len(loose_old) > spare:
+            undeclared.append(_change_phrase(dropped, put))
+        else:
+            released.extend(clean_spelled_word(word) or word for word in loose_old)
+    if not undeclared:
+        return None, released
+    if not name_word_changes(baseline, args.name)[2]:
+        return (
+            _name_changed(
+                f'This would put the words in a different order: "{args.name}". '
+                "Is that what you want?",
+                slots=len(undeclared),
+                order="moved",
+            ),
+            [],
+        )
+    lead = "This would also" if len(undeclared) < len(slots) else "This would"
+    return (
+        _name_changed(
+            f"{lead} {join_names_for_speech(undeclared)}. Is that what you want?",
+            slots=len(undeclared),
+            order="kept",
+        ),
+        [],
+    )
+
+
 def _owned_circle_named(rows: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
     wanted = normalize_spoken_name(name)
     for row in rows:
@@ -791,6 +1028,34 @@ def _owned_circle_named(rows: list[dict[str, Any]], name: str) -> dict[str, Any]
         if normalize_spoken_name(str(row.get("name") or "")) == wanted:
             return row
     return None
+
+
+_SPELLING_ARGS = frozenset(
+    {"name_parts", "spelled_words", "release_spelled_words", "changed_words"}
+)
+
+
+def _invalid_create_circle_correction(
+    raw_args: dict[str, Any], failed: frozenset[str]
+) -> Rejected | None:
+    """The refusal for a correction whose spelling could not be read: ask for the
+    spelled word again, not for a missing detail.
+
+    The executor has already retired the card this proposal was correcting.
+    Only which arguments failed validation is checked (their names, never their
+    values); a failure anywhere else keeps the executor's generic refusal, which
+    names the field. ``None`` keeps that refusal.
+    """
+    if not failed & _SPELLING_ARGS:
+        return None
+    return Rejected(
+        reason_code="invalid_spelling",
+        needs="repeat_name",
+        spoken_facts=[
+            "I couldn't read how that was spelled. Which word did they spell? "
+            "Ask them to spell just that word."
+        ],
+    )
 
 
 def _prepared_spelled_words(snapshot: dict[str, Any] | None) -> list[str]:
@@ -820,6 +1085,7 @@ async def create_circle(ctx: ToolContext, args: CreateCircleInput) -> ToolResult
         if existing is not None:
             circle = _remember(ctx, existing)
             ctx.entities.clear_spelled_words()
+            ctx.entities.clear_circle_name_baseline()
             return CreateCircleResult(
                 status="already_exists",
                 circle=CircleSummary.from_row(existing),
@@ -833,6 +1099,7 @@ async def create_circle(ctx: ToolContext, args: CreateCircleInput) -> ToolResult
     row = dict(row or {})
     circle = _remember(ctx, row)
     ctx.entities.clear_spelled_words()
+    ctx.entities.clear_circle_name_baseline()
     return CreateCircleResult(
         status="created",
         circle=CircleSummary.from_row(row),
@@ -856,19 +1123,40 @@ async def prepare_create_circle(ctx: ToolContext, args: CreateCircleInput) -> Pr
     model's own name text, exactly, and asks when one is missing. It never
     edits the name.
 
-    The person's words are kept before the check, so a refused call still
+    The person's words are kept before any check, so a refused call still
     remembers how they spelled it. A proposal that passes renews every word it
     needed, so retention runs from the last proposal that used a word.
+
+    Before the spelling check, a correction of the name under review (the last
+    one that passed, kept the same 3 minutes and across a cancel) must declare
+    every word it changes (see ``_name_lineage``), so an untouched word cannot
+    change whether or not it was ever declared as spelled. Only a call that
+    passes that check releases a spelled word, declared or respelled: a refused
+    one leaves every word for the next proposal to keep. A proposal that passes
+    becomes the name under review.
+
+    A name the person typed (``ctx.typed_name``) is theirs as written: it
+    releases every spelled word, skips both checks and the spelled read-back,
+    and becomes the name under review.
     """
     now = _spelling_now()
-    ctx.entities.release_spelled_words(args.release_spelled_words)
-    retained = ctx.entities.retained_spelled_words(now)
+    if ctx.typed_name:
+        logger.info("one_voice.circle_name.typed")
+        ctx.entities.clear_spelled_words()
+        ctx.entities.set_circle_name_baseline(args.name, now, kind=args.kind)
+        return Prepared(summary=summarize_create_circle(ctx, args), snapshot={"spelled_words": []})
     ctx.entities.remember_spelled_words(args.spelled_words, now)
+    refused, released = _name_lineage(ctx.entities.live_circle_name_baseline(now), args)
+    if refused is not None:
+        return refused
+    ctx.entities.release_spelled_words([*args.release_spelled_words, *released])
+    retained = ctx.entities.retained_spelled_words(now)
     required = unique_spelled_words([*retained, *args.spelled_words])
     missing = missing_spelled_words(args.name, required)
     if missing:
         return _spelling_refused(missing, args.spelled_words, retire_open_proposal=True)
     ctx.entities.remember_spelled_words(required, now)
+    ctx.entities.set_circle_name_baseline(args.name, now, kind=args.kind)
     summary = summarize_create_circle(ctx, args) + "".join(
         f", with {word} spelled {spell_out(word)}" for word in required
     )
@@ -2206,10 +2494,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         input_model=GetCircleDetailsInput,
         output_model=GetCircleDetailsResult,
         description=(
-            "Read one circle's current name, kind, member count, whether the person owns it, "
-            "and what they can do with it (add members, rename, delete, leave). Read only. With "
-            "no circle argument it reads the circle whose screen is open, so it answers 'this "
-            "circle'. Use it to answer who manages a circle or what kind it is."
+            "Read a circle's name, kind, member count, ownership and allowed actions "
+            "(add, rename, delete, leave). No argument reads the circle on screen."
         ),
         handler=get_circle_details,
     ),
@@ -2220,12 +2506,9 @@ TOOLS: tuple[ToolSpec, ...] = (
         input_model=ListCircleMembersInput,
         output_model=ListCircleMembersResult,
         description=(
-            "Read who is in a circle: one page of members with each one's canonical id, real "
-            "name, role, and relationship to the person. Read only. With no circle argument it "
-            "reads the circle whose screen is open. Use it for 'who is in this group' and to "
-            "find the member to remove: someone can be in a circle without being a connection, "
-            "so remove_circle_member needs a member from here confirmed with confirm_person. "
-            "The result says whether more pages follow; the total is the total, not the page."
+            "Read one page of members: ids, names, roles and relationships. No argument reads "
+            "the circle on screen. Members need not be connections: before remove_circle_member, "
+            "confirm one from here with confirm_person. Counts are totals; has_more marks paging."
         ),
         handler=list_circle_members,
     ),
@@ -2236,18 +2519,18 @@ TOOLS: tuple[ToolSpec, ...] = (
         input_model=CreateCircleInput,
         output_model=CreateCircleResult,
         description=(
-            "Create an empty circle with the given name (kind family, friends, or other). "
-            "Creating a circle sends no invitations and shares no location; adding people is a "
-            "separate action. Reports already_exists when the person already owns one by that name."
-            " Use the name exactly as the person said or spelled it; a spelled word stays in "
-            "every correction until they change it. If it answers spelled_word_missing for a "
-            "word they changed, or for a different circle, call it again with that word in "
-            "release_spelled_words."
+            "Create an empty circle (family/friends/other); no invitations or location sharing. "
+            "Returns already_exists for an owned match. For spelling use name_parts, omit name: "
+            "characters assemble literally and are retained; literal parts keep spaces/rest. "
+            "Correct only requested words, even after cancel. Declare unspelled edits in "
+            "changed_words, explicit respelling/removal in release_spelled_words. Keep the rest. "
+            "On name_changed/spelled_word_missing, retry with the requested change declared."
         ),
         handler=create_circle,
         ui_refresh=REFRESH_CIRCLES,
         summarize=summarize_create_circle,
         prepare=prepare_create_circle,
+        on_invalid_correction=_invalid_create_circle_correction,
         # A new circle names no existing person or circle, so a lookup made for
         # a follow-up ("yes, and add Priya to it") must not cancel its card.
         lookup_targets=(),

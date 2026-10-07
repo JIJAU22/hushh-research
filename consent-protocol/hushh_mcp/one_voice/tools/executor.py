@@ -3,7 +3,8 @@
 The executor is where the hallucination contract becomes mechanical:
 
 * unknown tool → ``rejected/unknown_tool``;
-* arguments that do not parse → ``rejected/invalid_arguments``;
+* arguments that do not parse → ``rejected/invalid_arguments``; for a
+  ``confirm_*`` tool the open card that proposal was correcting is retired too;
 * a person/circle id not confirmed in this conversation → ``rejected/*_not_confirmed``;
 * a ``confirm_*`` policy → a pending row and ``confirmation_required``; the
   handler runs only after :meth:`ToolExecutor.execute_pending`.
@@ -265,8 +266,20 @@ class ToolExecutor:
         try:
             parsed = spec.input_model.model_validate(args or {})
         except ValidationError as exc:
-            missing = sorted({str(err.get("loc", ("?",))[0]) for err in exc.errors()})
+            missing = sorted({str((err.get("loc") or ("?",))[0]) for err in exc.errors()})
             facts = [f"I'm missing {', '.join(missing) or 'a detail'} for that."]
+            if name in {"send_mail", "reply_mail", "schedule_mail"}:
+                too_long = {
+                    str((err.get("loc") or ("?",))[0])
+                    for err in exc.errors()
+                    if err.get("type") == "string_too_long"
+                }
+                if too_long & {"message", "subject"}:
+                    field_name = "message" if "message" in too_long else "subject"
+                    facts = [
+                        f"That {field_name} is too long for a voice draft. "
+                        "Shorten it and try again."
+                    ]
             if "circle" in missing and ctx.screen.active_circle_id:
                 # The person is looking at a circle: say where its id comes from
                 # rather than leaving the model to guess one.
@@ -274,10 +287,12 @@ class ToolExecutor:
                     "Call get_circle_details with no argument to read the circle on screen, "
                     "then use its circle_id."
                 )
-            return ToolCallOutcome(
-                result=Rejected(reason_code="invalid_arguments", spoken_facts=facts),
-                spec=spec,
-            )
+            invalid = Rejected(reason_code="invalid_arguments", spoken_facts=facts)
+            if spec.policy.needs_confirmation:
+                return await self._refuse_correction(
+                    ctx, spec, args or {}, invalid, phase="arguments", failed=frozenset(missing)
+                )
+            return ToolCallOutcome(result=invalid, spec=spec)
         problem = self._entity_problem(spec, ctx, parsed)
         if problem is not None:
             return ToolCallOutcome(result=problem, spec=spec, parsed=parsed)
@@ -318,6 +333,25 @@ class ToolExecutor:
                     parsed=parsed,
                 )
             timings["pending"] = _elapsed_ms(pending_started)
+            # A correction only changes declared fields. The schema default is
+            # for a new circle, not permission to reset an existing proposal's
+            # kind when the owner only corrects its name.
+            if name == "create_circle" and "kind" not in parsed.model_fields_set:
+                from hushh_mcp.one_voice.tools.circles import (
+                    CreateCircleInput,
+                    retained_creation_kind,
+                )
+
+                previous = next((row for row in open_rows if row.tool_name == name), None)
+                previous_kind = (
+                    previous.args.get("kind")
+                    if previous is not None
+                    else retained_creation_kind(ctx, parsed)
+                    if isinstance(parsed, CreateCircleInput)
+                    else None
+                )
+                if previous_kind in {"family", "friends", "other"}:
+                    parsed = parsed.model_copy(update={"kind": previous_kind})
             target = self._target_key(ctx, spec, parsed)
             existing = self._open_duplicate(ctx, spec, parsed, open_rows, target=target)
             if existing is not None:
@@ -393,15 +427,19 @@ class ToolExecutor:
                         spec.name,
                         type(exc).__name__,
                     )
-                    return ToolCallOutcome(
-                        result=Rejected(
-                            reason_code="prepare_failed",
-                            spoken_facts=[
-                                "I couldn't check what that would do right now, so I "
-                                "haven't prepared it. Nothing was changed."
-                            ],
-                        ),
-                        spec=spec,
+                    unprepared = Rejected(
+                        reason_code="prepare_failed",
+                        spoken_facts=[
+                            "I couldn't check what that would do right now, so I "
+                            "haven't prepared it. Nothing was changed."
+                        ],
+                    )
+                    return await self._refuse_correction(
+                        ctx,
+                        spec,
+                        args or {},
+                        unprepared,
+                        phase="prepare",
                         parsed=parsed,
                         superseded=superseded,
                     )
@@ -709,6 +747,65 @@ class ToolExecutor:
             logger.warning("one_voice.pending.storage_failed phase=retire tool=%s", spec.name)
             return retired, False
         return retired, True
+
+    async def _refuse_correction(
+        self,
+        ctx: ToolContext,
+        spec: ToolSpec,
+        raw_args: dict[str, Any],
+        default: Rejected,
+        *,
+        phase: Literal["arguments", "prepare"],
+        parsed: Any = None,
+        superseded: list[PendingAction] | None = None,
+        failed: frozenset[str] = frozenset(),
+    ) -> ToolCallOutcome:
+        """Refuse a confirm-tier proposal that could not be read or prepared.
+
+        It was aimed at the open card of its own correction key just as a
+        well-formed correction is, so that card is retired with the refusal: a
+        yes must not reach what the person was correcting. If it cannot be
+        retired, nothing is asked over it (fail closed). The answer is the
+        tool's own ``on_invalid_correction`` refusal when it gives one, else
+        ``default``. ``raw_args`` go only to that hook, never to a log, with
+        ``failed``: the names of the top-level arguments that failed validation.
+        """
+        retired, complete = await self._retire_corrected(ctx, spec)
+        if retired:
+            # The next yes answers this refusal's question, never a card the
+            # model cancelled earlier: a re-proposal is asked fresh.
+            self._recent_cancels.pop(ctx.conversation_id, None)
+            logger.info(
+                "one_voice.pending.retired phase=%s tool=%s count=%d",
+                phase,
+                spec.name,
+                len(retired),
+            )
+        cancelled = [*(superseded or []), *retired]
+        if not complete:
+            return ToolCallOutcome(
+                result=_storage_unavailable(
+                    "I couldn't prepare that right now. Nothing was changed. "
+                    "Please try again in a moment."
+                ),
+                spec=spec,
+                parsed=parsed,
+                superseded=cancelled,
+            )
+        result = default
+        if spec.on_invalid_correction is not None:
+            try:
+                specific = spec.on_invalid_correction(dict(raw_args), failed)
+            except Exception as exc:  # noqa: BLE001 - a broken hook keeps the generic refusal
+                logger.warning(
+                    "one_voice.tool.refusal_failed tool=%s error=%s",
+                    spec.name,
+                    type(exc).__name__,
+                )
+                specific = None
+            if isinstance(specific, Rejected):
+                result = specific
+        return ToolCallOutcome(result=result, spec=spec, parsed=parsed, superseded=cancelled)
 
     async def _resolve_failed(
         self,

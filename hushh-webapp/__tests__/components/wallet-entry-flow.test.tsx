@@ -1,3 +1,5 @@
+import { Preferences } from "@capacitor/preferences";
+import { removeLocalItem } from "@/lib/utils/session-storage";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -83,8 +85,10 @@ function makeCards(count: number) {
 }
 
 describe("Wallet visit introduction", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    removeLocalItem("wallet_introduction_seen_v1:user_1");
+    await Preferences.remove({ key: "wallet_introduction_seen_v1:user_1" });
     authMock.user = { uid: "user_1" };
     vaultMock.locked = false;
     serviceMock.listCardSummaries.mockResolvedValue([]);
@@ -95,13 +99,13 @@ describe("Wallet visit introduction", () => {
     await screen.findByRole("tab", { name: "Cards" });
     await waitFor(() => expect(screen.getByRole("tab", { name: "Add" })).not.toBeDisabled());
   };
-  it("shows the illustration every visit, and demo Cards after Continue without saving them", async () => {
+  it("shows the illustration once, then opens Cards on later visits", async () => {
     const page = render(<WalletWorkspace />);
-    expect(screen.getByTestId("one-wallet-empty-art")).toBeTruthy();
+    expect(await screen.findByTestId("one-wallet-empty-art")).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Cards" })).toBeNull();
     await enter();
-    expect(screen.getByTestId("wallet-add-preview")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Travel - Demo" }));
+    expect(screen.getByTestId("wallet-preview-collection")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Travel, ending 4444" }));
     expect(serviceMock.addCard).not.toHaveBeenCalled();
     expect(serviceMock.getCard).not.toHaveBeenCalled();
     expect(serviceMock.deleteCard).not.toHaveBeenCalled();
@@ -111,7 +115,8 @@ describe("Wallet visit introduction", () => {
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     page.unmount();
     render(<WalletWorkspace />);
-    expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
+    expect(await screen.findByRole("tab", { name: "Cards" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   });
   it("opens entry directly in Add, retains masked drafts across tabs, and clears a cancelled draft", async () => {
     render(<WalletWorkspace />);
@@ -133,9 +138,10 @@ describe("Wallet visit introduction", () => {
     serviceMock.listCardSummaries.mockResolvedValue(makeCards(2));
     render(<WalletWorkspace />);
     await enter();
-    expect(screen.queryByTestId("wallet-add-preview")).toBeNull();
+    expect(screen.queryByTestId("wallet-preview-collection")).toBeNull();
     expect(screen.getByTestId("wallet-add-layer-1000")).toBeTruthy();
     expect(serviceMock.getCard).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Open Card 0, ending 1000" }));
     expect(screen.getByRole("button", { name: "Show card details" })).toBeTruthy();
   });
   it("returns a saved real card to Cards without mixing in demos", async () => {
@@ -150,8 +156,9 @@ describe("Wallet visit introduction", () => {
     fireEvent.change(screen.getByLabelText("Issuing region"), { target: { value: "IN" } });
     fireEvent.click(screen.getByTestId("secure-card-save"));
     await waitFor(() => expect(screen.getByRole("tab", { name: "Cards" })).toHaveAttribute("aria-selected", "true"));
-    expect(screen.getByTestId("wallet-add-layer-4242")).toHaveAttribute("data-selected", "true");
-    expect(screen.queryByTestId("wallet-add-preview")).toBeNull();
+    await screen.findByTestId("wallet-selected-card");
+    expect(screen.getByRole("button", { name: "Open New card, ending 4242" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId("wallet-preview-collection")).toBeNull();
   });
   it("removes the form and card details when the vault locks", async () => {
     const page = render(<WalletWorkspace />);

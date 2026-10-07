@@ -27,6 +27,8 @@ import type {
   PendingActionPublic,
   ServerFrame,
   ToolResultPublic,
+  TranscriptFrame,
+  TranscriptKind,
   VoiceState,
 } from "@/lib/one-voice/protocol";
 import {
@@ -116,7 +118,9 @@ export type ToolResultTone = "success" | "neutral" | "failure" | "pending";
  * `location_updates_pending` keep their pinned failure tone (their screens
  * render the interim state themselves and the panel hides the card).
  */
-const PENDING_STATUSES = new Set<string>([SOS_GRANTS_CREATED, "draft_open_requested"]);
+const PENDING_STATUSES = new Set<string>([
+  SOS_GRANTS_CREATED, "draft_open_requested", "review_requested", "review_pending", "sending",
+]);
 
 /**
  * Outcomes that are neither done nor failed, whatever the frame's `ok` says.
@@ -132,6 +136,8 @@ export const NEUTRAL_OUTCOME_STATUSES = new Set<string>([
   "already_sent",
   "already_sending",
   "not_sent",
+  "needs_input",
+  "outcome_unknown",
 ]);
 
 /** An armed-but-unsent outcome: neither success nor failure yet. */
@@ -496,6 +502,7 @@ function mergeTranscript(
       text,
       final,
       turnId,
+      lastLegacyChunk: normalizeTranscriptText(text),
     };
     return {
       transcript: [...transcript, item].slice(-MAX_TRANSCRIPT_ITEMS),
@@ -504,7 +511,12 @@ function mergeTranscript(
   };
   const replaceRow = (index: number, merged: string): TranscriptMerge => {
     const next = transcript.slice();
-    next[index] = { ...transcript[index]!, text: merged, final };
+    next[index] = {
+      ...transcript[index]!,
+      text: merged,
+      final,
+      lastLegacyChunk: normalizeTranscriptText(text),
+    };
     return { transcript: next, transcriptSeq };
   };
 
@@ -518,12 +530,24 @@ function mergeTranscript(
   const current = normalizeTranscriptText(existing.text);
   const isPrefix = incoming.startsWith(current);
   const longer = incoming.length > current.length;
-  // A chunk that begins with whitespace is incremental by its own shape: it
-  // continues the row ("H" + " Hussh garage"), so it can never restate it.
+  // A space-led chunk normally continues the row ("H" + " Hussh garage").
+  // A final may restate the whole line, as the relay's segment merger allows.
   const continues = /^\s/.test(text);
   const restates = !continues && isPrefix;
 
   if (!existing.final) {
+    // A full final can carry the provider's leading space. Preserve a repeated
+    // delta ("S" + " S") unless it repeats the raw line exactly; an accumulated
+    // line differs from its last chunk and can be replaced without guessing
+    // whether its words or letters were intentionally repeated.
+    if (
+      final &&
+      (text === existing.text ||
+        (incoming === current &&
+          existing.lastLegacyChunk !== undefined &&
+          incoming !== existing.lastLegacyChunk))
+    )
+      return replaceRow(index, text);
     // A cumulative restatement replaces the row. A chunk equal to the row so
     // far is not strictly longer, so it is incremental and appends ("S","S").
     if (restates && (longer || final)) return replaceRow(index, text);
@@ -534,6 +558,66 @@ function mergeTranscript(
   if (restates && longer) return replaceRow(index, text);
   // Anything else (e.g. speech after a tool result) is its own line.
   return appendRow();
+}
+
+type TranscriptSegment = { segmentId: string; seq: number; kind: TranscriptKind };
+
+/** The relay's segment identity, only when all three fields are well formed. */
+function transcriptSegment(frame: TranscriptFrame): TranscriptSegment | null {
+  const { segment_id: segmentId, seq, kind } = frame;
+  if (typeof segmentId !== "string" || segmentId.length === 0) return null;
+  if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 1) return null;
+  if (kind !== "partial" && kind !== "cumulative" && kind !== "final") return null;
+  return { segmentId, seq, kind };
+}
+
+/**
+ * Applies a contracted frame to its row, keyed by role and the relay's
+ * segment id. The relay says how to apply the text, so nothing here reads its
+ * shape: a frame at or below the row's last seq (a repeat or a late arrival)
+ * and any frame for a frozen row change nothing; partial appends; cumulative
+ * replaces; final replaces and freezes.
+ */
+function mergeContractedTranscript(
+  transcript: TranscriptItem[],
+  transcriptSeq: number,
+  role: TranscriptItem["role"],
+  turnId: string,
+  text: string,
+  segment: TranscriptSegment,
+): TranscriptMerge {
+  const final = segment.kind === "final";
+  const index = findLastIndex(
+    transcript,
+    (item) => item.role === role && item.segmentId === segment.segmentId,
+  );
+  if (index === -1) {
+    const item: TranscriptItem = {
+      id: `${role}:${segment.segmentId}`,
+      role,
+      text,
+      final,
+      turnId,
+      segmentId: segment.segmentId,
+      lastSeq: segment.seq,
+    };
+    return {
+      transcript: [...transcript, item].slice(-MAX_TRANSCRIPT_ITEMS),
+      transcriptSeq,
+    };
+  }
+  const existing = transcript[index]!;
+  if (existing.final || segment.seq <= (existing.lastSeq ?? 0)) {
+    return { transcript, transcriptSeq };
+  }
+  const next = transcript.slice();
+  next[index] = {
+    ...existing,
+    text: segment.kind === "partial" ? `${existing.text}${text}` : text,
+    final,
+    lastSeq: segment.seq,
+  };
+  return { transcript: next, transcriptSeq };
 }
 
 /** True when the transcript has anything a person would actually read. */
@@ -643,6 +727,9 @@ function reduceServerFrame(
         activeInputTurnId: null,
         activeResponseTurnId: null,
         fencedTurnIds: [],
+        relayFeatures: Array.isArray(frame.features)
+          ? frame.features.filter((item): item is string => typeof item === "string")
+          : [],
       };
     }
     case "audio": {
@@ -701,14 +788,24 @@ function reduceServerFrame(
             : state.clearedTurnIds,
         };
       }
-      const { transcript, transcriptSeq } = mergeTranscript(
-        state.transcript,
-        state.transcriptSeq,
-        role,
-        frame.turn_id,
-        frame.text,
-        frame.final,
-      );
+      const segment = transcriptSegment(frame);
+      const { transcript, transcriptSeq } = segment
+        ? mergeContractedTranscript(
+            state.transcript,
+            state.transcriptSeq,
+            role,
+            frame.turn_id,
+            frame.text,
+            segment,
+          )
+        : mergeTranscript(
+            state.transcript,
+            state.transcriptSeq,
+            role,
+            frame.turn_id,
+            frame.text,
+            frame.final,
+          );
       return {
         ...state,
         turnId: isStaleOrigin(state, frame.turn_id) && !newInput && !autonomousAfterFinal
@@ -1228,6 +1325,8 @@ export function reduceVoiceSession(
           activeInputTurnId: null,
           activeResponseTurnId: null,
           fencedTurnIds: [],
+          // The next relay may be older; it says what it accepts in session.ready.
+          relayFeatures: [],
         };
       }
       return {
@@ -1264,6 +1363,7 @@ export function reduceVoiceSession(
         clientStep: null,
         candidatePicker: null,
         idleDeadlineAt: null,
+        relayFeatures: [],
         // A reconnect that is not happening leaves no stale reason behind.
         reconnectReason: reconnecting ? state.reconnectReason : null,
         error: error

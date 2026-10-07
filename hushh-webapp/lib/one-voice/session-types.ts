@@ -10,6 +10,7 @@ import type { OpenedDraft, OpenedMailMessage } from "@/lib/one-voice/mail-open";
 import type {
   CandidatePublic,
   EntityCardPayload,
+  MailDraftChange,
   PendingActionPublic,
   ServerFrame,
   ToolResultPublic,
@@ -34,6 +35,12 @@ export type TranscriptItem = {
   text: string;
   final: boolean;
   turnId: string;
+  /** Relay-owned segment of a contracted row (row id `role:segmentId`). */
+  segmentId?: string;
+  /** Highest frame seq applied to a contracted row; older frames are ignored. */
+  lastSeq?: number;
+  /** Last normalized legacy chunk; distinguishes a full final from a repeated delta. */
+  lastLegacyChunk?: string;
 };
 
 export type ToolTimelineItem = {
@@ -119,6 +126,21 @@ export type VoiceSessionState = {
   idleTimeoutMs: number | null;
   idleDeadlineAt: number | null;
   reconnectReason: "go_away" | "max_duration" | null;
+  /**
+   * What the connected relay advertised in session.ready (`features`). Empty
+   * until it does and after the socket closes, so a surface never offers a
+   * frame an older relay would refuse.
+   */
+  relayFeatures: string[];
+};
+
+/** The relay's answer to a typed name edit, or the client's own refusal. */
+export type NameEditOutcome = {
+  status: "accepted" | "rejected";
+  reasonCode: string | null;
+  message: string | null;
+  /** The new card on `accepted`. */
+  pendingActionId: string | null;
 };
 
 export type VoiceSessionEvent =
@@ -170,6 +192,7 @@ export const INITIAL_VOICE_SESSION_STATE: VoiceSessionState = {
   idleTimeoutMs: null,
   idleDeadlineAt: null,
   reconnectReason: null,
+  relayFeatures: [],
 };
 
 /** What the provider exposes to the control, the panel, and the screens. */
@@ -234,6 +257,14 @@ export type VoiceSessionController = {
    * used. Carries no outcome on purpose; the relay re-reads the send action.
    */
   reportMailDelivery?: (deliveryRef: string, actionId: string) => void;
+  reportMailDraftChange?: (change: MailDraftChange) => boolean;
+  /**
+   * Replace an open create_circle card with a name the person typed. Resolves
+   * with the relay's `name_edit.result` for this submission, or a local
+   * refusal when no relay that accepts it is live. Never routes through the
+   * model.
+   */
+  submitNameEdit?: (pendingActionId: string, name: string) => Promise<NameEditOutcome>;
 };
 
 /** Screen hooks subscribe to tool results and directives by tool name/kind. */

@@ -84,6 +84,14 @@ export type MailDeliveryResultFrame = {
   delivery_ref: string;
   action_id: string;
 };
+export type MailDraftChange = {
+  draft_ref: string;
+  revision: number;
+  operation_id: string;
+  draft?: { to: string; cc?: string; bcc?: string; subject: string; body: string };
+  closed?: boolean;
+};
+export type MailDraftChangedFrame = MailDraftChange & { type: "mail_draft.changed" };
 export type UiSettledFrame = {
   type: "ui.settled";
   directive_id: string;
@@ -102,6 +110,17 @@ export type PerfFrame = {
 };
 export type PingFrame = { type: "ping" };
 export type EndFrame = { type: "end" };
+/**
+ * The person typed a new name on an open create_circle card. Sent only to a
+ * relay that lists `name_edit`; the relay validates the name, replaces that
+ * exact card, and answers with `name_edit.result` for this `operation_id`.
+ */
+export type NameEditSubmitFrame = {
+  type: "name_edit.submit";
+  pending_action_id: string;
+  name: string;
+  operation_id: string;
+};
 
 export type ClientFrame =
   | AuthFrame
@@ -114,11 +133,20 @@ export type ClientFrame =
   | CandidateChooseFrame
   | ClientStepResultFrame
   | MailDeliveryResultFrame
+  | MailDraftChangedFrame
   | UiSettledFrame
   | InterruptFrame
   | PerfFrame
   | PingFrame
-  | EndFrame;
+  | EndFrame
+  | NameEditSubmitFrame;
+
+/** Relay feature that accepts `name_edit.submit` (see SessionReadyFrame.features). */
+export const NAME_EDIT_FEATURE = "name_edit" as const;
+/** Cards whose name the person may type; the relay enforces the same set. */
+export const NAME_EDITABLE_TOOLS = new Set<string>(["create_circle"]);
+/** The circle name bound the relay applies after collapsing whitespace. */
+export const NAME_EDIT_MAX_CHARS = 80;
 
 export type OsPermission = "unknown" | "prompt" | "granted" | "denied";
 
@@ -228,7 +256,17 @@ export type TranscriptFrame = {
   turn_id: string;
   /** Present only for a typed request echoed by the relay. */
   request_id?: string;
+  /**
+   * Relay-owned line identity, additive and used only when all three are
+   * present: frames of one segment carry a seq rising from 1, and `kind` says
+   * how to apply `text` (partial appends, cumulative replaces, final replaces
+   * and freezes). Without them the client keeps its legacy merge.
+   */
+  segment_id?: string;
+  seq?: number;
+  kind?: TranscriptKind;
 };
+export type TranscriptKind = "partial" | "cumulative" | "final";
 export type TurnFrame = { type: "turn"; state: "model_start" | "model_end" | "interrupted"; turn_id: string };
 export type StateFrame = { type: "state"; state: VoiceState; turn_id?: string | null };
 export type ToolStartedFrame = { type: "tool.started"; call_id: string; tool: string; args_public: Record<string, unknown>; turn_id?: string };
@@ -293,6 +331,16 @@ export type ClientStepRequestFrame = {
   payload: Record<string, unknown>;
   timeout_s: number;
 };
+/** The relay's answer to one `name_edit.submit`; a resend gets the same one. */
+export type NameEditResultFrame = {
+  type: "name_edit.result";
+  operation_id: string;
+  status: "accepted" | "rejected";
+  reason_code: string | null;
+  message: string | null;
+  /** The new card on `accepted`; null on a refusal. */
+  pending_action_id: string | null;
+};
 export type ReconnectRequiredFrame = { type: "session.reconnect_required"; reason: "go_away" | "max_duration" };
 export type PongFrame = { type: "pong" };
 export type ErrorFrame = { type: "error"; code: string; message: string };
@@ -311,6 +359,7 @@ export type ServerFrame =
   | CandidatePickerFrame
   | UiDirectiveFrame
   | ClientStepRequestFrame
+  | NameEditResultFrame
   | ReconnectRequiredFrame
   | PongFrame
   | ErrorFrame;
@@ -330,6 +379,7 @@ const SERVER_TYPES = new Set<string>([
   "candidate_picker",
   "ui_directive",
   "client_step.request",
+  "name_edit.result",
   "session.reconnect_required",
   "pong",
   "error",
@@ -417,6 +467,11 @@ export const NOT_SUCCESS_STATUSES = new Set<string>([
   "draft_open_dispatched",
   // Gmail may or may not have sent the draft; never shown as "Sent".
   "draft_send_unconfirmed",
+  "review_requested",
+  "review_pending",
+  "needs_input",
+  "outcome_unknown",
+  "sending",
   // A scheduled-mail cancel that cancelled nothing, and a scheduled send whose
   // confirmation could not be recorded (mirrors the relay's NOT_OK_STATUSES).
   "send_unconfirmed",

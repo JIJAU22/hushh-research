@@ -24,6 +24,7 @@ import type {
 } from "@/lib/one-voice/live-client";
 import { useVoiceSessionStore } from "@/lib/one-voice/session-store";
 import type { VoiceSessionController } from "@/lib/one-voice/session-types";
+import type { MailDraftChange } from "@/lib/one-voice/protocol";
 
 import { pendingActionFrame, readyFrame } from "../../../__tests__/one-voice/fixtures/scripted-server";
 
@@ -121,6 +122,8 @@ class FakeClient {
   /** Each app_context payload, in order; each one replaces the relay's screen context. */
   readonly appContexts: AppContextInput[] = [];
   readonly mailDeliveries: Array<[deliveryRef: string, actionId: string]> = [];
+  readonly mailDraftChanges: MailDraftChange[] = [];
+  readonly nameEdits: Array<[pendingActionId: string, name: string, operationId: string]> = [];
   closeReasons: string[] = [];
   connected = 0;
   isReady = false;
@@ -166,6 +169,14 @@ class FakeClient {
   }
   mailDeliveryResult(deliveryRef: string, actionId: string) {
     this.mailDeliveries.push([deliveryRef, actionId]);
+    return true;
+  }
+  mailDraftChanged(change: MailDraftChange) {
+    this.mailDraftChanges.push(change);
+    return true;
+  }
+  nameEditSubmit(pendingActionId: string, name: string, operationId: string) {
+    this.nameEdits.push([pendingActionId, name, operationId]);
     return true;
   }
   pendingShown(pendingActionId: string) {
@@ -1397,6 +1408,23 @@ describe("VoiceSessionProvider ownership", () => {
 describe("VoiceSessionProvider open mail row and Send reports", () => {
   const DELIVERY_REF = "Zr4mQ8vX2kLp9TnB_wYc7H-E";
   const ACTION_ID = "6f1c2b9a-3d4e-4f5a-8b6c-7d8e9f0a1b2c";
+
+  it("sends private draft changes only to a live relay advertising review support", async () => {
+    mount();
+    const change = { draft_ref: DELIVERY_REF, revision: 1, operation_id: "edit-1", closed: true };
+    expect(controller!.reportMailDraftChange!(change)).toBe(false);
+    await act(async () => controller!.start());
+    const client = FakeClient.instances[0]!;
+    expect(controller!.reportMailDraftChange!(change)).toBe(false);
+    await act(async () => client.options.onFrame(readyFrame({
+      conversation_id: client.options.auth()!.conversationId, features: ["mail_draft_review"],
+    })));
+    expect(controller!.reportMailDraftChange!(change)).toBe(true);
+    expect(client.mailDraftChanges).toEqual([change]);
+    await act(async () => controller!.stop());
+    expect(controller!.reportMailDraftChange!(change)).toBe(false);
+    expect(client.mailDraftChanges).toHaveLength(1);
+  });
   const namesMailRow = (context: AppContextInput | undefined) =>
     context !== undefined &&
     ("active_mail_ordinal" in context || "active_mail_offer_revision" in context);
@@ -1545,5 +1573,107 @@ describe("VoiceSessionProvider open mail row and Send reports", () => {
     await act(async () => controller!.stop());
     await act(async () => controller!.reportMailDelivery!(DELIVERY_REF, ACTION_ID));
     expect(client.mailDeliveries).toEqual([[DELIVERY_REF, ACTION_ID]]);
+  });
+});
+
+describe("VoiceSessionProvider typed name edit", () => {
+  const CARD_ID = "11111111-aaaa-4bbb-8ccc-000000000001";
+  const NEW_CARD_ID = "11111111-aaaa-4bbb-8ccc-000000000002";
+  const circleCard = () =>
+    pendingActionFrame({
+      pending_action_id: CARD_ID,
+      tool: "create_circle",
+      gateway_action_id: "location.create_circle",
+      summary: "create a friends circle called Hush Garage V4",
+      args: { name: "Hush Garage V4", kind: "friends" },
+      entities: [],
+      receipt_token: undefined,
+    });
+
+  async function startWith(features: string[] | undefined) {
+    await act(async () => controller!.start());
+    const client = FakeClient.instances[0]!;
+    await act(async () =>
+      client.options.onFrame(
+        readyFrame({ conversation_id: client.options.auth()!.conversationId, features }),
+      ),
+    );
+    return client;
+  }
+
+  it("sends the exact frame to a relay that lists name_edit and answers with its own result", async () => {
+    mount();
+    const client = await startWith(["active_mail", "mail_delivery", "name_edit"]);
+    let outcome: Awaited<ReturnType<NonNullable<VoiceSessionController["submitNameEdit"]>>> | null =
+      null;
+    await act(async () => {
+      void controller!.submitNameEdit!(CARD_ID, "HUSSH GARAGE V04").then((value) => {
+        outcome = value;
+      });
+    });
+    expect(client.nameEdits).toHaveLength(1);
+    const [pendingActionId, name, operationId] = client.nameEdits[0]!;
+    expect([pendingActionId, name]).toEqual([CARD_ID, "HUSSH GARAGE V04"]);
+    expect(operationId).toMatch(/^[0-9a-f-]{36}$/);
+
+    // Another operation's answer is not this one's.
+    await act(async () =>
+      client.options.onFrame({
+        type: "name_edit.result",
+        operation_id: "someone-else-1",
+        status: "rejected",
+        reason_code: "not_pending",
+        message: "No.",
+        pending_action_id: null,
+      }),
+    );
+    expect(outcome).toBeNull();
+    await act(async () =>
+      client.options.onFrame({
+        type: "name_edit.result",
+        operation_id: operationId,
+        status: "accepted",
+        reason_code: null,
+        message: null,
+        pending_action_id: NEW_CARD_ID,
+      }),
+    );
+    expect(outcome).toEqual({
+      status: "accepted",
+      reasonCode: null,
+      message: null,
+      pendingActionId: NEW_CARD_ID,
+    });
+  });
+
+  it("never sends the frame to a relay that does not list it, and the panel offers no Edit name", async () => {
+    mockVisiblePendingGeometry();
+    mount(true, <PendingPanelProbe />);
+    const client = await startWith(["active_mail", "mail_delivery"]);
+    await act(async () => client.options.onFrame(circleCard()));
+    expect(screen.getByTestId("one-voice-pending-action")).toBeTruthy();
+    expect(screen.queryByTestId("one-voice-edit-name")).toBeNull();
+
+    const outcome = await act(async () =>
+      controller!.submitNameEdit!(CARD_ID, "HUSSH GARAGE V04"),
+    );
+    expect(outcome.status).toBe("rejected");
+    expect(client.nameEdits).toEqual([]);
+  });
+
+  it("shows Edit name on the panel's create_circle card when the relay lists it", async () => {
+    mockVisiblePendingGeometry();
+    mount(true, <PendingPanelProbe />);
+    const client = await startWith(["active_mail", "mail_delivery", "name_edit"]);
+    await act(async () => client.options.onFrame(circleCard()));
+    await act(async () => {
+      screen.getByTestId("one-voice-edit-name").click();
+    });
+    await act(async () => {
+      screen.getByTestId("one-voice-name-edit-review").click();
+    });
+    expect(client.nameEdits.map(([id, name]) => [id, name])).toEqual([
+      [CARD_ID, "Hush Garage V4"],
+    ]);
   });
 });

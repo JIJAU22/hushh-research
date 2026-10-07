@@ -187,6 +187,124 @@ def test_send_encrypts_content_and_returns_a_participant_safe_projection(monkeyp
     ]
 
 
+def test_send_persists_a_reply_only_after_the_target_is_checked_in_the_same_conversation(
+    monkeypatch,
+):
+    cipher = _Cipher()
+    service = _service(cipher)
+    reply_id = "33333333-3333-4333-8333-333333333333"
+    reply_row = {**_action_message(sender_user_id="bob"), "id": reply_id}
+    sent_row = {
+        **_action_message(),
+        "id": "44444444-4444-4444-8444-444444444444",
+        "reply_to_message_id": reply_id,
+    }
+    calls: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(service, "_require_active_connection", lambda *_args: "connection-id")
+    monkeypatch.setattr(service, "_conversation_by_pair", lambda *_args: _conversation())
+    monkeypatch.setattr(
+        service,
+        "_message_for_participant",
+        lambda viewer, conversation_id, message_id: (
+            reply_row
+            if (viewer, conversation_id, message_id) == ("alice", _CONVERSATION_ID, reply_id)
+            else None
+        ),
+    )
+
+    def execute_one(sql, params=None):
+        calls.append((sql, params or {}))
+        if "SELECT id\n                    FROM conversations" in sql:
+            return {"id": _CONVERSATION_ID}
+        if "INSERT INTO messages" in sql:
+            return sent_row
+        return None
+
+    monkeypatch.setattr(service, "_execute_one", execute_one)
+
+    result = service.send_message(
+        "alice",
+        recipient_user_id="bob",
+        content="I agree",
+        reply_to_message_id=reply_id,
+    )
+
+    insert_params = next(params for sql, params in calls if "INSERT INTO messages" in sql)
+    assert insert_params["reply_to_message_id"] == reply_id
+    assert result["message"]["replyTo"] == {
+        "id": reply_id,
+        "content": "decrypted text",
+        "senderIsViewer": False,
+        "deletedForEveryoneAt": None,
+    }
+
+
+def test_send_reply_returns_a_projection_when_insert_row_lacks_joined_reply_envelope(
+    monkeypatch,
+):
+    """A reply acknowledgement must not decrypt fields INSERT RETURNING lacks."""
+    monkeypatch.setenv(
+        "DIRECT_MESSAGE_ENCRYPTION_KEY_V1",
+        base64.urlsafe_b64encode(b"r" * 32).decode("ascii"),
+    )
+    cipher = DirectMessageCipher()
+    service = _service(cipher)
+    reply_id = "33333333-3333-4333-8333-333333333333"
+    sent_id = "44444444-4444-4444-8444-444444444444"
+    reply_row = {
+        **_action_message(sender_user_id="bob"),
+        "id": reply_id,
+        **cipher.seal(
+            "Original message",
+            conversation_id=_CONVERSATION_ID,
+            message_id=reply_id,
+            sender_user_id="bob",
+        ),
+    }
+    sent_row = {
+        **_action_message(),
+        "id": sent_id,
+        "reply_to_message_id": reply_id,
+        **cipher.seal(
+            "I agree",
+            conversation_id=_CONVERSATION_ID,
+            message_id=sent_id,
+            sender_user_id="alice",
+        ),
+    }
+
+    monkeypatch.setattr(service, "_require_active_connection", lambda *_args: "connection-id")
+    monkeypatch.setattr(service, "_conversation_by_pair", lambda *_args: _conversation())
+    monkeypatch.setattr(service, "_message_for_participant", lambda *_args: reply_row)
+    monkeypatch.setattr(
+        service,
+        "_execute_one",
+        lambda sql, *_args, **_kwargs: (
+            {"id": _CONVERSATION_ID}
+            if "SELECT id\n                    FROM conversations" in sql
+            else sent_row
+            if "INSERT INTO messages" in sql
+            else None
+        ),
+    )
+
+    result = service.send_message(
+        "alice",
+        recipient_user_id="bob",
+        content="I agree",
+        reply_to_message_id=reply_id,
+    )
+
+    assert result["message"]["content"] == "I agree"
+    assert result["message"]["replyTo"] == {
+        "id": reply_id,
+        "content": "Original message",
+        "senderIsViewer": False,
+        "deletedForEveryoneAt": None,
+    }
+
+
 def test_history_is_readable_but_reported_read_only_after_disconnect(monkeypatch):
     service = _service()
     monkeypatch.setattr(
@@ -214,6 +332,105 @@ def test_active_connection_query_also_requires_no_direct_message_block(monkeypat
     assert service._active_connection_id("alice", "bob") == "connection-id"
     assert "direct_message_blocks" in captured["sql"]
     assert captured["params"] == {"sender_user_id": "alice", "recipient_user_id": "bob"}
+
+
+def _action_message(*, sender_user_id="alice", deleted_for_everyone_at=None):
+    return {
+        **_message(),
+        "sender_user_id": sender_user_id,
+        "edited_at": None,
+        "reply_to_message_id": None,
+        "deleted_for_sender_at": None,
+        "deleted_for_recipient_at": None,
+        "deleted_for_everyone_at": deleted_for_everyone_at,
+        "participant_a_user_id": "alice",
+        "participant_b_user_id": "bob",
+        "reactions": [],
+    }
+
+
+def test_sender_only_actions_reject_a_participant_who_did_not_send_the_message(monkeypatch):
+    service = _service()
+    monkeypatch.setattr(
+        service,
+        "_message_action_row",
+        lambda *_args: _action_message(sender_user_id="bob"),
+    )
+    monkeypatch.setattr(
+        service,
+        "_execute_one",
+        lambda *_args, **_kwargs: pytest.fail("unauthorized action reached a database write"),
+    )
+
+    with pytest.raises(DirectMessagesError) as caught:
+        service.edit_message("alice", _CONVERSATION_ID, _MESSAGE_ID, content="edited")
+
+    assert caught.value.code == "DIRECT_MESSAGE_ACTION_FORBIDDEN"
+
+
+def test_edit_reencrypts_and_reaction_is_persisted_for_the_authenticated_participant(monkeypatch):
+    cipher = _Cipher()
+    service = _service(cipher)
+    action_row = _action_message()
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(service, "_message_action_row", lambda *_args: action_row)
+
+    def execute_one(sql, params=None):
+        calls.append((sql, params or {}))
+        if "UPDATE messages" in sql:
+            return {"id": _MESSAGE_ID}
+        if "INSERT INTO direct_message_reactions" in sql:
+            return {"message_id": _MESSAGE_ID}
+        return None
+
+    monkeypatch.setattr(service, "_execute_one", execute_one)
+
+    edited = service.edit_message("alice", _CONVERSATION_ID, _MESSAGE_ID, content="updated")
+    reacted = service.react_to_message("alice", _CONVERSATION_ID, _MESSAGE_ID, emoji="👍")
+
+    assert cipher.sealed == [
+        (
+            "updated",
+            {
+                "conversation_id": _CONVERSATION_ID,
+                "message_id": _MESSAGE_ID,
+                "sender_user_id": "alice",
+            },
+        )
+    ]
+    assert edited["message"]["content"] == "decrypted text"
+    assert reacted["message"]["content"] == "decrypted text"
+    edit_params = next(params for sql, params in calls if "UPDATE messages" in sql)
+    reaction_params = next(
+        params for sql, params in calls if "INSERT INTO direct_message_reactions" in sql
+    )
+    assert edit_params["content_ciphertext"] == "opaque-ciphertext"
+    assert "content" not in edit_params
+    assert reaction_params == {
+        "message_id": _MESSAGE_ID,
+        "viewer_user_id": "alice",
+        "emoji": "👍",
+    }
+
+
+def test_delete_for_me_uses_the_viewers_participant_visibility_field(monkeypatch):
+    service = _service()
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        service,
+        "_message_action_row",
+        lambda *_args: _action_message(sender_user_id="alice"),
+    )
+    monkeypatch.setattr(
+        service,
+        "_execute_one",
+        lambda sql, params=None: calls.append((sql, params or {})) or {"id": _MESSAGE_ID},
+    )
+
+    result = service.delete_message("bob", _CONVERSATION_ID, _MESSAGE_ID, scope="me")
+
+    assert result == {"scope": "me", "message": None}
+    assert "SET deleted_for_recipient_at = NOW()" in calls[0][0]
 
 
 def test_block_requires_an_existing_relationship_and_persists_a_directed_row(monkeypatch):
