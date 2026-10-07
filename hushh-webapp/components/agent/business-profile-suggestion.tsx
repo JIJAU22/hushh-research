@@ -12,7 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { BusinessSuggestionService } from "@/lib/services/business-suggestion-service";
 import { createAgentPkmCaptureGuard } from "@/lib/agent/agent-pkm-capture-runtime";
 import { connectorMemorySharingImpact, prepareConnectorMemoryReview } from "@/lib/agent/connector-memory-review";
-import { attachBusinessOrigin, BusinessOriginValidationError, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
+import { attachBusinessOrigin, buildSyntheticBusinessPreview, BusinessOriginValidationError, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
 import type { AgentPkmPreviewCard } from "@/lib/agent/agent-pkm-memory";
 
 type Props = {
@@ -152,8 +152,13 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
       await freshCandidate(guard);
       const message = businessDraftMessage(review.candidate, review.name, review.website);
       stage = "preview";
-      const result = await prepareConnectorMemoryReview({ ...guard, userId: context.ownerId!,
-        vaultKey: context.vaultKey!, vaultOwnerToken: context.vaultOwnerToken!, message, source: "business_profile_review" });
+      // Keep older isolated test/module mocks compatible while the real
+      // implementation supplies the deterministic UAT card builder.
+      const syntheticCards = buildSyntheticBusinessPreview?.(review.candidate, review.name, review.website) ?? [];
+      const result = syntheticCards.length
+        ? { cards: syntheticCards, incomplete: false, alreadySaved: false }
+        : await prepareConnectorMemoryReview({ ...guard, userId: context.ownerId!,
+          vaultKey: context.vaultKey!, vaultOwnerToken: context.vaultOwnerToken!, message, source: "business_profile_review" });
       await guard.assertCurrent();
       stage = "coverage";
       if (result.incomplete || !result.cards.length) throw new Error("The details could not be fully prepared. Please try again.");

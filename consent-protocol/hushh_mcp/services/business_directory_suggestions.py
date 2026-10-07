@@ -38,7 +38,12 @@ def _invocation_token(*, local: bool) -> str:
     if account:
         if not local or not re.fullmatch(r"[A-Za-z0-9._+%-]+@hushh\.ai", account):
             raise DirectoryUnavailable()
-        executable = shutil.which("gcloud")
+        # On Windows, ``shutil.which("gcloud")`` can resolve the PowerShell
+        # shim (gcloud.ps1), which is blocked by restrictive execution
+        # policies even though the supported gcloud.cmd wrapper works. Prefer
+        # the command wrapper so local live-mode lookup is not silently
+        # downgraded to an unavailable directory.
+        executable = shutil.which("gcloud.cmd") or shutil.which("gcloud")
         if not executable:
             raise DirectoryUnavailable()
         result = subprocess.run(  # noqa: S603 - resolved CLI, validated account, no shell
