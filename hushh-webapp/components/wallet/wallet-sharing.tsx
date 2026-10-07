@@ -53,7 +53,7 @@ export function WalletSharing() {
     let cancelled = false;
     const load = async () => {
       const fallbackName = user.displayName?.trim() || null;
-      const token = getVaultOwnerTokenRef.current();
+      const token = getVaultOwnerTokenRef.current?.();
       if (!token) {
         if (!cancelled) setDemoProfile({ displayName: fallbackName, shareUrl: null });
         return;
