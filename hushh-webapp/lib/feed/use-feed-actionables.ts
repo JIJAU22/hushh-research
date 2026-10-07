@@ -823,28 +823,35 @@ export function useFeedActionables(): UseFeedActionablesResult {
     const items: FeedActionable[] = [];
 
     for (const payment of sentPayments) {
+      const paymentIsExpired = payment.status === "expired";
+      const paymentAction = paymentIsExpired
+        ? []
+        : [
+            {
+              key: payment.status === "link_expired" ? "renew" : "pay",
+              label: payment.status === "link_expired" ? "Create new link" : "Pay $10",
+              tone: "primary" as const,
+              run: async () => {
+                try {
+                  const idToken = await user?.getIdToken();
+                  if (!idToken) throw new Error("Sign in to continue");
+                  const checkoutUrl = await DriveRequestPaymentService.checkout(idToken, payment.requestId);
+                  window.location.assign(checkoutUrl);
+                } catch {
+                  toast.error("Checkout couldn't open. Try again.");
+                }
+              },
+            },
+          ];
       items.push({
         id: `drive-payment:${payment.requestId}`,
         icon: ConsentAgentIcon,
         iconTone: "capability",
         title: payment.title,
         description: payment.description,
-        chevron: false,
-        actions: [{
-          key: "pay",
-          label: "Pay $10",
-          tone: "primary",
-          run: async () => {
-            try {
-              const idToken = await user?.getIdToken();
-              if (!idToken) throw new Error("Sign in to continue");
-              const checkoutUrl = await DriveRequestPaymentService.checkout(idToken, payment.requestId);
-              window.location.assign(checkoutUrl);
-            } catch {
-              toast.error("Checkout couldn't open. Try again.");
-            }
-          },
-        }],
+        href: paymentIsExpired ? payment.href : undefined,
+        chevron: paymentIsExpired,
+        actions: paymentAction,
         sortAt: payment.requestedAt ?? firstSeenAt(`drive-payment:${payment.requestId}`),
         displayTimestamp: payment.requestedAt,
       });

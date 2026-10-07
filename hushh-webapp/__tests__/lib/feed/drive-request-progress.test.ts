@@ -81,7 +81,11 @@ describe("projectFeedDriveProgress", () => {
     expect(projectFeedDriveProgress([payment])).toEqual([]);
     const rows = projectFeedDrivePayments([payment]);
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.title).toContain("Pay $10");
+    expect(rows[0]).toMatchObject({
+      status: "ready",
+      title: "Pay $10 for your document request",
+      description: "Sharing starts after payment.",
+    });
     expect(JSON.stringify(rows)).not.toContain("private.pdf");
     expect(projectFeedDrivePayments([entry({ metadata: payment.metadata })])).toEqual([]);
     expect(projectFeedDrivePayments([entry({ kind: "outgoing_request", metadata: {
@@ -96,6 +100,69 @@ describe("projectFeedDriveProgress", () => {
     } });
     expect(projectFeedDrivePayments([payment])).toHaveLength(1);
     expect(projectFeedDriveProgress([payment])).toEqual([]);
+  });
+
+  it("names the file owner without exposing file names", () => {
+    const payment = entry({ kind: "outgoing_request", counterpart_label: "V", metadata: {
+      ...entry().metadata, direction: "outgoing", paymentStatus: "awaiting_payment",
+      paymentAmountCents: 1000, paymentCurrency: "usd", file_names: ["private.pdf"],
+    } });
+    const row = projectFeedDrivePayments([payment])[0];
+    expect(row).toMatchObject({
+      title: "Pay $10 for files from V",
+      description: "You requested files from V. Pay to continue.",
+    });
+    expect(JSON.stringify(row)).not.toContain("private.pdf");
+  });
+
+  it("keeps an expired request visible without offering a stale payment action", () => {
+    const expired = entry({
+      kind: "history",
+      status: "expired",
+      counterpart_label: "V",
+      metadata: {
+        ...entry().metadata,
+        direction: "outgoing",
+        paymentStatus: "awaiting_payment",
+        paymentAmountCents: 1000,
+        paymentCurrency: "usd",
+      },
+    });
+    const row = projectFeedDrivePayments([expired])[0];
+    expect(row).toMatchObject({
+      status: "expired",
+      title: "Document request expired",
+      description: "Your request for files from V expired before payment.",
+    });
+    expect(row?.href).toContain("consentView=previous");
+  });
+
+  it("marks an expired Stripe link separately so it can be recreated", () => {
+    const payment = entry({ kind: "outgoing_request", metadata: {
+      ...entry().metadata,
+      direction: "outgoing",
+      paymentStatus: "checkout_open",
+      paymentLinkExpired: true,
+      paymentAmountCents: 1000,
+      paymentCurrency: "usd",
+    } });
+    expect(projectFeedDrivePayments([payment])[0]).toMatchObject({
+      status: "link_expired",
+      title: "Payment link expired",
+      description: "The $10 link expired. Create a new link to continue.",
+    });
+  });
+
+  it("keeps separate payment rows for separate requests", () => {
+    const first = entry({ id: "document_share_request:11111111-1111-4111-8111-111111111111", kind: "outgoing_request", metadata: {
+      ...entry().metadata, direction: "outgoing", paymentStatus: "awaiting_payment",
+      paymentAmountCents: 1000, paymentCurrency: "usd",
+    } });
+    const second = entry({ id: "document_share_request:22222222-2222-4222-8222-222222222222", kind: "outgoing_request", metadata: {
+      ...entry().metadata, direction: "outgoing", paymentStatus: "awaiting_payment",
+      paymentAmountCents: 1000, paymentCurrency: "usd",
+    } });
+    expect(projectFeedDrivePayments([first, second])).toHaveLength(2);
   });
 
   it("does not claim sharing progress during paid payment reconciliation", () => {
