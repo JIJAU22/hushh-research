@@ -24,7 +24,8 @@ from hushh_mcp.services.drive_sharing_store import DriveSharingStore
 from hushh_mcp.services.drive_work_wake import wake_drive_work
 from hushh_mcp.services.google_drive_adapter import DriveReadError
 
-CHECKOUT_HOLD_SECONDS = 30 * 60
+# Stripe requires at least 30 minutes; keep a minute of transport/clock slack.
+CHECKOUT_HOLD_SECONDS = 31 * 60
 
 
 def _stripe_dict(value) -> dict:
