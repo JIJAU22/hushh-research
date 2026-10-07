@@ -137,6 +137,10 @@ def project_directory_response(payload: Any, *, email: str | None, phone: str | 
             if not phone or digits not in {phone[1:], phone[2:]}:
                 raise DirectoryUnavailable()
             evidence.append({"kind": "verified_phone"})
+        if upstream_evidence.get("exact_owner_email_match") is True:
+            if not email or vertical != "business":
+                raise DirectoryUnavailable()
+            evidence.append({"kind": "verified_email_identity", "email": email})
         if not evidence:
             raise DirectoryUnavailable()
         public_draft = {"name": name.strip(), "website": parsed.geturl() if valid_url else ""}
