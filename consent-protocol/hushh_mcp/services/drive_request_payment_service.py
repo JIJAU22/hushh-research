@@ -24,6 +24,8 @@ from hushh_mcp.services.drive_sharing_store import DriveSharingStore
 from hushh_mcp.services.drive_work_wake import wake_drive_work
 from hushh_mcp.services.google_drive_adapter import DriveReadError
 
+CHECKOUT_HOLD_SECONDS = 30 * 60
+
 
 def _stripe_dict(value) -> dict:
     return value if isinstance(value, dict) else value.to_dict()
@@ -241,6 +243,8 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
         if order["stripe_checkout_url"]:
             return {"checkoutUrl": order["stripe_checkout_url"]}
 
+        checkout_expires_at = int(datetime.now(UTC).timestamp()) + CHECKOUT_HOLD_SECONDS
+
         def create():
             return self.stripe_api.checkout.Session.create(
                 mode="payment",
@@ -256,6 +260,7 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
                     }
                 ],
                 client_reference_id=request_id,
+                expires_at=checkout_expires_at,
                 metadata={
                     "payment_kind": "drive_request",
                     "request_id": request_id,

@@ -1203,6 +1203,7 @@ class DriveSharingStore(DriveDocumentStore):
                     sources=sources,
                     batch=f"rule:{rule['rule_id']}:{rule['version']}",
                     rule=rule,
+                    enforce_payment=False,
                 )
             updated = self._row(
                 connection,
@@ -1217,6 +1218,10 @@ class DriveSharingStore(DriveDocumentStore):
                     "status": "approved" if rule else "review_ready",
                 },
             )
+            if rule and updated["payment_required"]:
+                from hushh_mcp.services.drive_request_payment_store import DriveRequestPaymentStore
+
+                DriveRequestPaymentStore.ensure_order_for_approved_request(connection, updated)
             if rule or notify_owner:
                 self._event(
                     connection,

@@ -136,8 +136,10 @@ def test_non_trusted_approval_creates_one_payment_order_and_notification():
 
 def test_new_request_payment_boundary_is_after_consent_for_non_trusted_requests():
     create = inspect.getsource(DriveSharingStore.create_request)
+    prepare = inspect.getsource(DriveSharingStore.prepare_review)
     approve = inspect.getsource(DriveSharingStore.approve_review)
     assert "not owner_initiated" in create
+    assert "enforce_payment=False" in prepare
     assert "ensure_order_for_approved_request" in approve
     assert "enforce_payment=False" in approve
 
@@ -344,6 +346,7 @@ async def test_webhook_rejects_non_mapping_stripe_event(monkeypatch):
 def test_checkout_reservation_keeps_attempt_id_for_concurrent_tabs():
     source = inspect.getsource(DriveRequestPaymentService.checkout)
     assert 'if order["checkout_attempt_id"] is None' in source
+    assert "expires_at=checkout_expires_at" in source
     assert (
         "idempotency_key=f\"drive-request-{request_id}-{order['checkout_attempt_id']}\"" in source
     )
