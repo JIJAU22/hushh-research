@@ -264,12 +264,32 @@ export function WalletWorkspace() {
     }
   }, [ready, view.kind]);
 
+  useEffect(() => {
+    if (!ready || activeTab !== "cards") return;
+    let second = 0;
+    const first = window.requestAnimationFrame(() => {
+      second = window.requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>("[data-app-scroll-root='true']")?.scrollTo({ top: 0, behavior: "instant" });
+      });
+    });
+    return () => { window.cancelAnimationFrame(first); if (second) window.cancelAnimationFrame(second); };
+  }, [activeTab, ready]);
+
   const selectTab = (value: string) => {
     if (!ready || value === activeTab || !WALLET_TABS.some((option) => option.value === value)) return;
     // Drop revealed values and reject an in-flight reveal when leaving Cards.
     dispatch({ type: "unfocus" });
     dispatch({ type: "close_add" });
     setTab(value as WalletTab);
+    if (value === "cards") {
+      // Add and Sharing can be much taller than the deck. Restore the card
+      // surface to its start when returning so the first card is the entry
+      // point instead of inheriting the previous pane's scroll position.
+      window.requestAnimationFrame(() => {
+        const root = document.querySelector<HTMLElement>("[data-app-scroll-root='true']");
+        root?.scrollTo({ top: 0, behavior: "instant" });
+      });
+    }
   };
   // Metadata search stays in q; presentation selection stays in memory.
   const routeQuery = searchParams?.get("q") || "";
@@ -545,7 +565,7 @@ export function WalletWorkspace() {
   return (
     <AppPageShell
       as="div"
-      width="agent"
+      width="standard"
       fitContent
       className="relative isolate [--app-page-content-bottom-gap:0px]"
     >
