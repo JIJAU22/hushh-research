@@ -1376,7 +1376,12 @@ class DriveBulkShareStore(DriveLivePreferences):
                 )
                 if _request_missing_dates(private):
                     raise DriveSharingError("date_range_required")
-                if approval_source == "trusted_auto":
+                # A request that was created with the immutable Trusted
+                # authority marker still follows the automatic payment gate,
+                # even if the owner is explicitly approving the batch after
+                # that authority changed.  Manual/non-trusted requests defer
+                # payment until this approval creates the checkout order.
+                if approval_source == "trusted_auto" or private.get("trusted_auto") is True:
                     self._require_paid_for_origin(connection, origin["request_id"])
                 search = self._row(
                     connection,
@@ -2015,8 +2020,6 @@ class DriveBulkShareStore(DriveLivePreferences):
                 )
                 self._finalize(connection, share)
                 return None
-            if effect["state"] == "queued":
-                self._require_paid_for_origin(connection, row["origin_request_id"])
             try:
                 self.live_active(
                     connection, user_id=user_id, generation=row["connection_generation"]
@@ -2080,6 +2083,13 @@ class DriveBulkShareStore(DriveLivePreferences):
                 )
                 self._finalize(connection, share)
                 return None
+            # All checks above are local, durable state transitions.  Keep
+            # the payment gate immediately before leasing the effect so a
+            # legacy/undated request can be marked with its precise safe
+            # error without ever creating a provider job, while no unpaid
+            # effect can reach dispatch.
+            if effect["state"] == "queued":
+                self._require_paid_for_origin(connection, row["origin_request_id"])
             lease = str(uuid4())
             connection.execute(
                 text("""UPDATE drive_bulk_share_effects
