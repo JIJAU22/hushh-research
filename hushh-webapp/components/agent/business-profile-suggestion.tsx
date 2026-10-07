@@ -21,6 +21,10 @@ type Props = {
   /** The chat owns the assistant bubble; this capability owns only its card. */
   renderMessage?: (id: string, text: string, card: ReactNode) => ReactNode;
   onVisibleChange?: (visible: boolean) => void;
+  /** Remove a saved candidate from the owning chat turn immediately. */
+  onSaved?: (businessUid: string) => void;
+  /** Candidates already saved in this session stay suppressed if discovery refreshes. */
+  dismissedBusinessUids?: ReadonlySet<string>;
 };
 type Review = {
   candidate: BusinessCandidate; name: string; website: string; message: string;
@@ -69,14 +73,16 @@ export function BusinessProfileSuggestion(props: Props) {
   }, [ownerId, vaultKey, vaultOwnerToken, enabled, tokenExpiresAt, attempt]);
   if (!enabled || !ownerId || !vaultKey || !vaultOwnerToken || tokenExpiresAt === null || Date.now() >= tokenExpiresAt ||
     discovery?.ownerId !== ownerId || discovery.token !== vaultOwnerToken || discovery.key !== vaultKey) return null;
+  const candidates = discovery.candidates.filter(candidate => !props.dismissedBusinessUids?.has(candidate.businessUid));
+  if (!candidates.length) return null;
   return <div className="space-y-[var(--app-form-section-gap)]">
     {discovery.incomplete && <div className="space-y-[var(--app-form-field-gap)]">
       <HelperText>Business lookup is incomplete. Available suggestions may not include every business.</HelperText>
       <Button variant="link" size="standard" onClick={() => setAttempt(value => value + 1)}>Retry business lookup</Button>
     </div>}
     {discovery.status === "insufficient_signals" && <HelperText>Your verified contacts could not be used for business lookup yet. Nothing has been saved.</HelperText>}
-    {discovery.candidates.length > 1 && <HelperText>I found several possible businesses. Review each one separately; you can save more than one.</HelperText>}
-    {discovery.candidates.map(candidate => <BusinessCandidateReview key={candidate.businessUid} {...props} candidate={candidate} onCandidateVisible={onCandidateVisible} />)}
+    {candidates.length > 1 && <HelperText>I found several possible businesses. Review each one separately; you can save more than one.</HelperText>}
+    {candidates.map(candidate => <BusinessCandidateReview key={candidate.businessUid} {...props} candidate={candidate} onCandidateVisible={onCandidateVisible} />)}
   </div>;
 }
 
@@ -95,6 +101,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
+  const [saved, setSaved] = useState(false);
   const review = state?.context === context ? state.review : null;
   const reviewVisible = Boolean(review);
   const { onCandidateVisible } = props;
@@ -109,7 +116,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
 
   useEffect(() => {
     const abort = new AbortController(); controller.current = abort; busy.current = false;
-    setState(null); setAcknowledging(false); setOpen(false); setEditing(false);
+    setState(null); setAcknowledging(false); setOpen(false); setEditing(false); setSaved(false);
     const guard = createAgentPkmCaptureGuard({ userId: context.ownerId || "", signal: abort.signal, isEnabled: eligible });
     if (guard.isCurrent()) void (async () => {
       try {
@@ -203,6 +210,11 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
           selected: job.cards.map(card => card.card_id), phase: "review" });
         throw new Error("Some details still need saving. Retry this review.");
       }
+      // Persisted PKM state is authoritative, but also suppress this mounted
+      // card immediately. The parent callback covers a discovery refresh that
+      // would otherwise recreate the same ephemeral chat message.
+      setSaved(true);
+      props.onSaved?.(review.candidate.businessUid);
       setState(null); setOpen(false);
       return result;
     })();
@@ -237,7 +249,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     finally { if (guard.isCurrent()) busy.current = false; }
   };
 
-  if (!review || !eligible()) return null;
+  if (saved || !review || !eligible()) return null;
   const pending = review.phase === "preparing" || review.phase === "saving";
   const introduction = "I found a business you may be connected to. Check the public details below—is this yours?";
   const card = <section aria-label="Is this your business?"

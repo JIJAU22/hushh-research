@@ -47,7 +47,9 @@ describe("post-onboarding business suggestion", () => {
   });
   it("opens a visibly synthetic nudge; discovery and preparation never save", async () => {
     const onVisibleChange = vi.fn();
+    const onSaved = vi.fn();
     render(<BusinessProfileSuggestion {...props} onVisibleChange={onVisibleChange}
+      onSaved={onSaved}
       renderMessage={(id, text, card) => <AgentBubble message={{ id, role: "assistant", text,
         timestamp: "", status: "done", ephemeral: true }} businessProfileCard={card} />} />);
     expect(await screen.findByRole("region", { name: "Is this your business?" })).toBeTruthy();
@@ -63,6 +65,7 @@ describe("post-onboarding business suggestion", () => {
     await screen.findByText("Synthetic company detail"); expect(mocks.save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("agent-pkm-review-save"));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(candidate.businessUid));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Is this your business?" })).toBeNull());
     await waitFor(() => expect(onVisibleChange).toHaveBeenLastCalledWith(false));
   });
