@@ -27,6 +27,10 @@ _IDENTITIES = {
 }
 _CONSUMER_DOMAINS = {"gmail.com", "googlemail.com", "yahoo.com", "outlook.com", "hotmail.com",
     "live.com", "icloud.com", "aol.com", "proton.me", "protonmail.com", "yahoo.co.in", "mail.com"}
+# Local development may use the separately managed Gmail identity that owns
+# the isolated gcloud profile. Keep this explicit rather than permitting an
+# arbitrary consumer account to invoke the directory.
+_LOCAL_GCLOUD_ALLOWLIST = {"husshpuppy5@gmail.com"}
 
 
 class DirectoryUnavailable(RuntimeError):
@@ -36,7 +40,10 @@ class DirectoryUnavailable(RuntimeError):
 def _invocation_token(*, local: bool) -> str:
     account = os.getenv("HUSHH_LOCAL_GCLOUD_ACCOUNT", "").strip()
     if account:
-        if not local or not re.fullmatch(r"[A-Za-z0-9._+%-]+@hushh\.ai", account):
+        if not local or not (
+            re.fullmatch(r"[A-Za-z0-9._+%-]+@hushh\.ai", account)
+            or account.lower() in _LOCAL_GCLOUD_ALLOWLIST
+        ):
             raise DirectoryUnavailable()
         # On Windows, ``shutil.which("gcloud")`` can resolve the PowerShell
         # shim (gcloud.ps1), which is blocked by restrictive execution
