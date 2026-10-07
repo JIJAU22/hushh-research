@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/lib/morphy-ux/button";
 import { morphyToast } from "@/lib/morphy-ux/morphy";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,9 @@ import type { AgentPkmPreviewCard } from "@/lib/agent/agent-pkm-memory";
 type Props = {
   ownerId: string | null; vaultKey: string | null; vaultOwnerToken: string | null;
   tokenExpiresAt: number | null; enabled: boolean;
+  /** The chat owns the assistant bubble; this capability owns only its card. */
+  renderMessage?: (id: string, text: string, card: ReactNode) => ReactNode;
+  onVisibleChange?: (visible: boolean) => void;
 };
 type Review = {
   candidate: BusinessCandidate; name: string; website: string; message: string;
@@ -30,6 +33,21 @@ export function BusinessProfileSuggestion(props: Props) {
   const [discovery, setDiscovery] = useState<{ ownerId: string; token: string; key: string;
     candidates: BusinessCandidate[]; incomplete: boolean; status: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
+  const onCandidateVisible = useCallback((id: string, visible: boolean) => {
+    setVisibleIds(current => {
+      if (current.has(id) === visible) return current;
+      const next = new Set(current);
+      if (visible) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
+  const visible = visibleIds.size > 0;
+  const { onVisibleChange } = props;
+  useEffect(() => {
+    onVisibleChange?.(visible);
+    return () => onVisibleChange?.(false);
+  }, [onVisibleChange, visible]);
   const { ownerId, vaultKey, vaultOwnerToken, enabled, tokenExpiresAt } = props;
   useEffect(() => {
     const abort = new AbortController();
@@ -58,11 +76,12 @@ export function BusinessProfileSuggestion(props: Props) {
     </div>}
     {discovery.status === "insufficient_signals" && <HelperText>Your verified contacts could not be used for business lookup yet. Nothing has been saved.</HelperText>}
     {discovery.candidates.length > 1 && <HelperText>I found several possible businesses. Review each one separately; you can save more than one.</HelperText>}
-    {discovery.candidates.map(candidate => <BusinessCandidateReview key={candidate.businessUid} {...props} candidate={candidate} />)}
+    {discovery.candidates.map(candidate => <BusinessCandidateReview key={candidate.businessUid} {...props} candidate={candidate} onCandidateVisible={onCandidateVisible} />)}
   </div>;
 }
 
-function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate }) {
+function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
+  onCandidateVisible: (id: string, visible: boolean) => void }) {
   const fieldId = useId();
   const { ownerId, vaultKey, vaultOwnerToken, enabled, tokenExpiresAt } = props;
   const context = useMemo(() => ({ ownerId, vaultKey, vaultOwnerToken, enabled, tokenExpiresAt }),
@@ -77,6 +96,12 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate }
   const [editing, setEditing] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
   const review = state?.context === context ? state.review : null;
+  const reviewVisible = Boolean(review);
+  const { onCandidateVisible } = props;
+  useEffect(() => {
+    onCandidateVisible(props.candidate.businessUid, reviewVisible);
+    return () => onCandidateVisible(props.candidate.businessUid, false);
+  }, [onCandidateVisible, props.candidate.businessUid, reviewVisible]);
   const eligible = () => current.current === context && context.enabled && !!context.ownerId &&
     !!context.vaultKey && !!context.vaultOwnerToken && context.tokenExpiresAt !== null && Date.now() < context.tokenExpiresAt;
   const session = () => createAgentPkmCaptureGuard({ userId: context.ownerId || "",
@@ -196,30 +221,35 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate }
 
   if (!review || !eligible()) return null;
   const pending = review.phase === "preparing" || review.phase === "saving";
-  return <section aria-label="Is this your business?" data-message-role="assistant"
-    className="my-3 min-w-0 space-y-[var(--app-form-section-gap)]">
-    <div className="space-y-[var(--app-form-field-gap)]">
-      <HelperText className="font-semibold text-foreground">One</HelperText>
-      <p className="ui-text-body text-foreground">I found a business you may be connected to. Is this yours?</p>
-    </div>
+  const introduction = "I found a business you may be connected to. Check the public details below—is this yours?";
+  const card = <section aria-label="Is this your business?"
+    className="min-w-0 space-y-[var(--app-form-section-gap)]">
     {!open && <Button variant="muted" size="standard" onClick={() => setOpen(true)}>Review business details</Button>}
-    {open && <div className="min-w-0 space-y-[var(--app-form-section-gap)] rounded-[var(--app-card-radius-compact)] border border-[color:var(--app-separator)] bg-[color:var(--app-secondary-surface)] p-4 sm:p-5">
-        <div className="min-w-0 space-y-[var(--app-form-field-gap)]">
-          <h3 className="ui-text-card-title break-words text-foreground">{review.name || review.candidate.draft.name}</h3>
-          <p className="ui-text-row-description break-all text-muted-foreground">{review.website || review.candidate.draft.website}</p>
+    {open && <div className="min-w-0 space-y-3 rounded-[var(--app-card-radius-compact)] border border-[color:var(--app-separator)] p-3 sm:p-4">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+          <h3 className="ui-text-row-title break-words text-foreground">{review.name || review.candidate.draft.name}</h3>
+          <HelperText>Suggested profile · ownership unverified</HelperText>
           {(review.name !== review.candidate.draft.name || review.website !== review.candidate.draft.website) &&
             <HelperText>Your correction · ownership still unverified</HelperText>}
+          </div>
           {!review.job && <Button variant="link" size="standard" disabled={pending} aria-expanded={editing}
             onClick={() => setEditing(value => !value)}>{editing ? "Done editing" : "Edit details"}</Button>}
         </div>
-        <div className="space-y-[var(--app-form-field-gap)]">
+        <div className="space-y-1">
           {review.candidate.synthetic && <HelperText className="font-semibold text-foreground">UAT test suggestion</HelperText>}
           <HelperText className="leading-relaxed text-foreground/80">Why this appeared: {review.candidate.synthetic ? "your verified email domain matches the UAT test business" :
             review.candidate.matchEvidence.map(item => item.kind === "verified_phone" ? "your linked phone matches the directory phone" : "your verified email domain matches the business website").join("; ")}. Business ownership has not been verified.</HelperText>
           {!review.candidate.synthetic && <HelperText>Public directory · {review.candidate.sourceIdentity.vertical}</HelperText>}
-          {!review.candidate.synthetic && Object.entries(review.candidate.draft).filter(([key, value]) => !["name", "website"].includes(key) && value).map(([key, value]) =>
-            <p key={key} className="ui-text-row-description break-words text-foreground"><span className="capitalize">{key.replaceAll("_", " ")}</span>: {value}</p>)}
         </div>
+        <dl className="divide-y divide-[color:var(--app-separator)]">
+          {Object.entries({ ...review.candidate.draft, name: review.name, website: review.website })
+            .filter(([key, value]) => key !== "name" && Boolean(value)).map(([key, value]) => <div key={key}
+              className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] gap-3 py-2 sm:grid-cols-[7rem_minmax(0,1fr)]">
+              <dt className="ui-text-helper capitalize text-muted-foreground">{key === "name" ? "Business name" : key.replaceAll("_", " ")}</dt>
+              <dd className="ui-text-row-description min-w-0 break-words text-foreground [overflow-wrap:anywhere]">{value}</dd>
+            </div>)}
+        </dl>
         {editing && !review.job && <div className="space-y-[var(--app-form-section-gap)]">
           <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor={`${fieldId}-name`}>Business name</Label>
             <Input id={`${fieldId}-name`} maxLength={160} value={review.name} disabled={pending}
@@ -255,4 +285,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate }
       </AlertDialogFooter></AlertDialogContent>
     </AlertDialog>
   </section>;
+  return props.renderMessage
+    ? props.renderMessage(review.candidate.businessUid, introduction, card)
+    : <div data-message-role="assistant" className="space-y-3"><p>{introduction}</p>{card}</div>;
 }

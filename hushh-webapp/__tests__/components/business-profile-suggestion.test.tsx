@@ -15,6 +15,7 @@ vi.mock("@/lib/agent/connector-memory-review", () => ({ prepareConnectorMemoryRe
   connectorMemorySharingImpact: (cards: AgentPkmPreviewCard[]) => Math.max(0, ...cards.map(card => card.sharing_impact?.active_recipient_count || 0)) }));
 vi.mock("@/lib/morphy-ux/morphy", () => ({ morphyToast: { error: vi.fn(), promise: vi.fn() } }));
 import { BusinessProfileSuggestion } from "@/components/agent/business-profile-suggestion";
+import { AgentBubble } from "@/components/agent/agent-chat-workspace";
 const candidate = { businessUid: "urn:hushh:business:uat:hushh.ai:v1", synthetic: true,
   sourceIdentity: { source: "uat_fixture", sourceKey: "hushh.ai:v1" }, draft: { name: "Hushh — UAT Test Business", website: "https://hushh.ai" } };
 const cards: AgentPkmPreviewCard[] = [{ card_id: "one", source_text: "Synthetic company detail", write_mode: "confirm_first", target_domain: "professional" }];
@@ -42,16 +43,25 @@ describe("post-onboarding business suggestion", () => {
     expect(mocks.save).not.toHaveBeenCalled();
   });
   it("opens a visibly synthetic nudge; discovery and preparation never save", async () => {
-    render(<BusinessProfileSuggestion {...props} />);
+    const onVisibleChange = vi.fn();
+    render(<BusinessProfileSuggestion {...props} onVisibleChange={onVisibleChange}
+      renderMessage={(id, text, card) => <AgentBubble message={{ id, role: "assistant", text,
+        timestamp: "", status: "done", ephemeral: true }} businessProfileCard={card} />} />);
     expect(await screen.findByRole("region", { name: "Is this your business?" })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByText(/I found a business you may be connected to/)).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Is this your business?" });
+    const assistantBubble = region.closest('[class*="--one-chat-bubble"]');
+    expect(assistantBubble?.textContent).toContain("I found a business");
+    expect(region.closest('[data-message-role="assistant"]')).toBeTruthy();
+    await waitFor(() => expect(onVisibleChange).toHaveBeenLastCalledWith(true));
     expect(screen.getByText(/UAT test suggestion/)).toBeTruthy(); expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Review details", exact: true }));
     await screen.findByText("Synthetic company detail"); expect(mocks.save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("agent-pkm-review-save"));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Is this your business?" })).toBeNull());
+    await waitFor(() => expect(onVisibleChange).toHaveBeenLastCalledWith(false));
   });
   it.each([false, null, Date.now() - 1000])("unknown, expired, or disabled authority does not request a candidate: %s", async value => {
     render(<BusinessProfileSuggestion {...props} {...(value === false ? { enabled: false } : { tokenExpiresAt: value as number | null })} />);
