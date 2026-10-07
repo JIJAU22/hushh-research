@@ -156,6 +156,14 @@ describe("projectFeedDriveProgress", () => {
     expect(JSON.stringify(row)).not.toContain("private.pdf");
   });
 
+  it("falls back to concise generic copy for technical identity labels", () => {
+    const payment = entry({ kind: "outgoing_request", counterpart_label: "123e4567-e89b-12d3-a456-426614174000", metadata: {
+      ...entry().metadata, direction: "outgoing", paymentStatus: "awaiting_payment",
+      paymentAmountCents: 1000, paymentCurrency: "usd",
+    } });
+    expect(projectFeedDrivePayments([payment])[0]?.title).toBe("Pay $10 for your document request");
+  });
+
   it("keeps an expired request visible without offering a stale payment action", () => {
     const expired = entry({
       kind: "history",
@@ -218,7 +226,7 @@ describe("projectFeedDriveProgress", () => {
     expect(projectFeedDrivePayments([payment])).toEqual([]);
   });
 
-  it("keeps separate payment rows for separate requests", () => {
+  it("keeps one concise payment row per request", () => {
     const first = entry({ id: "document_share_request:11111111-1111-4111-8111-111111111111", kind: "outgoing_request", metadata: {
       ...entry().metadata, direction: "outgoing", paymentStatus: "awaiting_payment",
       paymentAmountCents: 1000, paymentCurrency: "usd",

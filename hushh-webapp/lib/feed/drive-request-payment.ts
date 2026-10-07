@@ -47,7 +47,12 @@ function counterpartLabel(entry: ConsentCenterEntry): string | null {
   ];
   for (const candidate of candidates) {
     const label = nonEmptyString(candidate);
-    if (!label || GENERIC_COUNTERPART_LABELS.has(label.toLowerCase())) continue;
+    if (
+      !label ||
+      GENERIC_COUNTERPART_LABELS.has(label.toLowerCase()) ||
+      /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(label) ||
+      /^[a-z0-9_-]{20,}$/i.test(label)
+    ) continue;
     return label;
   }
   return null;

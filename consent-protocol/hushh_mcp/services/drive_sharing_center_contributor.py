@@ -28,6 +28,10 @@ _PROJECTION = """
 WITH participants AS (
   SELECT request_id,revision,created_at,'share' AS source,
     CASE WHEN recipient_user_id=:user THEN 'outgoing' ELSE 'incoming' END AS direction,
+    CASE WHEN recipient_user_id=:user
+      THEN COALESCE(NULLIF(owner_identity.display_name,''), 'Document request')
+      ELSE COALESCE(NULLIF(recipient_identity.display_name,''), 'Document request')
+    END AS counterpart_label,
     CASE WHEN status IN ('pending','preparing','review_ready') AND expires_at<=now()
       THEN 'expired'
       WHEN recipient_user_id=:user AND status IN ('preparing','review_ready') THEN 'pending'
@@ -45,9 +49,15 @@ WITH participants AS (
     {payment_reconciliation_required} AS payment_reconciliation_required,
     {payment_link_expired} AS payment_link_expired,
     {checkout_expires_at} AS checkout_expires_at
-  FROM drive_share_requests WHERE user_id=:user OR recipient_user_id=:user
+  FROM drive_share_requests
+  LEFT JOIN actor_identity_cache owner_identity
+    ON owner_identity.user_id=drive_share_requests.user_id
+  LEFT JOIN actor_identity_cache recipient_identity
+    ON recipient_identity.user_id=drive_share_requests.recipient_user_id
+  WHERE user_id=:user OR recipient_user_id=:user
   UNION ALL
   SELECT request_id,revocation_revision,created_at,'share','incoming','management_only',
+    NULL::text,
     NULL::text,NULL::text,FALSE,FALSE,FALSE,FALSE,NULL::text,NULL::integer,NULL::text,NULL::boolean,FALSE,NULL::timestamptz
   FROM drive_share_management_contexts
   WHERE user_id=:user AND private_request_erased_at IS NOT NULL{queries}
@@ -101,6 +111,7 @@ _QUERIES = """
   UNION ALL
   SELECT request_id,revision,created_at,'query',
     CASE WHEN requester_user_id=:user THEN 'outgoing' ELSE 'incoming' END,
+    NULL::text,
     CASE WHEN status='pending' AND expires_at<=now() THEN 'expired'
       -- An abandoned claim (DriveLiveQueryStore.STALE_CLAIM_SECONDS) reads like the view.
       WHEN status='running' AND expires_at<=now()
@@ -316,7 +327,7 @@ def entry(row: Any) -> dict[str, Any]:
         ),
         "counterpart_type": "investor",
         "counterpart_id": None,
-        "counterpart_label": "Document request",
+        "counterpart_label": row.get("counterpart_label") or "Document request",
         "issued_at": int(row["issued_at"]),
         "metadata": {
             "request_source": REQUEST_SOURCE,
@@ -330,7 +341,8 @@ def entry(row: Any) -> dict[str, Any]:
             # A Trusted Circle request stays pending while automatic search and
             # sharing run. Only the sharing authority can distinguish that
             # progress from an owner task or a paused/manual recovery.
-            "owner_attention_required": row["bucket"] == "incoming_requests"
+            "owner_attention_required": row["state"] == "pending"
+            and row["bucket"] == "incoming_requests"
             and not automatic_progressing
             and not owner_payment_blocked,
             **({"payment_waiting_for_requester": True} if owner_payment_waiting else {}),

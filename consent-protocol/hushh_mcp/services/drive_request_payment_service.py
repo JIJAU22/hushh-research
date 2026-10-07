@@ -107,25 +107,33 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
         owner = participant["user_id"]
         sharing = DriveSharingStore(db=self.db)
         sharing._sharing_admission(owner)
-        if not connector_feature_enabled("google_drive_chat_reads", owner):
-            raise DriveSharingError("payment_not_ready")
         participants = sharing._participant_gate(connection, owner, request_id)
-        preferences = DriveLivePreferences(db=self.db)
-        current = preferences.live_active(connection, user_id=owner)
-        preferences.background_current(
-            connection, user_id=owner, generation=current["connection_generation"]
-        )
         request = sharing._related_request(connection, owner, request_id)
-        if (
-            request["recipient_user_id"] != requester_user_id
-            or request["status"] != "pending"
-            or request["expires_at"] <= datetime.now(UTC)
-            or request["preparation_error_code"] == "manual_search_active"
-            or sharing._open_request(request).get("trusted_auto") is not True
-            or not sharing._trusted_recipient_current(
-                connection, owner, participants["recipient_user_id"]
+        if request["recipient_user_id"] != requester_user_id or request["expires_at"] <= datetime.now(UTC):
+            raise DriveSharingError("payment_not_ready")
+        private = sharing._open_request(request)
+        if private.get("trusted_auto") is True:
+            preferences = DriveLivePreferences(db=self.db)
+            current = preferences.live_active(connection, user_id=owner)
+            preferences.background_current(
+                connection, user_id=owner, generation=current["connection_generation"]
             )
-        ):
+            trusted_valid = (
+                request["status"] == "pending"
+                and request["preparation_error_code"] != "manual_search_active"
+                and connector_feature_enabled("google_drive_chat_reads", owner)
+                and sharing._trusted_recipient_current(
+                    connection, owner, participants["recipient_user_id"]
+                )
+            )
+        else:
+            # Non-trusted requests retain owner consent. Payment is available
+            # only after that consent has queued the approved grant batch.
+            trusted_valid = (
+                request["status"] in {"approved", "partial"}
+                and connector_feature_enabled("google_drive_chat_reads", owner)
+            )
+        if not trusted_valid:
             raise DriveSharingError("payment_not_ready")
         return request
 
@@ -155,7 +163,7 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
             )
             if (
                 order is None
-                or order["request_status"] != "pending"
+                or order["request_status"] not in {"pending", "approved", "partial"}
                 or order["request_expires_at"] <= datetime.now(UTC)
             ):
                 raise DriveSharingError("payment_not_ready")
@@ -525,7 +533,7 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
                 reconciliation_reason = None
                 if request is None:
                     reconciliation_reason = "account_erased"
-                elif request["status"] != "pending" or request["expires_at"] <= datetime.now(UTC):
+                elif request["status"] not in {"pending", "approved", "partial"} or request["expires_at"] <= datetime.now(UTC):
                     reconciliation_reason = "request_closed"
                 elif not authority_current:
                     reconciliation_reason = "authority_changed"
@@ -570,7 +578,11 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
                    ON CONFLICT (stripe_event_id) DO NOTHING"""),
                 {"event": event["id"], "session": session["id"], "request": request_id},
             )
-            return "sharing" if request is None else "suggestions"
+            return (
+                "sharing"
+                if request is None or request["status"] in {"approved", "partial"}
+                else "suggestions"
+            )
 
         wake_stage = await self._transaction(settle)
         if wake_stage:

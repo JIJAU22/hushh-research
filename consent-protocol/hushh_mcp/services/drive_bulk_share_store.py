@@ -1376,7 +1376,8 @@ class DriveBulkShareStore(DriveLivePreferences):
                 )
                 if _request_missing_dates(private):
                     raise DriveSharingError("date_range_required")
-                self._require_paid_for_origin(connection, origin["request_id"])
+                if approval_source == "trusted_auto":
+                    self._require_paid_for_origin(connection, origin["request_id"])
                 search = self._row(
                     connection,
                     """SELECT job_id,status,revision,incomplete_search,checkpoint_envelope
@@ -1482,6 +1483,12 @@ class DriveBulkShareStore(DriveLivePreferences):
                     WHERE request_id=:request RETURNING *""",
                     {"request": origin["request_id"]},
                 )
+                if request["payment_required"]:
+                    from hushh_mcp.services.drive_request_payment_store import (
+                        DriveRequestPaymentStore,
+                    )
+
+                    DriveRequestPaymentStore.ensure_order_for_approved_request(connection, request)
                 connection.execute(
                     text("""INSERT INTO drive_share_events(
                     event_id,request_id,user_id,revision,event_type)

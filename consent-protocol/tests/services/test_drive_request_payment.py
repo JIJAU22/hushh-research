@@ -29,6 +29,7 @@ from hushh_mcp.services.drive_request_payment_service import DriveRequestPayment
 from hushh_mcp.services.drive_request_payment_store import DriveRequestPaymentStore
 from hushh_mcp.services.drive_sharing_contract import DriveSharingError
 from hushh_mcp.services.drive_sharing_retention import erase_drive_account_in_transaction
+from hushh_mcp.services.drive_sharing_store import DriveSharingStore
 from tests.services.test_drive_sharing_store import (  # noqa: F401
     connector_postgres_url,
     documents,
@@ -112,6 +113,33 @@ def test_paid_grant_guard_blocks_reconciliation_hold():
         "reconciliation_required"
     ] = False
     DriveRequestPaymentStore.require_paid_if_required(connection, request_row)
+
+
+def test_non_trusted_approval_creates_one_payment_order_and_notification():
+    insert_result = Mock()
+    selected_result = Mock()
+    selected_result.mappings.return_value.first.return_value = {"status": "awaiting_payment"}
+    event_result = Mock(rowcount=1)
+    connection = SimpleNamespace(execute=Mock(side_effect=[insert_result, selected_result, event_result]))
+    request_row = {
+        "request_id": str(uuid4()),
+        "user_id": "owner",
+        "recipient_user_id": "requester",
+        "payment_required": True,
+        "revision": 2,
+    }
+
+    assert DriveRequestPaymentStore.ensure_order_for_approved_request(connection, request_row)
+    assert connection.execute.call_count == 3
+    assert "ON CONFLICT (request_id) DO NOTHING" in str(connection.execute.call_args_list[0].args[0])
+
+
+def test_new_request_payment_boundary_is_after_consent_for_non_trusted_requests():
+    create = inspect.getsource(DriveSharingStore.create_request)
+    approve = inspect.getsource(DriveSharingStore.approve_review)
+    assert "not owner_initiated" in create
+    assert "ensure_order_for_approved_request" in approve
+    assert "enforce_payment=False" in approve
 
 
 def test_erasure_locks_connector_share_request_then_order():
