@@ -741,6 +741,23 @@ describe("ConsentCenterPage requestId deep links", () => {
     expect(mocks.replace.mock.lastCall?.[0]).not.toContain("requestView=sent");
   });
 
+  it("does not replace the route when Received is already selected", async () => {
+    mocks.search = "tab=pending";
+    mocks.listEntries.mockResolvedValue(emptyListResponse());
+
+    render(<ConsentCenterPage />);
+
+    const received = await screen.findByRole("button", { name: "Received" });
+    expect(received).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(received);
+
+    // A same-URL replace re-renders the mounted pager and its list resource,
+    // which is the source of the visible title/button jitter reported on this
+    // tab. The active direction is already the desired state, so navigation
+    // must remain untouched.
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
   it("keeps Northstar's material decision terms once without duplicate controls", async () => {
     mocks.search = "tab=requests&requestId=northstar-scope-upgrade";
     mocks.listEntries.mockResolvedValue(
