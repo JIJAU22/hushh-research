@@ -85,7 +85,9 @@ async def test_edit_retires_old_action_and_retains_other_fields(compose):
     assert changed.revision == revision + 1
     delivery.cancel_prepared.assert_awaited_once()
     assert runtime.tasks[ref].draft["body"] == "Hi"
-    assert runtime.prepare_send(ref, revision).reason_code == "draft_stale"
+    assert runtime.prepare_send(ref, revision).reason_code == (
+        "draft_stale" if runtime.tasks[ref].revision != revision else "draft_not_reviewed"
+    )
     assert runtime.prepare_send(ref, changed.revision).reason_code == "draft_not_reviewed"
     delivery.execute.assert_not_awaited()
 
@@ -325,6 +327,9 @@ async def test_status_recovers_retirement_only_from_authoritative_terminal_state
     )
     result = await _status(ctx, DraftStatusInput(draft_ref=ref))
     assert result.status == "needs_input"
+    assert result.client_step["prepared"] is None
+    assert result.client_step["previous_action_id"] == "a" * 36
+    assert result.client_step["previous_revision"] == revision
     assert not runtime.tasks[ref].prepared
     assert runtime.tasks[ref].draft["body"] == "Hi"
 
@@ -494,8 +499,12 @@ async def test_new_input_during_await_blocks_claim_until_fresh_review(
     prior_attempts = delivery.execute.await_count
     await runtime.send(ctx, ref, revision)
     assert delivery.execute.await_count == prior_attempts
-    assert runtime.prepare_send(ref, revision).reason_code == "draft_not_reviewed"
-    renewed = await runtime.edit(ctx, ref, revision, {}, operation_id="fresh-review")
+    assert runtime.prepare_send(ref, revision).reason_code == (
+        "draft_stale" if runtime.tasks[ref].revision != revision else "draft_not_reviewed"
+    )
+    renewed = await runtime.edit(
+        ctx, ref, runtime.tasks[ref].revision, {}, operation_id="fresh-review"
+    )
     assert renewed.status == "review_requested"
     assert runtime.prepare_send(ref, renewed.revision).reason_code == "draft_not_reviewed"
     assert runtime.mark_reviewed(ref, renewed.revision, "a" * 36)

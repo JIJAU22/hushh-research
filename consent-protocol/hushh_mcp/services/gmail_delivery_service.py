@@ -1342,14 +1342,15 @@ class GmailDeliveryService:
                    SET state = 'cancelled', updated_at = NOW()
                    WHERE action_id = $1 AND user_id = $2
                      AND state = 'prepared' AND send_at IS NULL
-                   RETURNING action_id, state""",
+                     AND sent_at IS NULL AND gmail_message_id IS NULL
+                   RETURNING action_id, state, sent_at, gmail_message_id""",
                 action_id,
                 user_id,
             )
             if row is not None:
                 return {"action_id": action_id, "cancelled": True, "state": "cancelled"}
             current = await conn.fetchrow(
-                """SELECT state FROM gmail_owner_send_actions
+                """SELECT state, sent_at, gmail_message_id FROM gmail_owner_send_actions
                    WHERE action_id = $1 AND user_id = $2 AND send_at IS NULL""",
                 action_id,
                 user_id,

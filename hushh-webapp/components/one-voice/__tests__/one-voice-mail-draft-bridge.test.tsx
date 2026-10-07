@@ -415,6 +415,19 @@ describe("OneVoiceMailDraftBridge", () => {
     expect(replay).toHaveBeenCalledExactlyOnceWith("failed", { reason: "stale_review" });
   });
 
+  it("rejects a newer voice review for a different draft after supersession", () => {
+    enableRealCard();
+    render(<OneVoiceMailDraftBridge />);
+    reviewStep();
+    const superseded = vi.fn();
+    act(() => useVoiceSessionStore.getState().emitClientStep({ stepId: "superseded-cross-draft", kind: "mail_draft_outcome", payload: {
+      draft_ref: DRAFT_REF, revision: 1, action_id: "action-1", status: "needs_input", reason_code: "VOICE_APPROVAL_SUPERSEDED",
+    }, timeoutS: 30 }, superseded));
+    const wrongDraft = reviewStep({ ...reviewedPayload(2), draft_ref: "other_draft_reference_123" });
+    expect(wrongDraft).toHaveBeenCalledExactlyOnceWith("failed", { reason: "stale_review" });
+    expect(screen.getByText("Review the current email again. Nothing was sent.")).toBeInTheDocument();
+  });
+
   it("does not replace an in-flight delivery with a fresh voice review", async () => {
     enableRealCard();
     const prepared = deferred<PreparedEmailSend>();
@@ -426,6 +439,29 @@ describe("OneVoiceMailDraftBridge", () => {
     const reviewWhileSending = reviewStep(reviewedPayload(2));
     expect(reviewWhileSending).toHaveBeenCalledExactlyOnceWith("failed", { reason: "stale_review" });
     expect(screen.getByTestId("one-voice-mail-delivery")).toHaveTextContent("Sending mail…");
+    prepared.resolve({ actionId: "action-1", expiresAt: null, senderToken: "sender-1", senderLabel: "owner@example.com" });
+  });
+
+  it("accepts an explicit retired-send recovery while preparation is still visible", async () => {
+    enableRealCard();
+    const prepared = deferred<PreparedEmailSend>();
+    vi.mocked(EmailDeliveryService.prepare).mockReturnValue(prepared.promise);
+    render(<OneVoiceMailDraftBridge />);
+    reviewStep();
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
+    expect(screen.getByTestId("one-voice-mail-delivery")).toHaveTextContent("Sending mail…");
+
+    const recovery = {
+      ...reviewedPayload(2),
+      prepared: null,
+      reason_code: "RECIPIENT_LOOKUP_UNAVAILABLE",
+      previous_action_id: "action-1",
+      previous_revision: 1,
+    };
+    const report = reviewStep(recovery);
+    expect(report).toHaveBeenCalledExactlyOnceWith("ok", { mounted: true, draft_ref: DRAFT_REF, revision: 2 });
+    expect(screen.getByText(/Recipients could not be checked/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review again" })).toBeEnabled();
     prepared.resolve({ actionId: "action-1", expiresAt: null, senderToken: "sender-1", senderLabel: "owner@example.com" });
   });
 

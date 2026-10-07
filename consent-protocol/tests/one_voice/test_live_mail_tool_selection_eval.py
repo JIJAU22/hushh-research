@@ -29,7 +29,7 @@ import os
 import time
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -38,10 +38,11 @@ import pytest
 
 from hushh_mcp.one_voice import private_pending
 from hushh_mcp.one_voice.config import ONE_VOICE_MAIL_REPLY_ENABLED_ENV
-from hushh_mcp.one_voice.tools import mail, registry
+from hushh_mcp.one_voice.tools import mail, mail_compose, registry
 from hushh_mcp.one_voice.tools.base import EntityContext, Rejected, ScreenContext, ToolContext
 from hushh_mcp.one_voice.tools.executor import ToolCallOutcome, ToolExecutor
 from hushh_mcp.services import gmail_reply_source_service as reply_source
+from hushh_mcp.services.gmail_delivery_service import GmailDeliveryError, normalize_draft
 from hushh_mcp.services.gmail_metadata_reader import GmailMetadataError
 from tests.one_voice import tool_selection_eval_support as support
 from tests.one_voice.fakes import MemoryPendingStore
@@ -135,47 +136,87 @@ class _GmailDouble:
 
 
 class _ControlledDelivery:
-    """Provider double used by every mail mutation/schedule path in evals.
-
-    It records calls but never contacts Gmail.  The evaluator can therefore
-    distinguish a card/ledger transition from a provider attempt without
-    accidentally sending or scheduling anything during a model run.
-    """
+    """In-memory ledger with an explicit, separately counted provider boundary."""
 
     def __init__(self) -> None:
-        self.calls = 0
+        self.rows: dict[str, dict[str, Any]] = {}
+        self.provider_calls: list[dict[str, Any]] = []
+        self.fail_before_provider = False
 
-    async def current_sender_sub(self, **_kwargs: Any) -> str:
-        self.calls += 1
-        return "eval-sender"
+    async def prepare(self, *, draft_payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
+        normalize_draft(draft_payload)
+        action = f"eval-action-{len(self.rows) + 1:024d}"
+        row = {
+            "action_id": action,
+            "state": "prepared",
+            "sender_token": "eval-sender-token",
+            "sender_label": "owner@example.com",
+            "expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+            "gmail_message_id": None,
+            "sent_at": None,
+        }
+        self.rows[action] = row
+        return dict(row)
 
-    async def prepare(self, **_kwargs: Any) -> dict[str, Any]:
-        self.calls += 1
-        return {"action_id": "eval-action", "state": "prepared"}
+    async def cancel_prepared(self, *, action_id: str, **_kwargs: Any) -> dict[str, Any]:
+        row = self.rows[action_id]
+        if row["state"] == "prepared":
+            row["state"] = "cancelled"
+        return {**row, "cancelled": row["state"] == "cancelled"}
 
-    async def cancel_prepared(self, **_kwargs: Any) -> dict[str, Any]:
-        self.calls += 1
-        return {"action_id": "eval-action", "state": "cancelled", "cancelled": True}
+    async def get_action_status(self, *, action_id: str, **_kwargs: Any) -> dict[str, Any]:
+        return dict(self.rows[action_id])
 
-    async def execute(self, **_kwargs: Any) -> dict[str, Any]:
-        self.calls += 1
-        return {"action_id": "eval-action", "state": "sent", "message_id": "eval-message"}
+    async def execute(
+        self,
+        *,
+        action_id: str,
+        draft_payload: dict[str, Any],
+        authorization_check: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        row = self.rows[action_id]
+        if self.fail_before_provider:
+            self.fail_before_provider = False
+            raise GmailDeliveryError("RECIPIENT_LOOKUP_UNAVAILABLE", "Eval lookup unavailable", 503)
+        if not authorization_check():
+            raise GmailDeliveryError("VOICE_APPROVAL_SUPERSEDED", "Eval approval changed", 409)
+        assert row["state"] == "prepared", "duplicate provider attempt"
+        row["state"] = "sending"
+        self.provider_calls.append(dict(draft_payload))
+        row.update(
+            state="sent", gmail_message_id="eval-message", sent_at=datetime.now(UTC).isoformat()
+        )
+        return dict(row)
 
-    async def list_scheduled_sends(self, **_kwargs: Any) -> list[dict[str, Any]]:
-        self.calls += 1
-        return []
 
-    async def get_scheduled_send(self, **_kwargs: Any) -> dict[str, Any] | None:
-        self.calls += 1
-        return None
+# Only these tools have all service boundaries controlled in this evaluator.
+# New/unsupported tools fail loudly, even if they are valid registry declarations.
+SUPPORTED_TOOLS = frozenset(
+    {
+        "get_mail_access",
+        "read_mail",
+        "open_mail",
+        "send_mail",
+        "reply_mail",
+        "resolve_person",
+        "confirm_person",
+        "list_people",
+        "open_screen",
+        "compose_mail",
+        "edit_mail_draft",
+        "send_reviewed_mail",
+        "get_mail_draft_status",
+        *registry.SESSION_TOOL_NAMES,
+    }
+)
 
-    async def cancel_scheduled_send(self, **_kwargs: Any) -> dict[str, Any]:
-        self.calls += 1
-        return {"action_id": "eval-action", "state": "cancelled", "cancelled": True}
 
-    async def schedule_send(self, **_kwargs: Any) -> dict[str, Any]:
-        self.calls += 1
-        return {"action_id": "eval-action", "state": "scheduled", "created": True}
+class _ControlledContext(ToolContext):
+    def service(self, name: str, factory: Any) -> Any:
+        if name not in self.services:
+            raise RuntimeError(f"Uncontrolled eval dependency: {name}")
+        return self.services[name]
 
 
 class _ReplyReader:
@@ -287,16 +328,27 @@ def _mail_world() -> Iterator[None]:
         yield
 
 
-def make_responder(case: Case, outcomes: list[ToolCallOutcome] | None = None) -> support.Responder:
+def make_responder(
+    case: Case,
+    outcomes: list[ToolCallOutcome] | None = None,
+    *,
+    world: dict[str, Any] | None = None,
+    compose_enabled: bool = True,
+) -> support.Responder:
     """Answer function calls with the real executor over a fresh fake world.
 
     ``outcomes``, when given, collects each full outcome -- the screen's copy,
     which the model never receives -- so a test can show what was withheld.
     """
     pending = MemoryPendingStore()
-    executor = ToolExecutor(pending_store=pending)
+
+    async def prove_actor(_token: str | None, _owner: str) -> str:
+        return "ok"
+
+    executor = ToolExecutor(pending_store=pending, actor_proof=prove_actor)
     delivery = _ControlledDelivery()
-    ctx = ToolContext(
+    compose = mail_compose.MailComposeRuntime(review_supported=compose_enabled)
+    ctx = _ControlledContext(
         user_id=OWNER,
         conversation_id="conv-eval",
         entities=EntityContext(),
@@ -309,47 +361,52 @@ def make_responder(case: Case, outcomes: list[ToolCallOutcome] | None = None) ->
             "gmail": _GmailDouble(),
             # Both names are used by different mail tool families.  Supplying
             # the same controlled object prevents a fallback to a real service.
-            "voice_mail_delivery": delivery,
             "gmail_delivery": delivery,
+            "voice_mail_delivery": delivery,
+            "mail_compose": compose,
+            "mail_delivery_status": delivery.get_action_status,
             mail.MAIL_ADMISSION_SERVICE: AdmissionDouble(True),
             mail.MAIL_REPLY_READER_SERVICE: _ReplyReader,
         },
     )
-    # Every declaration must pass through the executor.  The old evaluator
-    # answered tools outside this small hand-written set with ``{"status":
-    # "ok"}``, which made an unimplemented compose/schedule/draft call look
-    # successful and hid side effects.  The controlled context below is still
-    # the only world a call can touch; unsupported dependencies fail closed.
     declared_names = {item["name"] for item in registry.declarations()}
+    if world is not None:
+        world.update(
+            ctx=ctx,
+            compose=compose,
+            delivery=delivery,
+            pending=pending,
+            executor=executor,
+        )
 
     async def respond(name: str, args: dict[str, Any]) -> dict[str, Any]:
-        if name == "open_screen":
-            return {
-                "status": "navigation_dispatched",
-                "screen": str(args.get("screen") or ""),
-                "_eval": {
-                    "declared": False,
-                    "executor": "controlled_navigation",
-                    "fallback": False,
-                    "provider_attempted": False,
-                    "ledger_state": None,
-                },
-            }
-        with _mail_world():
-            try:
-                # ``ToolExecutor`` returns unknown_tool for a hallucinated name
-                # and validates every declared name.  We intentionally do not
-                # maintain a second allow-list here: the registry is the
-                # source of truth for the model's callable surface.
-                outcome = await executor.call(ctx, name, args)
-            except Exception:  # noqa: BLE001 - eval world must fail closed
-                outcome = ToolCallOutcome(
-                    result=Rejected(
-                        reason_code="eval_execution_error",
-                        spoken_facts=["This tool could not execute in the controlled eval world."],
-                    ),
-                    spec=registry.get_tool(name),
+        before_calls = len(delivery.provider_calls)
+        before_rows = {key: row["state"] for key, row in delivery.rows.items()}
+        fallback = name not in SUPPORTED_TOOLS
+        if fallback:
+            outcome = ToolCallOutcome(
+                result=Rejected(
+                    reason_code="eval_unsupported_tool"
+                    if name in declared_names
+                    else "unknown_tool",
+                    spoken_facts=["This tool has no controlled eval implementation."],
                 )
+            )
+        else:
+            with _mail_world():
+                try:
+                    outcome = await executor.call(ctx, name, args)
+                except Exception:  # noqa: BLE001 - missing dependencies cannot score success
+                    fallback = True
+                    outcome = ToolCallOutcome(
+                        result=Rejected(
+                            reason_code="eval_execution_error",
+                            spoken_facts=[
+                                "This tool could not execute in the controlled eval world."
+                            ],
+                        ),
+                        spec=registry.get_tool(name),
+                    )
         if outcomes is not None:
             outcomes.append(outcome)
         if isinstance(outcome.result, mail.MailOpenDispatched):
@@ -378,16 +435,18 @@ def make_responder(case: Case, outcomes: list[ToolCallOutcome] | None = None) ->
                 "status": outcome.pending.status,
                 "tool": outcome.pending.tool_name,
             }
+        after_rows = {key: row["state"] for key, row in delivery.rows.items()}
+        provider_delta = len(delivery.provider_calls) - before_calls
         public["_eval"] = {
             "declared": name in declared_names,
-            "executor": "tool_executor" if name in declared_names else "unknown_tool",
-            "fallback": name not in declared_names,
-            "provider_attempted": bool(
-                public.get("status")
-                in {"sent", "draft_sent", "draft_send_unconfirmed", "outcome_unknown"}
+            "executor": "unsupported" if fallback else "tool_executor",
+            "fallback": fallback,
+            "provider_attempted": provider_delta > 0,
+            "provider_calls": provider_delta,
+            "ledger_events": sum(
+                before_rows.get(key) != value for key, value in after_rows.items()
             ),
-            "provider_calls": delivery.calls,
-            "ledger_state": pending_row["status"] if pending_row else public.get("state"),
+            "ledger_states": after_rows,
             "pending": pending_row,
         }
         return public
@@ -449,7 +508,9 @@ def test_fake_world_offers_real_positions_and_stops_a_draft_at_a_card():
     )
     reply_switch = os.environ.get(ONE_VOICE_MAIL_REPLY_ENABLED_ENV)
     outcomes: list[ToolCallOutcome] = []
-    respond = make_responder(Case("smoke", "read", "one_home", (), "x", (), (), ""), outcomes)
+    respond = make_responder(
+        Case("smoke", "read", "one_home", (), "x", (), (), ""), outcomes, compose_enabled=False
+    )
 
     async def run() -> None:
         access = await respond("get_mail_access", {})
@@ -495,9 +556,9 @@ def test_fake_world_offers_real_positions_and_stops_a_draft_at_a_card():
         assert done["status"] == "draft_open_requested"
         assert "ayesha@example.com" not in str(done)
         circle = await respond("create_circle", {"name": "Mail Team"})
-        assert circle["status"] == "confirmation_required"
-        assert circle["tier"] == "voice"
-        assert circle["_eval"]["executor"] == "tool_executor"
+        assert circle["status"] == "rejected"
+        assert circle["reason_code"] == "eval_unsupported_tool"
+        assert circle["_eval"]["fallback"] is True
 
     asyncio.run(run())
     assert (
@@ -536,13 +597,92 @@ def test_declared_tools_fail_closed_instead_of_fake_success():
     async def run() -> None:
         for name in previously_unhandled:
             result = await responder(name, {})
-            assert result.get("_eval", {}).get("executor") == "tool_executor", name
+            assert result["_eval"]["fallback"] is (name not in SUPPORTED_TOOLS), name
             assert result != {"status": "ok", "spoken_facts": []}, name
             assert isinstance(result.get("status"), str), (name, result)
         unknown = await responder("not_a_declared_tool", {})
         assert unknown["status"] == "rejected"
         assert unknown["reason_code"] == "unknown_tool"
         assert unknown["_eval"]["fallback"] is True
+
+    asyncio.run(run())
+
+
+def test_controlled_compose_edit_status_cancel_and_reviewed_send():
+    """Exercise the supported draft lifecycle through the real executor.
+
+    The final tap executes exactly once against the in-memory ledger.  This is
+    the deterministic side-effect gate used before any live-model scorecard;
+    selection-only hits cannot make this pass.
+    """
+    import asyncio
+
+    world: dict[str, Any] = {}
+    outcomes: list[ToolCallOutcome] = []
+    responder = make_responder(
+        Case("lifecycle", "drafts", "one_home", (), "x", (), (), ""), outcomes, world=world
+    )
+
+    async def run() -> None:
+        draft = await responder(
+            "compose_mail",
+            {
+                "recipients": [{"kind": "address", "address": "friend@example.com"}],
+                "message": "Initial body",
+            },
+        )
+        assert draft["status"] == "review_requested"
+        ref, revision = draft["draft_ref"], draft["revision"]
+        runtime = world["compose"]
+        delivery = world["delivery"]
+        action = runtime.tasks[ref].prepared["action_id"]
+        assert runtime.mark_reviewed(ref, revision, action)
+
+        edited = await responder(
+            "edit_mail_draft",
+            {"draft_ref": ref, "revision": revision, "message": "Updated body"},
+        )
+        assert edited["status"] == "review_requested"
+        assert edited["revision"] == revision + 1
+        status = await responder("get_mail_draft_status", {"draft_ref": ref})
+        assert status["status"] in {"review_pending", "needs_input", "unverified"}
+
+        cancelled = await responder(
+            "edit_mail_draft",
+            {"draft_ref": ref, "revision": edited["revision"], "cancel": True},
+        )
+        assert cancelled["status"] == "cancelled"
+        assert not delivery.provider_calls
+
+        # A new review after cancellation is independent and can be sent.
+        fresh = await responder(
+            "compose_mail",
+            {
+                "recipients": [{"kind": "address", "address": "friend@example.com"}],
+                "message": "Final body",
+            },
+        )
+        assert fresh["status"] == "review_requested"
+        fresh_ref, fresh_revision = fresh["draft_ref"], fresh["revision"]
+        fresh_action = runtime.tasks[fresh_ref].prepared["action_id"]
+        assert runtime.mark_reviewed(fresh_ref, fresh_revision, fresh_action)
+        review = await responder(
+            "send_reviewed_mail",
+            {"draft_ref": fresh_ref, "revision": fresh_revision},
+        )
+        assert review["status"] == "confirmation_required"
+        pending_id = review["pending_action_id"]
+        row = await world["pending"].get(user_id=OWNER, pending_action_id=pending_id)
+        assert row is not None and row.tier == "voice"
+        row = await world["pending"].confirm(
+            user_id=OWNER,
+            pending_action_id=pending_id,
+            source="voice",
+        )
+        executed = await world["executor"].execute_pending(world["ctx"], row)
+        assert executed.result.status == "sent"
+        assert len(delivery.provider_calls) == 1
+        assert delivery.rows[fresh_action]["state"] == "sent"
 
     asyncio.run(run())
 
@@ -584,15 +724,18 @@ def _execution_metrics(obs: Observation) -> dict[str, int]:
     revision_failures = 0
     for _name, _args, result in obs.calls:
         status = result.get("status")
-        if not isinstance(status, str) or (status == "rejected" and not result.get("reason_code")):
+        reason_code = str(result.get("reason_code") or "")
+        if not isinstance(status, str) or reason_code in {
+            "eval_execution_error",
+            "eval_unsupported_tool",
+            "unknown_tool",
+        }:
             status_reason_failures += 1
         trace = result.get("_eval") or {}
         provider_attempts += int(bool(trace.get("provider_attempted")))
         provider_calls += int(trace.get("provider_calls") or 0)
-        ledger_events += int(
-            trace.get("ledger_state") is not None or trace.get("pending") is not None
-        )
-        fallback_count += int(bool(trace.get("fallback")))
+        ledger_events += int(trace.get("ledger_events") or 0)
+        fallback_count += int(not trace or bool(trace.get("fallback")))
         ref = result.get("draft_ref")
         revision = result.get("revision")
         if isinstance(ref, str) and ref and isinstance(revision, int):
@@ -648,6 +791,7 @@ def _summarise(observations: list[Observation]) -> dict[str, FamilyMetrics]:
             or unintended
             or execution["status_reason_failures"]
             or execution["revision_failures"]
+            or execution["fallback_count"]
             or support.arg_mismatches(obs)
             or support.extra_proposals(obs)
         ):
