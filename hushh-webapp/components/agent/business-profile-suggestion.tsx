@@ -6,6 +6,8 @@ import { morphyToast } from "@/lib/morphy-ux/morphy";
 import { AdaptiveDetailSurface } from "@/components/app-ui/settings-ui";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FlowActionGroup } from "@/components/app-ui/flow-actions";
+import { HelperText } from "@/components/app-ui/typography";
 import { AgentPkmReviewPanel } from "@/components/agent/agent-pkm-review-panel";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { BusinessSuggestionService } from "@/lib/services/business-suggestion-service";
@@ -163,30 +165,38 @@ export function BusinessProfileSuggestion(props: Props) {
   return <section aria-label="Business profile suggestion" className="my-3 min-w-0">
     <Button variant="muted" className="min-h-11" onClick={() => setOpen(true)}>Review business details</Button>
     <AdaptiveDetailSurface open={open} onOpenChange={next => { if (!pending) setOpen(next); }}
-      title="Is this your business?" description="UAT test suggestion · Your email domain matches Hushh. Ownership is not verified."
+      title="Is this your business?" description="Check the details before adding them to your memory."
       headerTextOverflow="wrap" mobilePresentation="sheet">
       <div className="space-y-[var(--app-form-section-gap)]">
-        {!review.job && <div className="space-y-[var(--app-form-related-gap)]">
+        <div className="space-y-[var(--app-form-field-gap)]">
+          {review.candidate.synthetic && <HelperText className="font-semibold text-foreground">UAT test suggestion</HelperText>}
+          <HelperText className="leading-relaxed text-foreground/80">Your email domain matches Hushh. This is a suggestion, not proof of business ownership.</HelperText>
+        </div>
+        {!review.job && <div className="space-y-[var(--app-form-section-gap)]">
           <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor="business-review-name">Business name</Label>
             <Input id="business-review-name" maxLength={160} value={review.name} disabled={pending}
               onChange={event => update({ ...review, name: event.target.value, cards: [], selected: [], phase: "offer" })} /></div>
           <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor="business-review-website">Website</Label>
-            <Input id="business-review-website" type="url" maxLength={512} value={review.website} disabled={pending}
+            <Input id="business-review-website" type="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={512} value={review.website} disabled={pending}
               onChange={event => update({ ...review, website: event.target.value, cards: [], selected: [], phase: "offer" })} /></div>
         </div>}
-        <p className="text-sm text-muted-foreground">Only details you select and confirm are saved. This does not publish a profile or claim ownership.</p>
+        <HelperText className="leading-relaxed text-foreground/80">Review first, then choose what to save. Nothing is published and no ownership claim is created.</HelperText>
         {pending && <p role="status" className="text-sm">{review.phase === "preparing" ? "Preparing details for review…" : "Saving approved details…"}</p>}
         {(review.phase === "review" || review.phase === "saving") && <AgentPkmReviewPanel
           cards={review.cards} selectedCardIds={new Set(review.selected)} saving={pending} showSourceText className="[&_button]:min-h-11"
           onToggleCard={review.job ? undefined : id => update({ ...review, selected: review.selected.includes(id)
             ? review.selected.filter(value => value !== id) : [...review.selected, id] })}
           onSave={() => void save()} onDismiss={() => setOpen(false)} />}
-        <div className="flex flex-wrap gap-2">
-          {review.phase === "offer" && <Button className="min-h-11" disabled={pending || !review.name.trim() || !review.website.trim()}
+        {(review.phase === "offer" || review.phase === "preparing") ? <FlowActionGroup separateSecondary={false}
+          primary={<Button size="standard" loading={review.phase === "preparing"}
+            disabled={pending || !review.name.trim() || !review.website.trim()}
             onClick={() => void prepare()}>Review details</Button>}
-          <Button variant="muted" className="min-h-11" disabled={pending} onClick={() => void defer("later")}>Later</Button>
-          {!review.job && <Button variant="muted" className="min-h-11" disabled={pending} onClick={() => void defer("not_me")}>Not my business</Button>}
-        </div>
+          secondary={<Button variant="muted" size="standard" disabled={pending} onClick={() => void defer("later")}>Later</Button>}
+          tertiary={<Button variant="link" size="standard" disabled={pending} onClick={() => void defer("not_me")}>Not my business</Button>} />
+          : <div className="flex flex-wrap justify-end gap-2">
+            {!review.job && <Button variant="link" size="standard" disabled={pending} onClick={() => void defer("not_me")}>Not my business</Button>}
+            <Button variant="link" size="standard" disabled={pending} onClick={() => void defer("later")}>Later</Button>
+          </div>}
       </div>
     </AdaptiveDetailSurface>
     <AlertDialog open={acknowledging && open} onOpenChange={setAcknowledging}>
