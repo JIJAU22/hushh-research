@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: 2026 Hushh
+# SPDX-FileCopyrightText: 2026 Hushh Research
 """Offline Android property/export acceptance tests; never read credentials."""
 import copy
 import unittest
