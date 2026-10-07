@@ -112,7 +112,9 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
         sharing._sharing_admission(owner)
         participants = sharing._participant_gate(connection, owner, request_id)
         request = sharing._related_request(connection, owner, request_id)
-        if request["recipient_user_id"] != requester_user_id or request["expires_at"] <= datetime.now(UTC):
+        if request["recipient_user_id"] != requester_user_id or request[
+            "expires_at"
+        ] <= datetime.now(UTC):
             raise DriveSharingError("payment_not_ready")
         private = sharing._open_request(request)
         if private.get("trusted_auto") is True:
@@ -132,10 +134,10 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
         else:
             # Non-trusted requests retain owner consent. Payment is available
             # only after that consent has queued the approved grant batch.
-            trusted_valid = (
-                request["status"] in {"approved", "partial"}
-                and connector_feature_enabled("google_drive_chat_reads", owner)
-            )
+            trusted_valid = request["status"] in {
+                "approved",
+                "partial",
+            } and connector_feature_enabled("google_drive_chat_reads", owner)
         if not trusted_valid:
             raise DriveSharingError("payment_not_ready")
         return request
@@ -539,7 +541,9 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
                 reconciliation_reason = None
                 if request is None:
                     reconciliation_reason = "account_erased"
-                elif request["status"] not in {"pending", "approved", "partial"} or request["expires_at"] <= datetime.now(UTC):
+                elif request["status"] not in {"pending", "approved", "partial"} or request[
+                    "expires_at"
+                ] <= datetime.now(UTC):
                     reconciliation_reason = "request_closed"
                 elif not authority_current:
                     reconciliation_reason = "authority_changed"

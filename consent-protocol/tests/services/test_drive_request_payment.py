@@ -120,7 +120,9 @@ def test_non_trusted_approval_creates_one_payment_order_and_notification():
     selected_result = Mock()
     selected_result.mappings.return_value.first.return_value = {"status": "awaiting_payment"}
     event_result = Mock(rowcount=1)
-    connection = SimpleNamespace(execute=Mock(side_effect=[insert_result, selected_result, event_result]))
+    connection = SimpleNamespace(
+        execute=Mock(side_effect=[insert_result, selected_result, event_result])
+    )
     request_row = {
         "request_id": str(uuid4()),
         "user_id": "owner",
@@ -131,7 +133,9 @@ def test_non_trusted_approval_creates_one_payment_order_and_notification():
 
     assert DriveRequestPaymentStore.ensure_order_for_approved_request(connection, request_row)
     assert connection.execute.call_count == 3
-    assert "ON CONFLICT (request_id) DO NOTHING" in str(connection.execute.call_args_list[0].args[0])
+    assert "ON CONFLICT (request_id) DO NOTHING" in str(
+        connection.execute.call_args_list[0].args[0]
+    )
 
 
 def test_new_request_payment_boundary_is_after_consent_for_non_trusted_requests():

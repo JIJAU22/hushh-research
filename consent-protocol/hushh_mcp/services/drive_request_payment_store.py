@@ -85,10 +85,14 @@ class DriveRequestPaymentStore(ExternalConnectorLifecycleStore):
                 "requester": request["recipient_user_id"],
             },
         )
-        order = connection.execute(
-            text("SELECT status FROM drive_request_payment_orders WHERE request_id=:request"),
-            {"request": request["request_id"]},
-        ).mappings().first()
+        order = (
+            connection.execute(
+                text("SELECT status FROM drive_request_payment_orders WHERE request_id=:request"),
+                {"request": request["request_id"]},
+            )
+            .mappings()
+            .first()
+        )
         return bool(
             order
             and order["status"] in {"awaiting_payment", "checkout_open"}

@@ -1339,8 +1339,12 @@ class DriveSharingStore(DriveDocumentStore):
             # files and a change to an unselected file cannot withdraw them.
             granted = current.narrowed_to([str(source["document_id"]) for source in selected])
             self._queue_grants(
-                connection, request=request, approval=granted, sources=selected, batch=batch,
-                enforce_payment=False
+                connection,
+                request=request,
+                approval=granted,
+                sources=selected,
+                batch=batch,
+                enforce_payment=False,
             )
             if trust_future_requests:
                 rule_id = str(uuid4())

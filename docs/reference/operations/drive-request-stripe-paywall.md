@@ -1,4 +1,4 @@
-# Trusted Circle Drive request payment gate
+# Drive request payment gate
 
 ## Visual Context
 
@@ -23,15 +23,13 @@ sequenceDiagram
 
 ## User story
 
-Manish can be asleep while Chris, a verified member of Manish's Trusted Circle,
-asks Manish's private agent for documents. With Manish's live Google Drive
-connection and background preparation enabled, the private agent searches under
-the existing owner authority, freezes the
-first nonempty shareable batch, and puts a **Pay $10** item in Chris's Feed. Chris
-pays through Stripe Checkout. A verified Stripe webhook records payment, then the
-Drive worker resumes its existing exact-file Google Viewer grant flow. Chris sees
-only confirmed grants. Manish does not receive a per-request consent screen for
-this `trusted_auto` path; turning background preparation off stops new work.
+For a Trusted Circle request, the private agent searches under the existing owner
+authority, freezes the first nonempty shareable batch, and puts a **Pay $10** item
+in the requester's Feed. After Stripe confirms payment, the Drive worker resumes
+the exact-file grant flow without another owner approval. For a non-trusted
+request, the owner first approves the request in Consent Center; only then does
+the requester receive the same payment step. Files are never shared before a
+successful payment.
 
 The fee is **one USD 10.00 charge per request**, independent of document count or
 the number of progressive 25-file batches. No payment item is created when the
@@ -47,9 +45,11 @@ as end-to-end or strict cryptographic zero knowledge of the Drive documents.
 
 ## Authority and state
 
-1. The trusted-auto request is created with `payment_required=true` only when
-   `DRIVE_REQUEST_PAYMENTS_ENABLED=true`. The original Trusted Circle, verified
-   identity, live connection, owner preference, and request-expiry checks remain.
+1. A new eligible request is created with `payment_required=true` only when
+   `DRIVE_REQUEST_PAYMENTS_ENABLED=true`. Trusted-auto requests retain the
+   existing Trusted Circle, verified identity, live connection, owner preference,
+   and request-expiry checks. Non-trusted requests remain owner-gated until
+   Consent Center approval.
 2. Preparation freezes at least one shareable file before it creates the single
    request-bound payment order and durable requester Feed event. Owner-private
    filenames, request wording, contents, Google IDs, and email addresses stay out
@@ -99,14 +99,15 @@ origin. The backend refuses Checkout if these values are absent or mismatched.
    concurrency check below passes against PostgreSQL. After that check and
    Stripe test secrets are ready, enable the governed UAT deploy. It refuses to turn
    on without both project secrets.
-3. Exercise a fresh Manish/Chris Trusted Circle request with background
-   preparation on: no files produces no payment; a frozen nonempty batch produces
-   one Pay $10 Feed item; before payment, no Google ACL or recipient link exists;
-   a test payment settles by webhook and resumes grants; a browser return alone
-   changes nothing. Repeat with replayed webhooks, two devices, multiple batches,
-   expired/cancelled requests, zero-delivery refunds, notification delivery
-   failure, and background off. The private Drive worker also needs the UAT
-   Stripe secrets so its scheduled sharing drain can reconcile refunds.
+3. Exercise both paths with a fresh request: no files produces no payment; a
+   frozen nonempty batch produces one concise payment Feed item; non-trusted
+   requests stay blocked until the owner approves; before payment, no Google ACL
+   or recipient link exists; a test payment settles by webhook and resumes grants;
+   a browser return alone changes nothing. Repeat with replayed webhooks, two
+   devices, multiple requests, expired/cancelled requests, zero-delivery refunds,
+   notification delivery failure, and background off. The private Drive worker
+   also needs the UAT Stripe secrets so its scheduled sharing drain can reconcile
+   refunds.
 4. Production remains off until its live Drive worker/scheduler and the same
    acceptance path work. Put the production `sk_live_` key and the production
    endpoint's `whsec_` secret in `hushh-pda` Secret Manager, register the public
