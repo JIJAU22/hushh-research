@@ -69,12 +69,11 @@ export function WalletCardBrowser({ cards, selectedCardId, onSelect, onOverview,
     const element = content.current;
     const root = element?.closest<HTMLElement>("[data-app-scroll-root]");
     if (!active || !element || !root) return;
-    // On short windows, bring the card workspace above the persistent bottom shelf.
+    // The Cards pane always starts at its deck; never inherit the taller Add
+    // or Sharing pane's scroll offset during the resize/transition.
     const observer = new ResizeObserver(() => {
-      const top = root.scrollTop + element.getBoundingClientRect().top - root.getBoundingClientRect().top - 16;
-      if (root.scrollHeight - root.clientHeight < top) return;
       automaticScrollUntil.current = performance.now() + 350;
-      root.scrollTo({ top: Math.max(0, top), behavior: "instant" });
+      root.scrollTo({ top: 0, behavior: "instant" });
       observer.disconnect();
     });
     observer.observe(root.firstElementChild ?? element);
