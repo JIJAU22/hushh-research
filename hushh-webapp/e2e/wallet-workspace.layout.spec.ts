@@ -413,7 +413,7 @@ for (const width of [320, 390, 1024]) {
     await expect(dock.getByRole("button", { name: "Open Travel, ending 4444" })).toHaveAttribute("aria-pressed", "true");
     await page.screenshot({ path: testInfo.outputPath("cards-detail.png") });
     await page.getByRole("button", { name: "Payment", exact: true }).first().click();
-    await expect(page.getByRole("dialog")).toContainText("No card is charged");
+    await expect(page.getByRole("dialog")).toContainText("No money moves and no payment is scheduled");
     await page.getByRole("button", { name: "Got it", exact: true }).click();
     await page.locator("[data-app-scroll-root]").evaluate((element) => { element.scrollTop = 0; });
     await dock.getByRole("button", { name: "All (3)", exact: true }).click();
