@@ -34,6 +34,7 @@ import {
 import { Button } from "@/lib/morphy-ux/button";
 import {
   ArrowLeft,
+  Check,
   CheckCheck,
   Loader2,
   MessageCircle,
@@ -100,15 +101,15 @@ function formatMessageFeedMarker(value: string | null | undefined): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   const now = new Date();
-  const sameDay = date.toDateString() === now.toDateString();
-  const day = sameDay
-    ? "Today"
-    : date.toLocaleDateString([], { month: "short", day: "numeric" });
-  const time = date.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
+  if (date.toDateString() === now.toDateString()) return "Today";
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
   });
-  return `${day} ${time}`;
 }
 
 function isNewMessageDay(
@@ -897,9 +898,32 @@ export function DirectMessagesPage() {
                                     <p className="whitespace-pre-wrap break-words">
                                       {message.content}
                                     </p>
-                                    {message.editedAt ? <span className={styles.editedLabel}>Edited</span> : null}
                                   </>
                                 )}
+                                {editingMessage?.id !== message.id ? (
+                                  <div className={styles.messageBubbleMeta}>
+                                    {message.editedAt ? <span>Edited</span> : null}
+                                    <time
+                                      dateTime={message.createdAt}
+                                      title={new Date(message.createdAt).toLocaleString()}
+                                    >
+                                      {formatMessageTime(message.createdAt)}
+                                    </time>
+                                    {message.senderIsViewer ? (
+                                      <span
+                                        className={styles.messageDeliveryState}
+                                        aria-label={message.readAt ? "Read" : "Sent"}
+                                        title={message.readAt ? "Read" : "Sent"}
+                                      >
+                                        {message.readAt ? (
+                                          <CheckCheck aria-hidden="true" className="h-3.5 w-3.5" />
+                                        ) : (
+                                          <Check aria-hidden="true" className="h-3.5 w-3.5" />
+                                        )}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                               </OneChatBubble>
                               <div className={styles.messageActions}>
                                 {!message.deletedForEveryoneAt ? (
@@ -994,23 +1018,6 @@ export function DirectMessagesPage() {
                                 {messageActionError.message}
                               </p>
                             ) : null}
-                            <time
-                              className={cn(
-                                styles.messageMeta,
-                                message.senderIsViewer && styles.messageMetaOwn,
-                              )}
-                              dateTime={message.readAt || message.createdAt}
-                            >
-                              {message.senderIsViewer && message.readAt
-                                ? `Read ${formatMessageTime(message.readAt)}`
-                                : formatMessageTime(message.createdAt)}
-                              {message.senderIsViewer && message.readAt ? (
-                                <CheckCheck
-                                  className="h-3 w-3"
-                                  aria-label="Read"
-                                />
-                              ) : null}
-                            </time>
                           </div>
                         </div>
                       </article>
