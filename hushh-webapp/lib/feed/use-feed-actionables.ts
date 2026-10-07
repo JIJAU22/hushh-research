@@ -56,6 +56,7 @@ import {
   describeFeedDrivePayment,
   projectFeedDrivePayments,
 } from "@/lib/feed/drive-request-payment";
+import { useFeedPaymentClock } from "@/lib/feed/use-feed-payment-clock";
 import { DriveRequestPaymentService } from "@/lib/services/drive-request-payment-service";
 import { driveSharingSelectionId, isDriveSharingEntry } from "@/lib/consent/drive-query-consent";
 import { resolveConsentRequesterLabel } from "@/lib/consent/consent-display";
@@ -403,10 +404,6 @@ export function useFeedActionables(): UseFeedActionablesResult {
   const { user } = useAuth();
   const { vaultOwnerToken } = useVault();
   const userId = user?.uid ?? null;
-  // Checkout deadlines are known locally. Ticking only while a live deadline
-  // is visible lets Feed show "4m left" and switch to an expired link at the
-  // exact second, without waiting for the 10s server refresh.
-  const [paymentClockNow, setPaymentClockNow] = useState(() => Date.now());
   const [dismissedSmsEmergencyIds, setDismissedSmsEmergencyIds] = useState<
     Set<string>
   >(() => new Set());
@@ -699,21 +696,9 @@ export function useFeedActionables(): UseFeedActionablesResult {
     (payment) =>
       payment.status === "ready" &&
       payment.expiresAt !== null &&
-      payment.expiresAt > paymentClockNow,
+      payment.expiresAt > Date.now(),
   );
-  useEffect(() => {
-    setPaymentClockNow(Date.now());
-    if (!hasLivePaymentDeadline || typeof window === "undefined") return;
-    const tick = () => {
-      if (document.visibilityState === "visible") setPaymentClockNow(Date.now());
-    };
-    const interval = window.setInterval(tick, 1_000);
-    document.addEventListener("visibilitychange", tick);
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", tick);
-    };
-  }, [hasLivePaymentDeadline]);
+  const paymentClockNow = useFeedPaymentClock(hasLivePaymentDeadline);
   const activeProgress = useMemo(
     () => projectFeedDriveProgress(activeProgressItems ?? []),
     [activeProgressItems],
