@@ -90,7 +90,10 @@ origin. The backend refuses Checkout if these values are absent or mismatched.
    (signature secret for the UAT endpoint). Give the backend runtime service
    account access. Register the public
    `/api/payments/stripe/webhook` endpoint in the same Stripe test account for
-   `checkout.session.completed` and `checkout.session.async_payment_succeeded`.
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and
+   `checkout.session.expired`. The service also treats the stored provider expiry
+   timestamp as authoritative, so an expired checkout cannot keep a payment push
+   alive while its expiry event is delayed.
    Never put a Stripe key, webhook secret, document metadata, or a live Checkout
    URL in GitHub variables, build substitutions, logs, or client code.
 2. Deploy migration 262 and backend/frontend code with the switch off. Confirm

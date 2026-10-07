@@ -2,21 +2,25 @@
 
 # ruff: noqa: F811 -- imported isolated PostgreSQL fixtures
 
+import asyncio
 import hashlib
 import hmac
 import inspect
 import json
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
+import stripe
 from sqlalchemy import text
 
 from hushh_mcp.runtime_settings import clear_runtime_settings_caches
+from hushh_mcp.services.connection_graph_service import lock_connection_graph_users
 from hushh_mcp.services.drive_bulk_share_store import DriveBulkShareStore
 from hushh_mcp.services.drive_permission_store import DrivePermissionStore
 from hushh_mcp.services.drive_request_payment_refunds import (
@@ -887,3 +891,453 @@ async def test_late_paid_webhook_after_erasure_uses_reserved_attempt(sharing, mo
     assert obligation["stripe_payment_intent_id"] == "pi_test_bound"
     assert obligation["reconciliation_required"] is True and events == 1
     assert len(claims) == 1 and claims[0]["payment_intent"] == "pi_test_bound"
+
+
+def _checkout_fixture(monkeypatch, provider_create):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_local_only_synthetic")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_payment_test_secret")
+    monkeypatch.setenv("APP_FRONTEND_ORIGIN", "https://test.example")
+    request_id, attempt_id = str(uuid4()), str(uuid4())
+    order = {
+        "status": "awaiting_payment",
+        "request_status": "pending",
+        "request_expires_at": datetime.now(UTC) + timedelta(hours=1),
+        "checkout_attempt_id": attempt_id,
+        "stripe_checkout_url": None,
+        "stripe_checkout_session_id": None,
+    }
+    service = DriveRequestPaymentService(
+        db=object(),
+        stripe_api=SimpleNamespace(
+            checkout=SimpleNamespace(Session=SimpleNamespace(create=provider_create))
+        ),
+    )
+    service.payment_state = AsyncMock(return_value={"status": "awaiting_payment"})
+    service._current_checkout_authority = Mock()
+    service._row = Mock(side_effect=lambda *args, **kwargs: order.copy())
+    connection = SimpleNamespace(execute=Mock())
+
+    async def transact(operation):
+        return operation(connection)
+
+    service._transaction = transact
+    return service, request_id, attempt_id, connection
+
+
+def _checkout_sdk_response(params, session_id="cs_test_checkout_regression"):
+    return stripe.checkout.Session.construct_from(
+        {
+            "id": session_id,
+            "object": "checkout.session",
+            "mode": params["mode"],
+            "client_reference_id": params["client_reference_id"],
+            "amount_total": 1000,
+            "currency": "usd",
+            "livemode": False,
+            "metadata": params["metadata"],
+            "url": f"https://checkout.stripe.com/c/pay/{session_id}",
+            "expires_at": int(time.time()) + 1800,
+        },
+        params["api_key"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_checkout_uses_supported_stripe_parameters_and_binds_sdk_session(monkeypatch):
+    def create_session(**params):
+        # UAT Stripe rejected this legacy argument before opening Checkout.
+        if "payment_method_types" in params:
+            raise stripe.InvalidRequestError(
+                "payment_method_types is no longer supported",
+                "payment_method_types",
+                http_status=400,
+            )
+        assert params["mode"] == "payment"
+        assert params["line_items"] == [
+            {
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": 1000,
+                    "product_data": {"name": "Document request"},
+                },
+                "quantity": 1,
+            }
+        ]
+        assert params["idempotency_key"] == f"drive-request-{request_id}-{attempt_id}"
+        assert params["payment_intent_data"]["metadata"] == params["metadata"]
+        return _checkout_sdk_response(params)
+
+    create = Mock(side_effect=create_session)
+    service, request_id, attempt_id, connection = _checkout_fixture(monkeypatch, create)
+    result = await service.checkout(requester_user_id="recipient", request_id=request_id)
+    assert result == {
+        "checkoutUrl": "https://checkout.stripe.com/c/pay/cs_test_checkout_regression"
+    }
+    create.assert_called_once()
+    assert service._current_checkout_authority.call_count == 2
+    binding = connection.execute.call_args.args[1]
+    assert binding["request"] == request_id
+    assert binding["session"] == "cs_test_checkout_regression"
+    assert binding["url"] == result["checkoutUrl"]
+
+
+@pytest.mark.asyncio
+async def test_checkout_recovers_rejected_legacy_attempt_with_stable_retry_key(monkeypatch):
+    def create_session(**params):
+        if params["idempotency_key"] == original_key:
+            if params.get("payment_method_types") == ["card"]:
+                raise stripe.InvalidRequestError(
+                    "payment_method_types is no longer supported",
+                    "payment_method_types",
+                    http_status=400,
+                )
+            raise stripe.IdempotencyError("Different parameters", http_status=400)
+        assert params["idempotency_key"] == original_key + "-dynamic-methods-v1"
+        assert "payment_method_types" not in params
+        return _checkout_sdk_response(params)
+
+    create = Mock(side_effect=create_session)
+    service, request_id, attempt_id, connection = _checkout_fixture(monkeypatch, create)
+    original_key = f"drive-request-{request_id}-{attempt_id}"
+    # The provider succeeds, but the database bind is interrupted. Retrying the
+    # same order must replay the same fallback key instead of opening a new order.
+    connection.execute.side_effect = [None, RuntimeError("bind interrupted"), None, None]
+    with pytest.raises(RuntimeError, match="bind interrupted"):
+        await service.checkout(requester_user_id="recipient", request_id=request_id)
+    result = await service.checkout(requester_user_id="recipient", request_id=request_id)
+    assert result["checkoutUrl"].endswith("cs_test_checkout_regression")
+    calls = [call.kwargs for call in create.call_args_list]
+    assert [call["idempotency_key"] for call in calls] == [
+        original_key,
+        original_key,
+        original_key + "-dynamic-methods-v1",
+        original_key,
+        original_key,
+        original_key + "-dynamic-methods-v1",
+    ]
+    assert calls[1] == {**calls[0], "payment_method_types": ["card"]}
+    assert calls[2] == {**calls[0], "idempotency_key": original_key + "-dynamic-methods-v1"}
+    assert calls[:3] == calls[3:]
+    assert connection.execute.call_args.args[1]["session"] == "cs_test_checkout_regression"
+
+
+@pytest.mark.asyncio
+async def test_checkout_binds_cached_legacy_success_without_creating_another_session(monkeypatch):
+    def create_session(**params):
+        if "payment_method_types" not in params:
+            raise stripe.IdempotencyError("Different parameters", http_status=400)
+        assert params["payment_method_types"] == ["card"]
+        return _checkout_sdk_response(params, "cs_test_existing_legacy")
+
+    create = Mock(side_effect=create_session)
+    service, request_id, attempt_id, connection = _checkout_fixture(monkeypatch, create)
+    result = await service.checkout(requester_user_id="recipient", request_id=request_id)
+    assert result["checkoutUrl"].endswith("cs_test_existing_legacy")
+    assert create.call_count == 2
+    assert {call.kwargs["idempotency_key"] for call in create.call_args_list} == {
+        f"drive-request-{request_id}-{attempt_id}"
+    }
+    assert connection.execute.call_args.args[1]["session"] == "cs_test_existing_legacy"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "legacy_error",
+    [
+        stripe.APIConnectionError("Provider outcome is unknown"),
+        stripe.InvalidRequestError("Different parameter rejected", "currency", http_status=400),
+        stripe.InvalidRequestError("Provider failed", "payment_method_types", http_status=500),
+        stripe.IdempotencyError("Legacy payload mismatch", http_status=400),
+    ],
+    ids=["network", "other-parameter", "server-error", "legacy-idempotency-conflict"],
+)
+async def test_checkout_does_not_change_retry_key_for_uncertain_legacy_outcome(
+    monkeypatch, legacy_error
+):
+    create = Mock(
+        side_effect=[stripe.IdempotencyError("Different parameters", http_status=400), legacy_error]
+    )
+    service, request_id, attempt_id, connection = _checkout_fixture(monkeypatch, create)
+    with pytest.raises(DriveSharingError, match="payment_unavailable"):
+        await service.checkout(requester_user_id="recipient", request_id=request_id)
+    assert create.call_count == 2
+    assert {call.kwargs["idempotency_key"] for call in create.call_args_list} == {
+        f"drive-request-{request_id}-{attempt_id}"
+    }
+    # Only reserve happened; no checkout session was bound and no alternate
+    # provider key was tried for an outcome that could already have succeeded.
+    assert connection.execute.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_checkout_does_not_replay_or_rotate_an_in_progress_idempotency_key(monkeypatch):
+    create = Mock(
+        side_effect=stripe.IdempotencyError(
+            "Another request is in progress", http_status=409, code="idempotency_key_in_use"
+        )
+    )
+    service, request_id, attempt_id, connection = _checkout_fixture(monkeypatch, create)
+    with pytest.raises(DriveSharingError, match="payment_unavailable"):
+        await service.checkout(requester_user_id="recipient", request_id=request_id)
+    create.assert_called_once()
+    assert create.call_args.kwargs["idempotency_key"] == f"drive-request-{request_id}-{attempt_id}"
+    assert "payment_method_types" not in create.call_args.kwargs
+    assert connection.execute.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "order", [None, {"status": "awaiting_payment", "reconciliation_required": False}]
+)
+async def test_no_match_request_closes_unpaid_payment_state(order):
+    request = {
+        "request_id": str(uuid4()),
+        "user_id": "owner",
+        "recipient_user_id": "recipient",
+        "payment_required": True,
+        "status": "no_match",
+        "expires_at": datetime.now(UTC) + timedelta(hours=1),
+    }
+    store = DriveRequestPaymentStore(db=object())
+    store._row = Mock(return_value=request)
+    store._ensure_ready = Mock(return_value=(request, order, False))
+
+    async def transaction(operation):
+        return operation(SimpleNamespace())
+
+    store._transaction = transaction
+    state = await store.payment_state(
+        requester_user_id="recipient", request_id=request["request_id"]
+    )
+    assert state["status"] == "expired"
+    store._ensure_ready.assert_called_once()
+
+
+def _make_legacy_undated_paid_request(sharing, connection, request_id):
+    row = (
+        connection.execute(
+            text("SELECT * FROM drive_share_requests WHERE request_id=:request"),
+            {"request": request_id},
+        )
+        .mappings()
+        .one()
+    )
+    private = sharing._open_request(row)
+    private["purpose"]["periodStart"] = None
+    private["purpose"]["periodEnd"] = None
+    envelope = sharing.sharing_cipher.seal(
+        private, user_id="owner", resource_id=request_id, purpose="request"
+    )
+    connection.execute(
+        text("""UPDATE drive_share_requests
+      SET payment_required=TRUE,request_envelope=CAST(:envelope AS jsonb)
+      WHERE request_id=:request"""),
+        {"request": request_id, "envelope": json.dumps(envelope)},
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_undated_request_cannot_prepare_a_payment_order(sharing):
+    created = await request(sharing)
+    request_id = created["requestId"]
+    with sharing.db.engine.begin() as connection:
+        _make_legacy_undated_paid_request(sharing, connection, request_id)
+        with pytest.raises(DriveSharingError, match="date_range_required"):
+            DriveRequestPaymentStore(db=sharing.db)._ensure_ready(
+                connection, user_id="owner", request_id=request_id, share_id=None
+            )
+        assert (
+            connection.execute(
+                text("SELECT count(*) FROM drive_request_payment_orders WHERE request_id=:request"),
+                {"request": request_id},
+            ).scalar_one()
+            == 0
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_undated_order_cannot_start_checkout(sharing, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_local_only_synthetic")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_payment_test_secret")
+    monkeypatch.setenv("APP_FRONTEND_ORIGIN", "https://test.example")
+    created = await request(sharing)
+    request_id = created["requestId"]
+    with sharing.db.engine.begin() as connection:
+        _make_legacy_undated_paid_request(sharing, connection, request_id)
+        connection.execute(
+            text("""INSERT INTO drive_request_payment_orders
+          (request_id,user_id,requester_user_id,status)
+          VALUES (:request,'owner','recipient','awaiting_payment')"""),
+            {"request": request_id},
+        )
+    stripe_api = Mock()
+    service = DriveRequestPaymentService(db=sharing.db, stripe_api=stripe_api)
+    with pytest.raises(DriveSharingError, match="date_range_required"):
+        await service.checkout(requester_user_id="recipient", request_id=request_id)
+    stripe_api.checkout.Session.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_paid_undated_request_stays_visible_and_enters_refund_reconciliation(sharing):
+    created = await request(sharing)
+    request_id = created["requestId"]
+    with sharing.db.engine.begin() as connection:
+        _make_legacy_undated_paid_request(sharing, connection, request_id)
+        connection.execute(
+            text("""INSERT INTO drive_request_payment_orders
+          (request_id,user_id,requester_user_id,status,stripe_payment_intent_id,paid_at)
+          VALUES (:request,'owner','recipient','paid','pi_test_undated',clock_timestamp())"""),
+            {"request": request_id},
+        )
+    service = DriveRequestPaymentService(db=sharing.db)
+    state = await service.payment_state(requester_user_id="recipient", request_id=request_id)
+    assert state["status"] == "paid"
+    assert state["reconciliationRequired"] is True
+    with sharing.db.engine.begin() as connection:
+        claims = _claim_refunds(service, connection, limit=1)
+    assert len(claims) == 1
+    assert claims[0]["payment_intent"] == "pi_test_undated"
+
+
+@pytest.mark.asyncio
+async def test_paid_no_match_request_is_immediately_refund_eligible(sharing):
+    created = await request(sharing)
+    request_id = created["requestId"]
+    with sharing.db.engine.begin() as connection:
+        connection.execute(
+            text("""UPDATE drive_share_requests
+          SET payment_required=TRUE,status='no_match'
+          WHERE request_id=:request"""),
+            {"request": request_id},
+        )
+        connection.execute(
+            text("""INSERT INTO drive_request_payment_orders
+          (request_id,user_id,requester_user_id,status,stripe_payment_intent_id,paid_at)
+          VALUES (:request,'owner','recipient','paid','pi_test_no_match',clock_timestamp())"""),
+            {"request": request_id},
+        )
+        claims = _claim_refunds(DriveRequestPaymentService(db=sharing.db), connection, limit=1)
+    assert len(claims) == 1
+    assert str(claims[0]["request_id"]) == request_id
+    assert claims[0]["payment_intent"] == "pi_test_no_match"
+
+
+@pytest.mark.asyncio
+async def test_webhook_waits_for_account_erasure_and_reconciles_late_payment(sharing, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_local_only_synthetic")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_payment_test_secret")
+    monkeypatch.setenv("APP_FRONTEND_ORIGIN", "https://test.example")
+    created = await request(sharing)
+    request_id, attempt_id = created["requestId"], str(uuid4())
+    with sharing.db.engine.begin() as connection:
+        connection.execute(
+            text("UPDATE drive_share_requests SET payment_required=TRUE WHERE request_id=:request"),
+            {"request": request_id},
+        )
+        connection.execute(
+            text("""INSERT INTO drive_request_payment_orders
+              (request_id,user_id,requester_user_id,status,checkout_attempt_id,
+               stripe_checkout_session_id)
+              VALUES (:request,'owner','recipient','checkout_open',:attempt,'cs_test_bound')"""),
+            {"request": request_id, "attempt": attempt_id},
+        )
+
+    service = DriveRequestPaymentService(db=sharing.db)
+    erasure_held = threading.Event()
+    release_erasure = threading.Event()
+    webhook_entered = threading.Event()
+    erasure_pid: list[int] = []
+    webhook_pid: list[int] = []
+
+    def erase(connection):
+        # Hold account erasure's graph gate while the webhook has already read
+        # the still-present request; it must wait before writing payment state.
+        lock_connection_graph_users(connection, user_ids=["recipient"])
+        erasure_pid.append(connection.execute(text("SELECT pg_backend_pid()")).scalar_one())
+        erasure_held.set()
+        assert release_erasure.wait(20), "erasure barrier was not released"
+        erase_drive_account_in_transaction(connection, user_id="recipient", permanent=False)
+
+    original_gate = lock_connection_graph_users
+
+    def observe_webhook_gate(connection, *, user_ids):
+        webhook_pid.append(connection.execute(text("SELECT pg_backend_pid()")).scalar_one())
+        webhook_entered.set()
+        original_gate(connection, user_ids=user_ids)
+
+    erase_task = asyncio.create_task(service._transaction(erase))
+    webhook_task = None
+    try:
+        assert await asyncio.to_thread(erasure_held.wait, 10)
+        monkeypatch.setattr(
+            "hushh_mcp.services.connection_graph_service.lock_connection_graph_users",
+            observe_webhook_gate,
+        )
+        payload, signature = _signed_event(request_id, attempt_id=attempt_id)
+        webhook_task = asyncio.create_task(
+            service.process_webhook(payload=payload, signature=signature)
+        )
+        assert await asyncio.to_thread(webhook_entered.wait, 10)
+        deadline = asyncio.get_running_loop().time() + 5
+        while True:
+            with sharing.db.engine.connect() as connection:
+                blocked = connection.execute(
+                    text("SELECT :holder = ANY(pg_blocking_pids(:waiter))"),
+                    {"holder": erasure_pid[0], "waiter": webhook_pid[0]},
+                ).scalar_one()
+            if blocked:
+                break
+            assert asyncio.get_running_loop().time() < deadline, "webhook did not wait on erasure"
+            await asyncio.sleep(0.01)
+    finally:
+        release_erasure.set()
+        outcomes = await asyncio.wait_for(
+            asyncio.gather(
+                *([erase_task, webhook_task] if webhook_task else [erase_task]),
+                return_exceptions=True,
+            ),
+            30,
+        )
+    assert outcomes == [None, None]
+    with sharing.db.engine.begin() as connection:
+        assert (
+            connection.execute(
+                text("SELECT count(*) FROM drive_share_requests WHERE request_id=:request"),
+                {"request": request_id},
+            ).scalar_one()
+            == 0
+        )
+        assert (
+            connection.execute(
+                text("SELECT count(*) FROM drive_request_payment_orders WHERE request_id=:request"),
+                {"request": request_id},
+            ).scalar_one()
+            == 0
+        )
+        obligation = (
+            connection.execute(
+                text("""SELECT status,paid_at,erased_at,reconciliation_required,payer_ref
+              FROM drive_request_payment_obligations WHERE request_id=:request"""),
+                {"request": request_id},
+            )
+            .mappings()
+            .one()
+        )
+        events = connection.execute(
+            text(
+                "SELECT count(*) FROM drive_request_payment_webhook_events WHERE request_id=:request"
+            ),
+            {"request": request_id},
+        ).scalar_one()
+        feed_events = connection.execute(
+            text("SELECT count(*) FROM drive_share_events WHERE request_id=:request"),
+            {"request": request_id},
+        ).scalar_one()
+    assert obligation["status"] == "paid"
+    assert obligation["paid_at"] is not None and obligation["erased_at"] is not None
+    assert obligation["reconciliation_required"] is True
+    assert obligation["payer_ref"] == hashlib.sha256(f"{request_id}:recipient".encode()).hexdigest()
+    assert events == 1 and feed_events == 0

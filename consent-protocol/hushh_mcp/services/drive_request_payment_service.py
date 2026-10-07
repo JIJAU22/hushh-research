@@ -185,16 +185,15 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
                 return order
             if order["stripe_checkout_session_id"]:
                 return {**order, "expired_checkout": True}
-            # Keep one attempt token for the whole reserve/create/bind cycle.
-            # Concurrent browser tabs therefore share Stripe's idempotency key
-            # instead of creating two sessions for one request.
-            attempt_id = order["checkout_attempt_id"] or str(uuid4())
             if order["checkout_attempt_id"] is None:
-                connection.execute(
-                    text("""UPDATE drive_request_payment_orders SET checkout_attempt_id=:attempt,
-                         updated_at=clock_timestamp() WHERE request_id=:request"""),
-                    {"attempt": attempt_id, "request": request_id},
-                )
+                attempt_id = str(uuid4())
+            else:
+                attempt_id = order["checkout_attempt_id"]
+            connection.execute(
+                text("""UPDATE drive_request_payment_orders SET checkout_attempt_id=:attempt,
+                     updated_at=clock_timestamp() WHERE request_id=:request"""),
+                {"attempt": attempt_id, "request": request_id},
+            )
             order["checkout_attempt_id"] = attempt_id
             return order
 
@@ -249,9 +248,8 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
         checkout_expires_at = int(datetime.now(UTC).timestamp()) + CHECKOUT_HOLD_SECONDS
 
         def create():
-            return self.stripe_api.checkout.Session.create(
+            params = dict(
                 mode="payment",
-                payment_method_types=["card"],
                 line_items=[
                     {
                         "price_data": {
@@ -283,6 +281,25 @@ class DriveRequestPaymentService(DriveRequestPaymentStore):
                 api_key=key,
                 idempotency_key=f"drive-request-{request_id}-{order['checkout_attempt_id']}",
             )
+            try:
+                return self.stripe_api.checkout.Session.create(**params)
+            except stripe.IdempotencyError as exc:
+                if exc.http_status != 400:
+                    raise
+                # Recover attempts reserved before Stripe retired explicit methods.
+                # Replay the exact payload first so a cached success is reused.
+                try:
+                    return self.stripe_api.checkout.Session.create(
+                        **params, payment_method_types=["card"]
+                    )
+                except stripe.InvalidRequestError as exc:
+                    if exc.http_status != 400 or exc.param != "payment_method_types":
+                        raise
+                # Only a definitive parameter rejection permits a new payload key.
+                params["idempotency_key"] = (
+                    f"drive-request-{request_id}-{order['checkout_attempt_id']}-dynamic-methods-v1"
+                )
+                return self.stripe_api.checkout.Session.create(**params)
 
         try:
             session = _stripe_dict(await asyncio.to_thread(create))

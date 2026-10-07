@@ -131,6 +131,30 @@ class DriveRequestPaymentStore(ExternalConnectorLifecycleStore):
             "SELECT * FROM drive_request_payment_orders WHERE request_id=:request",
             {"request": request["request_id"]},
         )
+        if request["status"] == "pending" and request["expires_at"] > datetime.now(UTC):
+            from hushh_mcp.services.drive_sharing_store import DriveSharingStore
+
+            purpose = DriveSharingStore(db=self.db)._open_request(request).get("purpose", {})
+            if not (purpose.get("periodStart") and purpose.get("periodEnd")):
+                # Preserve paid/refunded state for reconciliation, while
+                # withholding new checkout and payment-ready authority.
+                if existing is not None and existing["status"] == "paid":
+                    if not existing["reconciliation_required"]:
+                        connection.execute(
+                            text("""UPDATE drive_request_payment_orders
+                          SET reconciliation_required=TRUE,
+                            reconciliation_reason='authority_changed',
+                            reconciliation_at=clock_timestamp(),
+                            updated_at=clock_timestamp()
+                          WHERE request_id=:request AND status='paid'
+                            AND reconciliation_required=FALSE"""),
+                            {"request": request["request_id"]},
+                        )
+                        existing = {**existing, "reconciliation_required": True}
+                    return request, existing, False
+                if existing is not None and existing["status"] == "refunded":
+                    return request, existing, False
+                raise DriveSharingError("date_range_required")
         if existing is not None:
             notified = False
             if (
@@ -225,13 +249,16 @@ class DriveRequestPaymentStore(ExternalConnectorLifecycleStore):
             _, order, notified = self._ensure_ready(
                 connection, user_id=request["user_id"], request_id=request_id, share_id=None
             )
-            request_expired = request["status"] in {"cancelled", "declined", "expired"} or (
-                request["expires_at"] <= datetime.now(UTC)
-            )
+            request_expired = request["status"] in {
+                "cancelled",
+                "declined",
+                "no_match",
+                "expired",
+            } or (request["expires_at"] <= datetime.now(UTC))
             checkout_expired = bool(
                 order
                 and order["status"] not in {"paid", "refunded"}
-                and order["stripe_checkout_expires_at"] is not None
+                and order.get("stripe_checkout_expires_at") is not None
                 and order["stripe_checkout_expires_at"] <= datetime.now(UTC)
             )
             if order is None and request_expired:
@@ -251,7 +278,7 @@ class DriveRequestPaymentStore(ExternalConnectorLifecycleStore):
                 "paymentLinkExpired": checkout_expired and not request_expired,
                 "checkoutExpiresAt": (
                     order["stripe_checkout_expires_at"].isoformat()
-                    if order and order["stripe_checkout_expires_at"] is not None
+                    if order and order.get("stripe_checkout_expires_at") is not None
                     else None
                 ),
                 "reconciliationRequired": bool(
