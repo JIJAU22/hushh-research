@@ -27,6 +27,13 @@ DEFAULTS = {
     "expected_streams": {
         "production": [
             {
+                "stream_id": "15395548050",
+                "type": "ANDROID_APP_DATA_STREAM",
+                "firebase_app_id": "1:1006304528804:android:55bde832bb50240acfd931",
+                "package_name": "com.hussh.app",
+                "export_required": True,
+            },
+            {
                 "stream_id": "13694989021",
                 "type": "ANDROID_APP_DATA_STREAM",
                 "firebase_app_id": "1:1006304528804:android:e38e29d91ba817aecfd931",
@@ -435,6 +442,13 @@ def validate(summary: dict) -> dict:
                 findings["high"].append(
                     f"{label}: stream {stream_id} type is {stream.get('type')} not {expected_type}"
                 )
+            package_name = expected_stream.get("package_name")
+            if package_name and stream.get("androidAppStreamData", {}).get("packageName") != package_name:
+                findings["high"].append(f"{label}: stream {stream_id} Android package mismatch")
+            if expected_stream.get("export_required"):
+                resource = stream["name"]
+                if not any(resource in link.get("exportStreams", []) and link.get("dailyExportEnabled") for link in payload["bigquery_links"]):
+                    findings["high"].append(f"{label}: Android stream {stream_id} missing from daily BigQuery export")
             measurement_id = expected_stream.get("measurement_id")
             if measurement_id:
                 actual_measurement_id = (
