@@ -57,6 +57,9 @@ it("keeps the year picker responsive while the calendar catches up", async () =>
   fireEvent.change(year, { target: { value: "2020" } });
   fireEvent.change(year, { target: { value: "2010" } });
   fireEvent.change(year, { target: { value: "2000" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Month" }), {
+    target: { value: "0" },
+  });
 
   await waitFor(() => {
     expect(year).toHaveValue("2000");
