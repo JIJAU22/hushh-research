@@ -305,14 +305,18 @@ export function WalletWorkspace() {
     if (!user?.uid) { setDemoProfile(null); return; }
     let cancelled = false;
     const load = async () => {
+      const fallbackName = user.displayName?.trim() || null;
       const token = getVaultOwnerTokenRef.current();
-      if (!token) return;
+      if (!token) {
+        if (!cancelled) setDemoProfile({ displayName: fallbackName, shareUrl: null });
+        return;
+      }
       try {
         const state = await WalletCardService.getCard({ userId: user.uid, vaultOwnerToken: token });
         if (cancelled) return;
         const payloadName = state.card?.cardPayload.full_name?.trim() || null;
         setDemoProfile({ displayName: payloadName || state.card?.displayName?.trim() || user.displayName?.trim() || null, shareUrl: state.shareUrl });
-      } catch { if (!cancelled) setDemoProfile(null); }
+      } catch { if (!cancelled) setDemoProfile({ displayName: fallbackName, shareUrl: null }); }
     };
     void load();
     const timer = window.setInterval(load, 15000);
