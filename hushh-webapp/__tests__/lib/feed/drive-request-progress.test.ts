@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { projectFeedDriveProgress } from "@/lib/feed/drive-request-progress";
-import { projectFeedDrivePayments } from "@/lib/feed/drive-request-payment";
+import {
+  describeFeedDrivePayment,
+  formatPaymentRemaining,
+  projectFeedDrivePayments,
+} from "@/lib/feed/drive-request-payment";
 import type { ConsentCenterEntry } from "@/lib/services/consent-center-service";
 
 const requestId = "document_share_request:123e4567-e89b-12d3-a456-426614174000";
@@ -100,6 +104,43 @@ describe("projectFeedDriveProgress", () => {
     } });
     expect(projectFeedDrivePayments([payment])).toHaveLength(1);
     expect(projectFeedDriveProgress([payment])).toEqual([]);
+  });
+
+  it("shows the live payment deadline in compact copy", () => {
+    const now = Date.parse("2026-09-29T10:00:00Z");
+    const payment = entry({ kind: "outgoing_request", counterpart_label: "V", metadata: {
+      ...entry().metadata,
+      direction: "outgoing",
+      paymentStatus: "checkout_open",
+      checkoutExpiresAt: new Date(now + 299_000).toISOString(),
+      paymentAmountCents: 1000,
+      paymentCurrency: "usd",
+    } });
+    const row = projectFeedDrivePayments([payment], now)[0];
+    expect(row).toMatchObject({
+      status: "ready",
+      expiresAt: now + 299_000,
+      description: "5m left to pay.",
+    });
+    expect(describeFeedDrivePayment(row!, now + 298_500).description).toBe("1s left to pay.");
+    expect(formatPaymentRemaining(0)).toBe("0s left");
+  });
+
+  it("switches to a renewable link immediately when the local deadline passes", () => {
+    const now = Date.parse("2026-09-29T10:00:00Z");
+    const payment = entry({ kind: "outgoing_request", metadata: {
+      ...entry().metadata,
+      direction: "outgoing",
+      paymentStatus: "checkout_open",
+      checkoutExpiresAt: new Date(now + 1_000).toISOString(),
+      paymentAmountCents: 1000,
+      paymentCurrency: "usd",
+    } });
+    const row = projectFeedDrivePayments([payment], now)[0]!;
+    expect(describeFeedDrivePayment(row, now + 1_001)).toMatchObject({
+      status: "link_expired",
+      title: "Payment link expired",
+    });
   });
 
   it("names the file owner without exposing file names", () => {

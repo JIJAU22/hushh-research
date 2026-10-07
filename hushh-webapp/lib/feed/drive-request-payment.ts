@@ -13,6 +13,10 @@ export interface FeedDrivePayment {
   requestedAt: number | null;
   /** A terminal payment stays inspectable from Feed, even without an action. */
   href?: string;
+  /** Provider checkout deadline in epoch milliseconds, when one is active. */
+  expiresAt: number | null;
+  /** Stable owner label used to recompute concise copy as the deadline ticks. */
+  ownerLabel: string | null;
 }
 
 const GENERIC_COUNTERPART_LABELS = new Set([
@@ -67,7 +71,7 @@ function expiryTimestamp(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function paymentState(entry: ConsentCenterEntry): FeedDrivePaymentStatus | null {
+function paymentState(entry: ConsentCenterEntry, now = Date.now()): FeedDrivePaymentStatus | null {
   const metadata = entry.metadata || {};
   const paymentStatus = nonEmptyString(metadata.paymentStatus).toLowerCase();
   const requestStatus = nonEmptyString(entry.status).toLowerCase();
@@ -91,7 +95,7 @@ function paymentState(entry: ConsentCenterEntry): FeedDrivePaymentStatus | null 
   if (!isOpenRequest) return null;
   if (
     checkoutExpired ||
-    (checkoutExpiresAt !== null && checkoutExpiresAt <= Date.now())
+    (checkoutExpiresAt !== null && checkoutExpiresAt <= now)
   ) return "link_expired";
   // Older projections only exposed the provider's terminal status. For an
   // otherwise-open request that status means the Checkout link expired; the
@@ -101,9 +105,37 @@ function paymentState(entry: ConsentCenterEntry): FeedDrivePaymentStatus | null 
   return "ready";
 }
 
+/** Compact deadline copy that stays readable in a narrow Feed row. */
+export function formatPaymentRemaining(remainingMs: number): string {
+  const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
+  if (seconds < 60) return `${seconds}s left`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes}m left`;
+  const hours = Math.ceil(minutes / 60);
+  return `${hours}h left`;
+}
+
+/** Recompute copy/status from the local clock without waiting for a refetch. */
+export function describeFeedDrivePayment(
+  payment: Pick<FeedDrivePayment, "status" | "ownerLabel" | "expiresAt">,
+  now = Date.now(),
+): Pick<FeedDrivePayment, "status" | "title" | "description"> {
+  const locallyExpired =
+    payment.status === "ready" &&
+    payment.expiresAt !== null &&
+    payment.expiresAt <= now;
+  const status: FeedDrivePaymentStatus = locallyExpired ? "link_expired" : payment.status;
+  const remainingMs =
+    status === "ready" && payment.expiresAt !== null
+      ? Math.max(0, payment.expiresAt - now)
+      : null;
+  return { status, ...paymentCopy(status, payment.ownerLabel, remainingMs) };
+}
+
 function paymentCopy(
   status: FeedDrivePaymentStatus,
   owner: string | null,
+  remainingMs: number | null = null,
 ): Pick<FeedDrivePayment, "title" | "description"> {
   if (status === "expired") {
     return owner
@@ -127,19 +159,22 @@ function paymentCopy(
           description: "The $10 link expired. Create a new link to continue.",
         };
   }
+  const deadline = remainingMs !== null && remainingMs > 0
+    ? `${formatPaymentRemaining(remainingMs)} to pay.`
+    : null;
   return owner
     ? {
         title: `Pay $10 for files from ${owner}`,
-        description: `You requested files from ${owner}. Pay to continue.`,
+        description: deadline ?? `You requested files from ${owner}. Pay to continue.`,
       }
     : {
         title: "Pay $10 for your document request",
-        description: "Sharing starts after payment.",
+        description: deadline ?? "Sharing starts after payment.",
       };
 }
 
 /** The outgoing server projection is the discovery authority, including after an app restart. */
-export function projectFeedDrivePayments(entries: ConsentCenterEntry[]): FeedDrivePayment[] {
+export function projectFeedDrivePayments(entries: ConsentCenterEntry[], now = Date.now()): FeedDrivePayment[] {
   const byRequest = new Map<string, FeedDrivePayment>();
   for (const entry of entries) {
     if (!isDocumentShareEntry(entry)) continue;
@@ -150,7 +185,7 @@ export function projectFeedDrivePayments(entries: ConsentCenterEntry[]): FeedDri
       Number(metadata.paymentAmountCents) !== 1000 ||
       nonEmptyString(metadata.paymentCurrency).toLowerCase() !== "usd"
     ) continue;
-    const status = paymentState(entry);
+    const status = paymentState(entry, now);
     if (!status) {
       // Expired request rows may be emitted as history, but must retain a
       // payment row if their order is still present in the projection.
@@ -158,7 +193,18 @@ export function projectFeedDrivePayments(entries: ConsentCenterEntry[]): FeedDri
     }
     const effectiveStatus = status || "expired";
     const requestedAt = parseConsentInstant(entry.issued_at);
-    const copy = paymentCopy(effectiveStatus, counterpartLabel(entry));
+    const ownerLabel = counterpartLabel(entry);
+    const expiresAt = expiryTimestamp(
+      metadata.paymentCheckoutExpiresAt ??
+        metadata.payment_checkout_expires_at ??
+        metadata.checkoutExpiresAt ??
+        metadata.checkout_expires_at,
+    );
+    const copy = paymentCopy(
+      effectiveStatus,
+      ownerLabel,
+      effectiveStatus === "ready" && expiresAt !== null ? Math.max(0, expiresAt - now) : null,
+    );
     const current = byRequest.get(requestId);
     // A merged/paginated response can duplicate a request. Prefer the newest
     // entry; equal timestamps keep terminal state over an actionable row.
@@ -177,6 +223,8 @@ export function projectFeedDrivePayments(entries: ConsentCenterEntry[]): FeedDri
       status: effectiveStatus,
       ...copy,
       requestedAt,
+      ownerLabel,
+      expiresAt,
       href:
         effectiveStatus === "expired"
           ? buildConsentCenterHref("previous", {
