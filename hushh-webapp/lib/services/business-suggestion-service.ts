@@ -25,6 +25,7 @@ const directoryCandidateSchema = z.object({
   match_evidence: z.array(z.union([
     z.object({ kind: z.literal("verified_email_domain"), domain: z.string().min(3).max(253) }),
     z.object({ kind: z.literal("verified_phone") }),
+    z.object({ kind: z.literal("verified_email_identity"), email: z.string().email() }),
   ])).min(1).max(2),
   draft: z.object({ name: z.string().min(1).max(160), website: z.string().max(512),
     phone: z.string().max(512).optional(), formatted_address: z.string().max(512).optional(),
@@ -57,7 +58,7 @@ export type BusinessSuggestion = {
     synthetic: boolean;
     sourceIdentity: { source: "uat_fixture" | "directory"; sourceKey: string;
       vertical?: "hotel" | "healthcare" | "ria" | "insurance" | "business" };
-    matchEvidence: Array<{ kind: "verified_email_domain"; domain: string } | { kind: "verified_phone" }>;
+    matchEvidence: Array<{ kind: "verified_email_domain"; domain: string } | { kind: "verified_phone" } | { kind: "verified_email_identity"; email: string }>;
     draft: { name: string; website: string; phone?: string; formatted_address?: string;
       address_line1?: string; street1?: string; city?: string; zip?: string; state?: string; category?: string };
     ownershipVerified: false;

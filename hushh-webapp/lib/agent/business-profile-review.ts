@@ -99,13 +99,16 @@ export function buildSyntheticBusinessPreview(candidate: BusinessCandidate, name
   if (!candidate.synthetic && candidate.sourceIdentity.source === "directory" && candidate.sourceIdentity.vertical === "business") {
     try {
       const identity = JSON.parse(candidate.sourceIdentity.sourceKey) as Record<string, unknown>;
-      isLiveUatDirectory = identity.source === "uat_test" && identity.source_key === "parth-hushh-ai-v1";
+      isLiveUatDirectory = identity.source === "uat_test"
+        && typeof identity.source_key === "string"
+        && identity.source_key.startsWith("hushh-ai-");
     } catch { /* malformed directory identities remain model-backed */ }
   }
   // The richer fixture is the production UAT contract. Keeping the guard
   // strict also prevents ordinary directory candidates from bypassing preparation.
   if ((!isFixture && !isLiveUatDirectory) || Object.keys(candidate.draft).length < 3) return [];
-  const entityId = "hushh_uat_test_business";
+  const entityId = isFixture ? "hushh_uat_test_business"
+    : `hushh_uat_${candidate.sourceIdentity.sourceKey.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`.slice(0, 80);
   const entity = Object.fromEntries(Object.entries({
     ...candidate.draft, name: name.trim(), website: website.trim(),
   }).filter(([, value]) => typeof value === "string" && value.trim())) as Record<string, string>;

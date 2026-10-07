@@ -257,7 +257,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
         <div className="space-y-1">
           {review.candidate.synthetic && <HelperText className="font-semibold text-foreground">UAT test suggestion</HelperText>}
           <HelperText className="leading-relaxed text-foreground/80">Why this appeared: {review.candidate.synthetic ? "your verified email domain matches the UAT test business" :
-            review.candidate.matchEvidence.map(item => item.kind === "verified_phone" ? "your linked phone matches the directory phone" : "your verified email domain matches the business website").join("; ")}. Business ownership has not been verified.</HelperText>
+            review.candidate.matchEvidence.map(item => item.kind === "verified_phone" ? "your linked phone matches the directory phone" : item.kind === "verified_email_identity" ? "your verified work email is assigned to this UAT test profile" : "your verified email domain matches the business website").join("; ")}. Business ownership has not been verified.</HelperText>
           {!review.candidate.synthetic && <HelperText>Public directory · {review.candidate.sourceIdentity.vertical}</HelperText>}
         </div>
         <dl className="divide-y divide-[color:var(--app-separator)]">
