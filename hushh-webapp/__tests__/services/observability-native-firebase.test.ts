@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const logEventMock = vi.fn();
 let nativePlatform = "android";
@@ -26,6 +26,10 @@ describe("native Firebase analytics adapter", () => {
     logEventMock.mockReset();
     vi.mocked(App.getInfo).mockResolvedValue({version:"1.3.9",build:"10",id:"com.hussh.app",name:"One"});
     vi.doMock("@capacitor-firebase/analytics", () => ({FirebaseAnalytics:{logEvent:logEventMock}}));
+    delete window.__HUSHH_NATIVE_TEST__;
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
     delete window.__HUSHH_NATIVE_TEST__;
   });
 
@@ -85,11 +89,15 @@ describe("native Firebase analytics adapter", () => {
     await (await adapter()).track("page_view", {platform:"android"});
     expect(logEventMock).not.toHaveBeenCalled();
   });
-  it("blocks reviewer admission while loading Firebase", async () => {
-    vi.doMock("@capacitor-firebase/analytics", async () => {
-      await Promise.resolve();
-      window.__HUSHH_NATIVE_TEST__ = {enabled:true,autoReviewerLogin:true};
-      return {FirebaseAnalytics:{logEvent:logEventMock}};
+  it("rechecks reviewer admission after loading Firebase", async () => {
+    const admission = await import("@/lib/testing/native-test");
+    const realAdmissionCheck = admission.shouldDisableExternalTelemetryForAutomation;
+    let checks = 0;
+    // Admission changes at the post-import boundary. Avoid depending on whether
+    // Vitest re-runs an external module's mock factory from its import cache.
+    vi.spyOn(admission, "shouldDisableExternalTelemetryForAutomation").mockImplementation(() => {
+      if (++checks === 3) window.__HUSHH_NATIVE_TEST__ = {enabled:true,autoReviewerLogin:true};
+      return realAdmissionCheck();
     });
     await (await adapter()).track("page_view", {platform:"android"});
     expect(logEventMock).not.toHaveBeenCalled();
