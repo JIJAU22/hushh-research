@@ -6,8 +6,14 @@ import { PersonalKnowledgeModelService } from "@/lib/services/personal-knowledge
 import { SecureResourceCacheService } from "@/lib/services/secure-resource-cache-service";
 import type { BusinessSuggestion } from "@/lib/services/business-suggestion-service";
 import { withPkmSaveJobLock } from "@/lib/pkm/pkm-save-job";
+import { businessMemoryEntity } from "@/lib/pkm/business-memory-origin";
 
 export type BusinessCandidate = BusinessSuggestion["candidates"][number];
+export class BusinessOriginValidationError extends Error {
+  constructor(readonly reason: "path" | "id" | "scope") {
+    super("The proposed destination changed. Review the details again.");
+  }
+}
 export type BusinessReviewJob = {
   version: 1;
   ownerId: string;
@@ -91,29 +97,25 @@ export function attachBusinessOrigin(card: AgentPkmPreviewCard, candidate: Busin
   if (!fixture && !directory)
     throw new Error("The business suggestion changed. Review it again.");
   const copy = structuredClone(card);
-  const entities: Array<{ value: Record<string, unknown>; path: string[] }> = [];
-  const walk = (value: unknown, path: string[] = []) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return;
-    for (const [key, child] of Object.entries(value)) {
-      if (key === "entities" && child && typeof child === "object" && !Array.isArray(child)) {
-        for (const [id, entity] of Object.entries(child)) {
-          if (entity && typeof entity === "object" && !Array.isArray(entity)) entities.push({ value: entity as Record<string, unknown>, path: [...path, key, id] });
-        }
-      } else walk(child, [...path, key]);
-    }
-  };
-  walk(copy.candidate_payload);
-  if (entities.length !== 1 || !["create_entity", "extend_entity", "correct_entity"].includes(
+  const entity = businessMemoryEntity(copy);
+  if (!["create_entity", "extend_entity", "correct_entity"].includes(
     String(copy.merge_decision?.merge_mode || copy.merge_mode || "")))
     throw new Error("The proposed detail needs a fresh review before saving.");
-  const entity = entities[0]!;
   const path = entity.path.join(".");
   const entityId = entity.path.at(-1);
   const scope = entity.path.slice(0, -2).join(".");
   const targetPath = String(copy.merge_decision?.target_entity_path || "");
-  if ((targetPath && targetPath !== path) || (copy.target_entity_id && copy.target_entity_id !== entityId) ||
-      (copy.target_entity_scope && copy.target_entity_scope !== scope && copy.target_entity_scope !== path))
-    throw new Error("The proposed destination changed. Review the details again.");
+  const targetSegments = targetPath ? targetPath.split(".") : entity.path;
+  const targetScope = targetSegments.slice(0, -2).join(".");
+  // The structure and merge stages can select different scopes for the same
+  // entity ID. Preserve both outputs, just as the canonical writer does;
+  // the conflict-aware save guard checks provenance at the merge destination.
+  if (targetSegments.length < 3 || targetSegments.at(-2) !== "entities" || targetSegments.at(-1) !== entityId ||
+    targetSegments.some(segment => !segment || ["__proto__", "prototype", "constructor"].includes(segment)))
+    throw new BusinessOriginValidationError("path");
+  if (copy.target_entity_id && copy.target_entity_id !== entityId) throw new BusinessOriginValidationError("id");
+  if (copy.target_entity_scope && ![scope, `${scope}.entities`, path, targetScope, `${targetScope}.entities`, targetPath].includes(copy.target_entity_scope))
+    throw new BusinessOriginValidationError("scope");
   entity.value._business_origin = { version: 1, business_uid: candidate.businessUid,
     source_identity: { source: candidate.sourceIdentity.source, source_key: candidate.sourceIdentity.sourceKey },
     synthetic: candidate.synthetic, ownership_verified: false };

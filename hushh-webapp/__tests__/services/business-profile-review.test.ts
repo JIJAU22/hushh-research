@@ -74,6 +74,28 @@ describe("business profile reviewed-memory boundary", () => {
     expect(() => attachBusinessOrigin({ ...card(), merge_mode: "delete_entity", merge_decision: { merge_mode: "delete_entity" } }, candidate)).toThrow();
     expect(() => attachBusinessOrigin({ ...card(), target_entity_id: "different" }, candidate)).toThrow();
     expect(() => attachBusinessOrigin({ ...card(), merge_decision: { merge_mode: "extend_entity", target_entity_path: "other.entities.other" } }, candidate)).toThrow();
+    expect(() => attachBusinessOrigin({ ...card(), target_entity_scope: "other.entities" }, candidate)).toThrow();
+  });
+  it("accepts the canonical entity-collection scope without changing its destination", () => {
+    const original = { ...card(), target_entity_scope: "businesses.entities" };
+    const result = attachBusinessOrigin(original, candidate);
+    expect(result.target_entity_scope).toBe("businesses.entities");
+    expect(result.target_entity_id).toBe("mem_one");
+    expect(result.candidate_payload).toMatchObject({ businesses: { entities: { mem_one: {
+      _business_origin: { business_uid: candidate.businessUid },
+    } } } });
+    expect(() => attachBusinessOrigin({ ...original, target_entity_id: "other" }, candidate)).toThrow();
+  });
+  it("preserves the canonical merge destination when its scope differs from the incoming entity", () => {
+    const original = { ...card(), target_entity_scope: "profile", merge_decision: {
+      merge_mode: "create_entity", target_entity_path: "profile.entities.mem_one",
+    } };
+    const result = attachBusinessOrigin(original, candidate);
+    expect(result.merge_decision).toEqual(original.merge_decision);
+    expect(result.target_entity_scope).toBe("profile");
+    expect(result.candidate_payload).toMatchObject({ businesses: { entities: { mem_one: {
+      _business_origin: { business_uid: candidate.businessUid },
+    } } } });
   });
   it("edits change reviewed content but never source identity; website credentials and unsafe schemes are rejected", () => {
     expect(businessDraftMessage(candidate, "Edited test business", "https://example.test")).toContain("Edited test business");

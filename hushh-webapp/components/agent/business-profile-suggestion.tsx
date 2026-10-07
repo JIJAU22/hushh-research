@@ -12,7 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { BusinessSuggestionService } from "@/lib/services/business-suggestion-service";
 import { createAgentPkmCaptureGuard } from "@/lib/agent/agent-pkm-capture-runtime";
 import { connectorMemorySharingImpact, prepareConnectorMemoryReview } from "@/lib/agent/connector-memory-review";
-import { attachBusinessOrigin, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
+import { attachBusinessOrigin, BusinessOriginValidationError, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
 import type { AgentPkmPreviewCard } from "@/lib/agent/agent-pkm-memory";
 
 type Props = {
@@ -147,18 +147,31 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     if (!guard.isCurrent()) return;
     busy.current = true;
     update({ ...review, phase: "preparing" });
+    let stage: "lookup" | "preview" | "coverage" | "origin" = "lookup";
     try {
       await freshCandidate(guard);
       const message = businessDraftMessage(review.candidate, review.name, review.website);
+      stage = "preview";
       const result = await prepareConnectorMemoryReview({ ...guard, userId: context.ownerId!,
         vaultKey: context.vaultKey!, vaultOwnerToken: context.vaultOwnerToken!, message, source: "business_profile_review" });
       await guard.assertCurrent();
+      stage = "coverage";
       if (result.incomplete || !result.cards.length) throw new Error("The details could not be fully prepared. Please try again.");
       // Ensure source identity can follow the actual semantic entity before offering Save.
+      stage = "origin";
       result.cards.forEach(card => attachBusinessOrigin(card, review.candidate));
       update({ ...review, message, cards: result.cards, selected: result.cards.map(card => card.card_id), phase: "review" });
-    } catch {
-      if (guard.isCurrent()) { update({ ...review, phase: "offer" }); morphyToast.error("The details could not be prepared. Try again."); }
+    } catch (error) {
+      if (guard.isCurrent()) {
+        // Bounded diagnostics only: never log source details, keys or preview payloads.
+        const originReason = error instanceof BusinessOriginValidationError ? error.reason : stage === "origin" && error instanceof Error
+          ? error.message === "The proposed detail needs a fresh review before saving." ? "entity-shape"
+            : error.message === "The proposed destination changed. Review the details again." ? "entity-destination" : "source-identity"
+          : "unavailable";
+        console.warn(`[BusinessReview] Preparation failed at ${stage}: ${originReason}`);
+        update({ ...review, phase: "offer" });
+        morphyToast.error("The details could not be prepared. Try again.");
+      }
     } finally { if (guard.isCurrent()) busy.current = false; }
   };
   const chosen = review?.cards.filter(card => review.selected.includes(card.card_id)) || [];

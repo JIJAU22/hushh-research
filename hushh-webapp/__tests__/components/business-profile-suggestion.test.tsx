@@ -7,6 +7,7 @@ import type { AgentPkmPreviewCard } from "@/lib/agent/agent-pkm-memory";
 const mocks = vi.hoisted(() => ({ get: vi.fn(), load: vi.fn(), prepare: vi.fn(), save: vi.fn(), decide: vi.fn(), create: vi.fn(), attach: vi.fn() }));
 vi.mock("@/lib/services/business-suggestion-service", () => ({ BusinessSuggestionService: { get: mocks.get } }));
 vi.mock("@/lib/agent/business-profile-review", () => ({
+  BusinessOriginValidationError: class extends Error {},
   loadBusinessReview: mocks.load, saveBusinessReview: mocks.save, decideBusinessReview: mocks.decide,
   createBusinessReviewJob: mocks.create, attachBusinessOrigin: mocks.attach,
   businessDraftMessage: (_candidate: unknown, name: string, website: string) => `${name}\n${website}`,
