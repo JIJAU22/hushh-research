@@ -242,7 +242,7 @@ for (const width of [320, 393, 1440]) {
     const wallet = await geometry();
     await open(page, width, "light", {}, { shell: true });
     await page.addScriptTag({ content: `window.__locationReference=${JSON.stringify({ hubClass, headerClass })}` });
-    await mount(page);
+    await mount(page, false);
     await expect(page.getByRole("heading", { name: "Location", exact: true })).toBeVisible();
     const location = await geometry();
     for (const part of ["header", "tabs"] as const) {
@@ -271,7 +271,7 @@ for (const [width, count] of [[320, 10], [375, 10], [390, 10], [430, 10], [1440,
     if (count) {
       const stack = page.getByTestId("wallet-add-stack");
       const layers = stack.locator("li:not([inert])");
-      await expect(layers).toHaveCount(count);
+      await expect(layers).toHaveCount(Math.min(count, 4));
       const geometry = await stack.evaluate((el) => {
         const box = el.getBoundingClientRect();
         const faces = [...el.querySelectorAll('li:not([inert]) [data-testid="wallet-card-face"]')].map((face) => {
@@ -290,7 +290,6 @@ for (const [width, count] of [[320, 10], [375, 10], [390, 10], [430, 10], [1440,
       expect((await add.boundingBox())!.y).toBeGreaterThan(geometry.bottom);
       if (width === 390 && count === 3) await page.screenshot({ path: test.info().outputPath("add-collection.png") });
       if (count > 1) {
-        await collection.getByRole("button", { name: "Collapse cards" }).click();
         await collection.getByRole("button", { name: `View all ${count} cards` }).click();
         await expect(layers).toHaveCount(count);
         if (await page.getByRole("button", { name: "View all 3 cards", exact: true }).count()) await page.getByRole("button", { name: "View all 3 cards", exact: true }).click();
@@ -395,7 +394,7 @@ for (const width of [320, 390, 1024]) {
     const dock = page.getByTestId("wallet-card-switcher");
     await expect(dock).toBeVisible();
     await expect(page.getByTestId("wallet-card-browser")).toHaveAttribute("data-mode", "all");
-    await expect(page.getByTestId("wallet-preview-stack")).toHaveAttribute("data-expanded", "true");
+    await expect(page.getByTestId("wallet-preview-stack")).toHaveAttribute("data-expanded", "false");
     const geometry = () => dock.evaluate((element) => ({
       bottom: element.getBoundingClientRect().bottom,
       top: element.getBoundingClientRect().top,
@@ -407,13 +406,13 @@ for (const width of [320, 390, 1024]) {
     expect(bounds.top).toBeGreaterThan(0);
     expect(bounds.overflow).toBeLessThanOrEqual(1);
     await page.screenshot({ path: testInfo.outputPath("cards-overview.png") });
-    await dock.getByRole("button", { name: "Open Travel - Demo, ending 4444" }).click();
+    await dock.getByRole("button", { name: "Open Travel, ending 4444" }).click();
     await expect(page.getByTestId("wallet-card-browser")).toHaveAttribute("data-mode", "card");
     await expect(page.getByTestId("wallet-demo-details")).toContainText("Travel card");
     await expect(page.getByTestId("wallet-demo-activity")).toContainText("₹8,640.00");
-    await expect(dock.getByRole("button", { name: "Open Travel - Demo, ending 4444" })).toHaveAttribute("aria-pressed", "true");
+    await expect(dock.getByRole("button", { name: "Open Travel, ending 4444" })).toHaveAttribute("aria-pressed", "true");
     await page.screenshot({ path: testInfo.outputPath("cards-detail.png") });
-    await page.getByRole("button", { name: "Payment preview", exact: true }).first().click();
+    await page.getByRole("button", { name: "Payment", exact: true }).first().click();
     await expect(page.getByRole("dialog")).toContainText("No card is charged");
     await page.getByRole("button", { name: "Got it", exact: true }).click();
     await page.locator("[data-app-scroll-root]").evaluate((element) => { element.scrollTop = 0; });

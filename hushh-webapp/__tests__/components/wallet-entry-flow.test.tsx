@@ -1,3 +1,5 @@
+import { Preferences } from "@capacitor/preferences";
+import { removeLocalItem } from "@/lib/utils/session-storage";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -83,9 +85,10 @@ function makeCards(count: number) {
 }
 
 describe("Wallet visit introduction", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    localStorage.clear();
+    removeLocalItem("wallet_introduction_seen_v1:user_1");
+    await Preferences.remove({ key: "wallet_introduction_seen_v1:user_1" });
     authMock.user = { uid: "user_1" };
     vaultMock.locked = false;
     serviceMock.listCardSummaries.mockResolvedValue([]);
