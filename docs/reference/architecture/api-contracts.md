@@ -797,24 +797,34 @@ decision and encrypted recovery key. Editing invalidates prepared proposals;
 explicit Save is still required, with exact-card idempotency and sharing checks.
 Real immutable provenance uses `synthetic:false` inside encrypted memory only.
 
-Verified 2026-10-07: a read-only production-directory smoke test returned one
-real hotel candidate through this adapter with incomplete coverage reported.
-This proves directory transport/projection, not a real owner's encrypted save.
-The deployed upstream currently requires both contacts; the independent-contact
-extension in HusshOne source needs deployment. The directory service's observed
-service-level invoker policy does not list the UAT app runtime service account
-`consent-protocol-runtime@hushh-pda-uat.iam.gserviceaccount.com`; its effective
-invocation access must be proven or a narrowly scoped invoker grant approved
-before hosted rollout. No IAM policy was changed. Vault-unlocked real-owner
-selection, save/readback and cold-session recovery still need acceptance.
+Verified 2026-10-07: the private directory deployment
+`hushh-directory-api-00006-5dd` serves independent email/phone contacts and the
+indexed registry query order at 100% traffic. All three absent-contact variants
+returned HTTP 200 with no unavailable warnings; a stored real hotel returned one
+candidate with ownership/claim flags false. Anonymous access remains 403.
+Explicitly approved service-specific invocation access was added for
+`consent-protocol-runtime@hushh-pda-uat.iam.gserviceaccount.com`, preserving
+existing Workspace access. This proves directory transport, not effective
+invocation from that hosted workload or a real owner's encrypted save.
+The research app changes remain local, behind main, and not deployed to UAT.
+Core release verification is blocked by the existing One prompt budget;
+the local frontend dependency lock was repaired and localhost restored.
+Vault-unlocked real-owner selection, save/readback and cold-session recovery
+still need acceptance after governed app rollout.
 
 Read-only database diagnosis also confirmed that healthcare and insurance have
 no website column or normalized-phone index. Healthcare's phone query timed out
 with SQLSTATE 57014 after five seconds; ZIP-filtered reads still succeeded for
 both databases. Domain-only matching cannot cover records with no website.
-HusshOne contains separately reviewed concurrent phone-index scripts; these
-were not applied, and ingestion/matching timeouts were not increased. Index
-approval, valid/ready state checks and query-plan acceptance are rollout gates.
+The approved concurrent phone indexes were applied after successful backup
+`1791367253653` and storage/load checks; both are valid/ready. Ordering registry
+lookups by normalized phone before native identity prevents the planner from
+walking the primary key instead. A checked healthcare plan used the new index
+and finished in 0.235 ms; deployed lookups completed without warnings in about
+2–4 seconds. No directory rows or matching timeouts were changed. Healthcare
+and insurance still lack websites, and no insurance agency with a valid
+ten-digit phone was found in the bounded source-coverage check. Indexes cannot
+invent missing contact evidence; large-scale load acceptance remains separate.
 
 For a localhost-only rehearsal, `ONE_BUSINESS_LOCAL_REHEARSAL_ENABLED=true`
 is a process-only maintainer override. It additionally requires review mode,
