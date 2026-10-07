@@ -1214,6 +1214,33 @@ describe("ConsentCenterPage requestId deep links", () => {
     ]);
   });
 
+  it("keeps the visible request list usable when the secondary summary read fails", async () => {
+    // Summary counts are a secondary projection. A transient summary timeout
+    // must not turn a healthy Requests surface into a blocking service error.
+    mocks.search = "tab=pending";
+    mocks.getSummary.mockRejectedValueOnce(new Error("Internal server error"));
+    mocks.listEntries.mockResolvedValue(
+      pendingListResponse({
+        id: "drive-request-1",
+        request_id: "drive-request-1",
+        kind: "incoming_request",
+        status: "pending",
+        action: "DOCUMENT_SHARE_REVIEW",
+        counterpart_type: "investor",
+        counterpart_label: "Abdul Rashid",
+        scope_description: "Google Drive files",
+      }),
+    );
+
+    render(<ConsentCenterPage />);
+
+    expect(await screen.findByText("Abdul Rashid")).toBeVisible();
+    expect(screen.queryByText("Consent service is unavailable")).toBeNull();
+    expect(
+      screen.queryByText(/did not return the latest access state/i),
+    ).toBeNull();
+  });
+
   it("does not auto-select the first row or open the detail panel after switching tabs", async () => {
     // Regression: selectedEntryFromList fell back to items[0] whenever no
     // requestId/bundleId was in the URL. With no selection open, every tab's
