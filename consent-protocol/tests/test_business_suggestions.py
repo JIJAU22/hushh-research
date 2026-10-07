@@ -48,6 +48,9 @@ async def test_verified_uat_owner_gets_only_synthetic_candidate(fixture_identity
     assert candidate["claim_created"] is False
     assert candidate["business_uid"] != "owner"
     assert "person@" not in str(result)
+    assert candidate["draft"]["category"] == "Software company · Private intelligence"
+    assert candidate["draft"]["phone"] == "+1 202-555-0147"
+    assert "UAT fixture" in candidate["draft"]["hours"]
 
 
 @pytest.mark.asyncio

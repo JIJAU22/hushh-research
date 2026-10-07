@@ -57,7 +57,10 @@ describe("business suggestion transport", () => {
       business_uid: "urn:hushh:business:uat:hushh.ai:v1", synthetic: true,
       source_identity: { source: "uat_fixture", source_key: "hushh.ai:v1" },
       match_evidence: [{ kind: "verified_email_domain", domain: "hushh.ai" }],
-      draft: { name: "Hushh — UAT Test Business", website: "https://hushh.ai" },
+      draft: { name: "Hushh — UAT Test Business", category: "Software company · Private intelligence",
+        formatted_address: "100 UAT Test Avenue, Austin, TX 78701", phone: "+1 202-555-0147",
+        website: "https://hushh.ai", hours: "Mon–Fri · 9:00 AM–5:00 PM (UAT fixture)",
+        about: "Synthetic UAT business used to verify business-profile matching, review, and explicit save flows." },
       ownership_verified: false, claim_created: false,
       verification_required: ["business_authority"],
     }] });

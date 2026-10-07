@@ -42,7 +42,18 @@ def build_uat_business_candidate() -> dict[str, Any]:
         "synthetic": True,
         "source_identity": {"source": "uat_fixture", "source_key": "hushh.ai:v1"},
         "match_evidence": [{"kind": "verified_email_domain", "domain": "hushh.ai"}],
-        "draft": {"name": "Hushh — UAT Test Business", "website": "https://hushh.ai"},
+        # Rich but unmistakably synthetic data lets the whole review card and
+        # PKM preview be exercised without presenting invented production facts
+        # as a real company record.
+        "draft": {
+            "name": "Hushh — UAT Test Business",
+            "category": "Software company · Private intelligence",
+            "formatted_address": "100 UAT Test Avenue, Austin, TX 78701",
+            "phone": "+1 202-555-0147",
+            "website": "https://hushh.ai",
+            "hours": "Mon–Fri · 9:00 AM–5:00 PM (UAT fixture)",
+            "about": "Synthetic UAT business used to verify business-profile matching, review, and explicit save flows.",
+        },
         "ownership_verified": False,
         "claim_created": False,
         "verification_required": ["business_authority"],

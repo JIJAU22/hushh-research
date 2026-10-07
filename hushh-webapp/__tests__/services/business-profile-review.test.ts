@@ -99,6 +99,7 @@ describe("business profile reviewed-memory boundary", () => {
   });
   it("edits change reviewed content but never source identity; website credentials and unsafe schemes are rejected", () => {
     expect(businessDraftMessage(candidate, "Edited test business", "https://example.test")).toContain("Edited test business");
+    expect(businessDraftMessage(candidate, "Edited test business", "https://example.test")).toContain("keep its fields together");
     for (const website of ["http://example.test", "javascript:alert(1)", "https://user:pass@example.test"])
       expect(() => businessDraftMessage(candidate, "Test", website)).toThrow();
     expect(() => businessDraftMessage(candidate, "", "https://example.test")).toThrow();
