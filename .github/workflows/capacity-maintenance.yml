@@ -33,6 +33,7 @@ jobs:
   cleanup:
     name: Verify and retire old Cloud Run revisions
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     environment: ${{ inputs.environment }}
     env:
       GCP_PROJECT_ID: ${{ inputs.environment == 'uat' && 'hushh-pda-uat' || 'hushh-pda' }}
@@ -148,16 +149,18 @@ jobs:
           set -euo pipefail
           cleanup_flags=()
           if [ "$APPLY" = true ]; then cleanup_flags=(--apply --healthy); fi
+          if [ "$RELEASE_ENV" = uat ]; then
+            # Retire the large set of old worker tags before the backend's
+            # one-hour request drain begins.
+            bash scripts/ci/cloudrun-retention.sh consent-protocol-drive-worker "$GCP_REGION" 2 \
+              "${cleanup_flags[@]}"
+          fi
           bash scripts/ci/cloudrun-retention.sh consent-protocol "$GCP_REGION" 2 \
             "$BACKEND_CURRENT" --rollback-revision "$BACKEND_ROLLBACK" \
             --last-known-good-revision "$BACKEND_CURRENT" "${cleanup_flags[@]}"
           bash scripts/ci/cloudrun-retention.sh hushh-webapp "$GCP_REGION" 10 \
             "$FRONTEND_CURRENT" --rollback-revision "$FRONTEND_ROLLBACK" \
             --last-known-good-revision "$FRONTEND_CURRENT" "${cleanup_flags[@]}"
-          if [ "$RELEASE_ENV" = uat ]; then
-            bash scripts/ci/cloudrun-retention.sh consent-protocol-drive-worker "$GCP_REGION" 2 \
-              "${cleanup_flags[@]}"
-          fi
 
       - name: Report post-cleanup connection budget
         if: inputs.apply

@@ -1,6 +1,8 @@
 """Safety contracts for Cloud Run revision cleanup."""
 
 import importlib.util
+import contextlib
+import io
 import pathlib
 import sys
 import unittest
@@ -15,14 +17,15 @@ SPEC.loader.exec_module(MODULE)
 
 
 def service(*traffic):
-    return {"status": {"traffic": list(traffic)}}
+    return {"spec": {"template": {"spec": {"timeoutSeconds": 240}}},
+            "status": {"traffic": list(traffic)}}
 
 
 def revision(number):
     return {"metadata": {
         "name": f"consent-protocol-{number:05d}-abc",
         "creationTimestamp": f"2026-10-07T00:{number:02d}:00Z",
-    }}
+    }, "spec": {"timeoutSeconds": 240}}
 
 
 class RetentionSafetyTest(unittest.TestCase):
@@ -55,6 +58,31 @@ class RetentionSafetyTest(unittest.TestCase):
         with mock.patch.object(MODULE, "service_state", return_value=changed):
             with self.assertRaisesRegex(MODULE.UnsafeState, "traffic changed"):
                 MODULE.assert_traffic("consent-protocol", "project", "us-central1", expected)
+
+    def test_dry_run_displays_live_timeout_floor_and_does_not_mutate(self):
+        state = service(
+            {"revisionName": revision(3)["metadata"]["name"], "percent": 100},
+            {"revisionName": revision(1)["metadata"]["name"], "percent": 0, "tag": "old"},
+        )
+        state["spec"]["template"]["spec"]["timeoutSeconds"] = 3600
+        output = io.StringIO()
+        with mock.patch.object(MODULE, "service_state", return_value=state), \
+             mock.patch.object(MODULE, "revision_state", return_value=[revision(1), revision(2), revision(3)]), \
+             mock.patch.object(MODULE, "gcloud") as cloud, \
+             mock.patch.object(sys, "argv", ["retention", "consent-protocol", "us-central1", "1", "--dry-run"]), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(MODULE.main(), 0)
+        self.assertIn("Drain before deletion: 3660s", output.getvalue())
+        cloud.assert_not_called()
+
+    def test_missing_request_timeout_fails_closed(self):
+        state = service({"revisionName": revision(3)["metadata"]["name"], "percent": 100})
+        old = revision(1)
+        old["spec"].pop("timeoutSeconds")
+        revisions = [old, revision(2), revision(3)]
+        plan = MODULE.plan_cleanup(state, revisions, 1, set())
+        with self.assertRaisesRegex(MODULE.UnsafeState, "timeout unavailable"):
+            MODULE.required_drain_seconds(state, revisions, plan, 120)
 
 
 if __name__ == "__main__":

@@ -106,6 +106,22 @@ def plan_cleanup(service: dict[str, Any], revisions: list[dict[str, Any]],
                 tuple(name for name in ordered if name not in protected))
 
 
+def required_drain_seconds(service: dict[str, Any], revisions: list[dict[str, Any]],
+                           plan: Plan, requested: int) -> int:
+    """Cover the longest request that could still use a revision being deleted."""
+    if not plan.delete_revisions:
+        return 0
+    template = (service.get("spec") or {}).get("template") or {}
+    timeouts = [(template.get("spec") or {}).get("timeoutSeconds")]
+    by_name = {(item.get("metadata") or {}).get("name"): item for item in revisions}
+    for name in plan.delete_revisions:
+        timeouts.append((by_name[name].get("spec") or {}).get("timeoutSeconds"))
+    if any(isinstance(value, bool) or not str(value).isdigit() or int(value) < 1
+           for value in timeouts):
+        raise UnsafeState("request timeout unavailable for a revision to delete")
+    return max(requested, max(int(value) for value in timeouts) + 60)
+
+
 def service_state(name: str, project: str | None, region: str) -> dict[str, Any]:
     state = gcloud(["services", "describe", name], project, region)
     if not isinstance(state, dict):
@@ -152,13 +168,15 @@ def main() -> int:
         parser.error("protected revision name is invalid")
     before = service_state(args.service, args.project, args.region)
     expected = traffic_fingerprint(before)
-    plan = plan_cleanup(before, revision_state(args.service, args.project, args.region),
-                        args.keep_count, protected)
+    revisions = revision_state(args.service, args.project, args.region)
+    plan = plan_cleanup(before, revisions, args.keep_count, protected)
+    drain_seconds = required_drain_seconds(before, revisions, plan, args.drain_seconds)
     print(f"{'APPLY' if args.apply else 'DRY RUN'}: {args.service} project={args.project or '(default)'}")
     print(f"Serving: {', '.join(sorted(plan.serving))}")
     print(f"Protected: {', '.join(sorted(plan.protected))}")
     print(f"Zero-traffic tags to remove: {len(plan.remove_tags)}")
     print(f"Revisions to delete: {len(plan.delete_revisions)}")
+    print(f"Drain before deletion: {drain_seconds}s")
     for tag in plan.remove_tags:
         print(f"  untag {tag}")
     for revision in plan.delete_revisions:
@@ -176,9 +194,11 @@ def main() -> int:
         if after != expected_after:
             raise UnsafeState("traffic differed after tag removal; refusing revision deletion")
         expected = traffic_fingerprint(after_service)
-        if plan.delete_revisions and args.drain_seconds:
-            print(f"Waiting {args.drain_seconds}s for removed tag requests to drain")
-            time.sleep(args.drain_seconds)
+    if plan.delete_revisions:
+        # This also covers a retry after an earlier run removed tags but failed
+        # before deletion; no durable untag timestamp is available.
+        print(f"Waiting {drain_seconds}s for requests to drain before deletion")
+        time.sleep(drain_seconds)
     for revision in plan.delete_revisions:
         assert_traffic(args.service, args.project, args.region, expected)
         current = revision_state(args.service, args.project, args.region)
