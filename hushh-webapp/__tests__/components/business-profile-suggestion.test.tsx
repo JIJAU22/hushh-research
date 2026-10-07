@@ -13,9 +13,6 @@ vi.mock("@/lib/agent/business-profile-review", () => ({
 }));
 vi.mock("@/lib/agent/connector-memory-review", () => ({ prepareConnectorMemoryReview: mocks.prepare,
   connectorMemorySharingImpact: (cards: AgentPkmPreviewCard[]) => Math.max(0, ...cards.map(card => card.sharing_impact?.active_recipient_count || 0)) }));
-vi.mock("@/components/app-ui/settings-ui", () => ({ AdaptiveDetailSurface: ({ open, title, description, children }: {
-  open: boolean; title: string; description: string; children: React.ReactNode;
-}) => open ? <div role="dialog" aria-label={title}><p>{description}</p>{children}</div> : null }));
 vi.mock("@/lib/morphy-ux/morphy", () => ({ morphyToast: { error: vi.fn(), promise: vi.fn() } }));
 import { BusinessProfileSuggestion } from "@/components/agent/business-profile-suggestion";
 const candidate = { businessUid: "urn:hushh:business:uat:hushh.ai:v1", synthetic: true,
@@ -34,13 +31,15 @@ afterEach(() => { cleanup(); publishValidatedAuthSessionOwner(null); });
 describe("post-onboarding business suggestion", () => {
   it("opens a visibly synthetic nudge; discovery and preparation never save", async () => {
     render(<BusinessProfileSuggestion {...props} />);
-    expect(await screen.findByRole("dialog", { name: "Is this your business?" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Is this your business?" })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText(/I found a business you may be connected to/)).toBeTruthy();
     expect(screen.getByText(/UAT test suggestion/)).toBeTruthy(); expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Review details", exact: true }));
     await screen.findByText("Synthetic company detail"); expect(mocks.save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("agent-pkm-review-save"));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Is this your business?" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Is this your business?" })).toBeNull());
   });
   it.each([false, null, Date.now() - 1000])("unknown, expired, or disabled authority does not request a candidate: %s", async value => {
     render(<BusinessProfileSuggestion {...props} {...(value === false ? { enabled: false } : { tokenExpiresAt: value as number | null })} />);
@@ -50,7 +49,7 @@ describe("post-onboarding business suggestion", () => {
     mocks.load.mockResolvedValue({ version: 1, decision, until: Date.now() + 100000 });
     render(<BusinessProfileSuggestion {...props} />);
     await waitFor(() => expect(mocks.load).toHaveBeenCalled());
-    expect(screen.queryByRole("dialog")).toBeNull(); expect(mocks.save).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Is this your business?" })).toBeNull(); expect(mocks.save).not.toHaveBeenCalled();
   });
   it("Later stores only a decision, never prepares or saves memory", async () => {
     render(<BusinessProfileSuggestion {...props} />);
@@ -62,6 +61,7 @@ describe("post-onboarding business suggestion", () => {
     render(<BusinessProfileSuggestion {...props} />);
     fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
     await screen.findByText("Synthetic company detail");
+    fireEvent.click(screen.getByRole("button", { name: "Edit details", exact: true }));
     fireEvent.change(screen.getByLabelText("Business name"), { target: { value: "Edited synthetic company" } });
     expect(screen.queryByTestId("agent-pkm-review-save")).toBeNull(); expect(mocks.save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Review details", exact: true }));

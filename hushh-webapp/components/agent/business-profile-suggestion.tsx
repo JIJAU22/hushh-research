@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/lib/morphy-ux/button";
 import { morphyToast } from "@/lib/morphy-ux/morphy";
-import { AdaptiveDetailSurface } from "@/components/app-ui/settings-ui";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FlowActionGroup } from "@/components/app-ui/flow-actions";
@@ -38,6 +37,7 @@ export function BusinessProfileSuggestion(props: Props) {
   const busy = useRef(false);
   const [state, setState] = useState<{ context: typeof context; review: Review } | null>(null);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
   const review = state?.context === context ? state.review : null;
   const eligible = () => current.current === context && context.enabled && !!context.ownerId &&
@@ -47,7 +47,7 @@ export function BusinessProfileSuggestion(props: Props) {
 
   useEffect(() => {
     const abort = new AbortController(); controller.current = abort; busy.current = false;
-    setAcknowledging(false); setOpen(false);
+    setAcknowledging(false); setOpen(false); setEditing(false);
     const guard = createAgentPkmCaptureGuard({ userId: context.ownerId || "", signal: abort.signal, isEnabled: eligible });
     if (guard.isCurrent()) void (async () => {
       try {
@@ -162,17 +162,27 @@ export function BusinessProfileSuggestion(props: Props) {
 
   if (!review || !eligible()) return null;
   const pending = review.phase === "preparing" || review.phase === "saving";
-  return <section aria-label="Business profile suggestion" className="my-3 min-w-0">
-    <Button variant="muted" className="min-h-11" onClick={() => setOpen(true)}>Review business details</Button>
-    <AdaptiveDetailSurface open={open} onOpenChange={next => { if (!pending) setOpen(next); }}
-      title="Is this your business?" description="Check the details before adding them to your memory."
-      headerTextOverflow="wrap" mobilePresentation="sheet">
-      <div className="space-y-[var(--app-form-section-gap)]">
+  return <section aria-label="Is this your business?" data-message-role="assistant"
+    className="my-3 min-w-0 space-y-[var(--app-form-section-gap)]">
+    <div className="space-y-[var(--app-form-field-gap)]">
+      <HelperText className="font-semibold text-foreground">One</HelperText>
+      <p className="ui-text-body text-foreground">I found a business you may be connected to. Is this yours?</p>
+    </div>
+    {!open && <Button variant="muted" size="standard" onClick={() => setOpen(true)}>Review business details</Button>}
+    {open && <div className="min-w-0 space-y-[var(--app-form-section-gap)] rounded-[var(--app-card-radius-compact)] border border-[color:var(--app-separator)] bg-[color:var(--app-secondary-surface)] p-4 sm:p-5">
+        <div className="min-w-0 space-y-[var(--app-form-field-gap)]">
+          <h3 className="ui-text-card-title break-words text-foreground">{review.name || review.candidate.draft.name}</h3>
+          <p className="ui-text-row-description break-all text-muted-foreground">{review.website || review.candidate.draft.website}</p>
+          {(review.name !== review.candidate.draft.name || review.website !== review.candidate.draft.website) &&
+            <HelperText>Your correction · ownership still unverified</HelperText>}
+          {!review.job && <Button variant="link" size="standard" disabled={pending} aria-expanded={editing}
+            onClick={() => setEditing(value => !value)}>{editing ? "Done editing" : "Edit details"}</Button>}
+        </div>
         <div className="space-y-[var(--app-form-field-gap)]">
           {review.candidate.synthetic && <HelperText className="font-semibold text-foreground">UAT test suggestion</HelperText>}
-          <HelperText className="leading-relaxed text-foreground/80">Your email domain matches Hushh. This is a suggestion, not proof of business ownership.</HelperText>
+          <HelperText className="leading-relaxed text-foreground/80">Why this appeared: your verified email domain matches Hushh. Business ownership has not been verified.</HelperText>
         </div>
-        {!review.job && <div className="space-y-[var(--app-form-section-gap)]">
+        {editing && !review.job && <div className="space-y-[var(--app-form-section-gap)]">
           <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor="business-review-name">Business name</Label>
             <Input id="business-review-name" maxLength={160} value={review.name} disabled={pending}
               onChange={event => update({ ...review, name: event.target.value, cards: [], selected: [], phase: "offer" })} /></div>
@@ -197,8 +207,7 @@ export function BusinessProfileSuggestion(props: Props) {
             {!review.job && <Button variant="link" size="standard" disabled={pending} onClick={() => void defer("not_me")}>Not my business</Button>}
             <Button variant="link" size="standard" disabled={pending} onClick={() => void defer("later")}>Later</Button>
           </div>}
-      </div>
-    </AdaptiveDetailSurface>
+      </div>}
     <AlertDialog open={acknowledging && open} onOpenChange={setAcknowledging}>
       <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Update shared memory?</AlertDialogTitle>
         <AlertDialogDescription>These details affect memory already shared with {sharingCount} {sharingCount === 1 ? "person" : "people"}.</AlertDialogDescription>
