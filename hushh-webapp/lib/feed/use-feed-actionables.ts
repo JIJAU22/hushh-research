@@ -1449,6 +1449,7 @@ export function useFeedActionables(): UseFeedActionablesResult {
     locationRefresh,
     openAnalysis,
     pendingConsentCount,
+    paymentClockNow,
     router,
     user,
     userId,
