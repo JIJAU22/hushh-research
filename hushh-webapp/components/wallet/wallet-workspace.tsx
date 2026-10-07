@@ -60,6 +60,7 @@ import { clearSecretOffer, peekSecretOffer } from "@/lib/pkm/secret-offer-handof
 import { SecretsVaultService } from "@/lib/pkm/secrets-vault-service";
 import { SecureCardReveal } from "@/components/wallet/secure-card-reveal";
 import { WalletCardBrowser } from "@/components/wallet/wallet-card-browser";
+import browserStyles from "@/components/wallet/wallet-card-browser.module.css";
 import { WalletSharing } from "@/components/wallet/wallet-sharing";
 import { useAuth } from "@/hooks/use-auth";
 import { prefersReducedMotion } from "@/lib/morphy-ux/gsap";
@@ -797,7 +798,7 @@ export function WalletWorkspace() {
           />
         ) : null}
       </AppPageContentRegion>
-      <div ref={setCardDockHost} hidden={introductionOpen || !ready || activeTab !== "cards" || Boolean(searchOpen && deferredQuery)} className="sticky bottom-0 z-20 mx-auto w-full max-w-[820px] border-t border-border bg-[var(--app-card-surface-default-solid)] px-2 py-1 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-[var(--app-bottom-shell-height,132px)] after:bg-[var(--app-card-surface-default-solid)] after:content-['']" data-testid="wallet-card-dock-host" />
+      <div ref={setCardDockHost} hidden={introductionOpen || !ready || activeTab !== "cards" || Boolean(searchOpen && deferredQuery)} className={cn(browserStyles.dockHost, "sticky bottom-0 z-20 mx-auto w-full max-w-[820px] border-t border-border bg-[var(--app-card-surface-default-solid)] px-2 py-1 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-[var(--app-bottom-shell-height,132px)] after:bg-[var(--app-card-surface-default-solid)] after:content-['']")} data-testid="wallet-card-dock-host" />
     </AppPageShell>
   );
 }

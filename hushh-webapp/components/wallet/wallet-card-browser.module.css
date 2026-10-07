@@ -68,5 +68,6 @@
 .allButton { min-height:44px; padding-inline:8px; }
 .plus { width:44px; height:44px; }
 
-/* Hide the complete shelf, including its mask, without changing scroll geometry. */
-:global([data-testid="wallet-card-dock-host"][data-scrolling-down="true"]):not(:focus-within) { visibility:hidden; pointer-events:none; }
+/* Hide the complete shelf, including its mask, without changing scroll geometry.
+   Anchored on a local class: CSS-modules pure mode (native webpack build) rejects selectors with only :global parts. */
+.dockHost[data-scrolling-down="true"]:not(:focus-within) { visibility:hidden; pointer-events:none; }
