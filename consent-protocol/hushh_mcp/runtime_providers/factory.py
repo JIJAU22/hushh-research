@@ -207,12 +207,15 @@ class ManagedGeminiRuntimeBinding:
                 f"Vertex location {clean_location!r} is not supported for Live model "
                 f"{clean_model!r}"
             )
-        return genai.Client(
-            vertexai=True,
-            project=self.project,
-            location=clean_location,
-            **({"credentials": credentials} if (credentials := local_cli_credentials()) else {}),
-        )
+        credentials = local_cli_credentials()
+        client_kwargs: dict[str, Any] = {
+            "vertexai": True,
+            "project": self.project,
+            "location": clean_location,
+        }
+        if credentials is not None:
+            client_kwargs["credentials"] = credentials
+        return genai.Client(**client_kwargs)
 
     def build_adk_model(
         self,

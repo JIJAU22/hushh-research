@@ -8983,7 +8983,8 @@ export function AgentChatWorkspace({ className }: AgentChatWorkspaceProps) {
                   replaced and disabled. */}
               {chatOnboarding.turns.length ? (
                 renderChatOnboarding({ kind: "top" })
-              ) : !hasStartedConversation && !businessSuggestionVisible && !voiceActive ? (
+              ) : !hasStartedConversation && !voiceActive ? (
+                businessSuggestionVisible ? null : (
                 <>
                   <AgentWelcomePanel
                     name={displayName}
@@ -8999,6 +9000,7 @@ export function AgentChatWorkspace({ className }: AgentChatWorkspaceProps) {
                     />
                   ) : null}
                 </>
+                )
               ) : null}
 
               {!businessTurnAnchor?.afterId || !visibleMessageIds.includes(businessTurnAnchor.afterId) ? renderBusinessTurn() : null}

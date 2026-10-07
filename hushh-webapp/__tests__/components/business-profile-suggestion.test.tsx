@@ -4,12 +4,13 @@ import { publishValidatedAuthSessionOwner } from "@/lib/auth/session-owner";
 import { advanceVaultSessionEpoch } from "@/lib/vault/session-epoch";
 import type { AgentPkmPreviewCard } from "@/lib/agent/agent-pkm-memory";
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), load: vi.fn(), prepare: vi.fn(), save: vi.fn(), decide: vi.fn(), create: vi.fn(), attach: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), load: vi.fn(), prepare: vi.fn(), save: vi.fn(), decide: vi.fn(), create: vi.fn(), attach: vi.fn(), syntheticPreview: vi.fn() }));
 vi.mock("@/lib/services/business-suggestion-service", () => ({ BusinessSuggestionService: { get: mocks.get } }));
 vi.mock("@/lib/agent/business-profile-review", () => ({
   BusinessOriginValidationError: class extends Error {},
   loadBusinessReview: mocks.load, saveBusinessReview: mocks.save, decideBusinessReview: mocks.decide,
   createBusinessReviewJob: mocks.create, attachBusinessOrigin: mocks.attach,
+  buildSyntheticBusinessPreview: mocks.syntheticPreview,
   businessDraftMessage: (_candidate: unknown, name: string, website: string) => `${name}\n${website}`,
 }));
 vi.mock("@/lib/agent/connector-memory-review", () => ({ prepareConnectorMemoryReview: mocks.prepare,
@@ -25,6 +26,7 @@ const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = n
 beforeEach(() => {
   vi.clearAllMocks(); publishValidatedAuthSessionOwner("owner");
   mocks.get.mockResolvedValue({ candidates: [candidate] }); mocks.load.mockResolvedValue(null);
+  mocks.syntheticPreview.mockReturnValue(cards);
   mocks.prepare.mockResolvedValue({ cards, incomplete: false, alreadySaved: false });
   mocks.save.mockResolvedValue({ saved: 1, remaining: 0 }); mocks.decide.mockResolvedValue(true);
   mocks.create.mockImplementation((_owner, _candidate, message, selected) => ({ cards: selected, message, revision: "synthetic" }));
@@ -81,6 +83,7 @@ describe("post-onboarding business suggestion", () => {
     expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
   });
   it("editing invalidates the prepared selection and requires another review", async () => {
+    mocks.syntheticPreview.mockReturnValue([]);
     render(<BusinessProfileSuggestion {...props} />);
     fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
     await screen.findByText("Synthetic company detail");
@@ -92,6 +95,7 @@ describe("post-onboarding business suggestion", () => {
     expect(mocks.prepare.mock.calls[1]![0].message).toContain("Edited synthetic company");
   });
   it.each(["owner", "vault", "unmount"])("discards late preparation after %s", async cause => {
+    mocks.syntheticPreview.mockReturnValue([]);
     const pending = deferred<{ cards: AgentPkmPreviewCard[]; incomplete: boolean }>(); mocks.prepare.mockReturnValue(pending.promise);
     const root = render(<BusinessProfileSuggestion {...props} />);
     fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
@@ -103,6 +107,7 @@ describe("post-onboarding business suggestion", () => {
     expect(mocks.save).not.toHaveBeenCalled(); expect(screen.queryByText("Synthetic company detail")).toBeNull();
   });
   it("a changed fresh candidate prevents saving even if the preview was valid", async () => {
+    mocks.syntheticPreview.mockReturnValue([]);
     render(<BusinessProfileSuggestion {...props} />);
     fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
     await screen.findByText("Synthetic company detail"); mocks.get.mockResolvedValue({ candidates: [] });
