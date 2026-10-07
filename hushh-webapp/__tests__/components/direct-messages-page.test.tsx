@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
     editMessage: vi.fn(),
     deleteMessage: vi.fn(),
     reactToMessage: vi.fn(),
+    morphyToast: { error: vi.fn(), info: vi.fn(), promise: vi.fn() },
     requestAgentConversationAfterRoute: vi.fn(),
   };
 });
@@ -69,6 +70,10 @@ vi.mock("@/lib/direct-messages/direct-message-events", () => ({
 vi.mock("@/lib/agent/agent-voice-settings", () => ({
   requestAgentConversationAfterRoute: (...args: unknown[]) =>
     mocks.requestAgentConversationAfterRoute(...args),
+}));
+
+vi.mock("@/lib/morphy-ux/morphy", () => ({
+  morphyToast: mocks.morphyToast,
 }));
 
 vi.mock("@/lib/services/direct-messages-service", () => ({
@@ -123,6 +128,9 @@ describe("DirectMessagesPage", () => {
     });
     mocks.markConversationRead.mockResolvedValue({ readCount: 0, readAt: null });
     mocks.openEvents.mockImplementation(() => new Promise(() => undefined));
+    mocks.morphyToast.error.mockReset();
+    mocks.morphyToast.info.mockReset();
+    mocks.morphyToast.promise.mockReset();
     mocks.sendMessage.mockResolvedValue({
       conversation: mocks.conversation,
       message: {
@@ -241,9 +249,63 @@ describe("DirectMessagesPage", () => {
         emoji: "😀",
       }),
     );
+    expect(mocks.morphyToast.promise).not.toHaveBeenCalled();
 
     fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Reply" }));
     expect(screen.getByText("Replying to yourself")).toBeVisible();
+
+    const composer = screen.getByRole("textbox", {
+      name: "Message Ankit Kumar Singh",
+    });
+    fireEvent.change(composer, { target: { value: "Thanks" } });
+    fireEvent.submit(composer.closest("form")!);
+
+    await waitFor(() =>
+      expect(mocks.sendMessage).toHaveBeenCalledWith({
+        idToken: "test-token",
+        content: "Thanks",
+        recipientPersonRef: "person-1",
+        replyToMessageId: "message-1",
+      }),
+    );
+  });
+
+  it("keeps a failed reply in the composer without a toast", async () => {
+    const message = {
+      id: "message-1",
+      conversationId: "conversation-1",
+      senderIsViewer: false,
+      content: "Can you review this?",
+      createdAt: "2026-10-06T10:01:00.000Z",
+      readAt: null,
+      reactions: [],
+    };
+    mocks.getConversationMessages.mockResolvedValue({
+      conversation: mocks.conversation,
+      items: [message],
+      canSend: true,
+      disconnectedNotice: null,
+      nextBefore: null,
+    });
+    mocks.sendMessage.mockRejectedValueOnce(new Error("temporary failure"));
+
+    renderConnectionThread();
+    fireEvent.click(await screen.findByText("Can you review this?"));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reply" }));
+
+    const composer = screen.getByRole("textbox", {
+      name: "Message Ankit Kumar Singh",
+    });
+    fireEvent.change(composer, { target: { value: "Yes, I can." } });
+    fireEvent.submit(composer.closest("form")!);
+
+    expect(
+      await screen.findByText("Couldn’t send this reply. Your message is ready to try again."),
+    ).toBeVisible();
+    expect(composer).toHaveValue("Yes, I can.");
+    expect(screen.getByText("Replying to Ankit Kumar Singh")).toBeVisible();
+    expect(mocks.morphyToast.error).not.toHaveBeenCalled();
   });
 });

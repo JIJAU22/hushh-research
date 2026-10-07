@@ -196,6 +196,7 @@ export function DirectMessagesPage() {
   const [loadingThread, setLoadingThread] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [composerError, setComposerError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [openMessageMenu, setOpenMessageMenu] = useState<string | null>(null);
@@ -206,6 +207,10 @@ export function DirectMessagesPage() {
   const [deleteRequest, setDeleteRequest] = useState<{
     message: DirectMessage;
     scope: "me" | "everyone";
+  } | null>(null);
+  const [messageActionError, setMessageActionError] = useState<{
+    messageId: string;
+    message: string;
   } | null>(null);
   const loadGeneration = useRef(0);
   const loadedRouteKey = useRef<string | null>(null);
@@ -484,11 +489,13 @@ export function DirectMessagesPage() {
     event?.preventDefault();
     if (!user || sending || !thread.canSend) return;
     const content = draft;
+    const reply = replyingTo;
     const recipientPersonRef = thread.peerPersonRef || requestedPersonRef;
     if (!recipientPersonRef) {
       morphyToast.error("This recipient is no longer available for messaging.");
       return;
     }
+    setComposerError(null);
     setSending(true);
     try {
       const idToken = await user.getIdToken();
@@ -496,7 +503,7 @@ export function DirectMessagesPage() {
         idToken,
         content,
         recipientPersonRef,
-        replyToMessageId: replyingTo?.id,
+        replyToMessageId: reply?.id,
       });
       setDraft("");
       setReplyingTo(null);
@@ -526,7 +533,11 @@ export function DirectMessagesPage() {
       );
     } catch {
       setDraft(content);
-      morphyToast.error("Message could not be sent. Check your connection and try again.");
+      setComposerError(
+        reply
+          ? "Couldn’t send this reply. Your message is ready to try again."
+          : "Couldn’t send this message. Your draft is ready to try again.",
+      );
       // A 403/409 is authoritative: redraw the thread as read-only instead of
       // leaving a stale connected composer visible.
       void loadThread({ preserveMessages: true });
@@ -572,6 +583,7 @@ export function DirectMessagesPage() {
   const startReply = (message: DirectMessage) => {
     setOpenMessageMenu(null);
     setActiveMessageActions(message.id);
+    setComposerError(null);
     setReplyingTo(message);
     requestAnimationFrame(() => composerRef.current?.focus());
   };
@@ -579,6 +591,7 @@ export function DirectMessagesPage() {
   const startEditing = (message: DirectMessage) => {
     setOpenMessageMenu(null);
     setActiveMessageActions(message.id);
+    setMessageActionError(null);
     setEditingMessage(message);
     setEditingContent(message.content);
   };
@@ -586,71 +599,75 @@ export function DirectMessagesPage() {
   const saveEdit = () => {
     if (!user || !editingMessage || !editingContent.trim()) return;
     const message = editingMessage;
-    const operation = (async () => {
-      const idToken = await user.getIdToken();
-      return DirectMessagesService.editMessage({
-        idToken,
-        conversationId: message.conversationId,
-        messageId: message.id,
-        content: editingContent,
-      });
+    void (async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const updated = await DirectMessagesService.editMessage({
+          idToken,
+          conversationId: message.conversationId,
+          messageId: message.id,
+          content: editingContent,
+        });
+        replaceMessage(updated);
+        setMessageActionError(null);
+        setEditingMessage(null);
+        setEditingContent("");
+      } catch {
+        setMessageActionError({
+          messageId: message.id,
+          message: "Couldn’t update this message. Try again.",
+        });
+      }
     })();
-    void operation.then((updated) => {
-      replaceMessage(updated);
-      setEditingMessage(null);
-      setEditingContent("");
-    }).catch(() => undefined);
-    void morphyToast.promise(operation, {
-      loading: "Saving message…",
-      success: "Message edited",
-      error: "Message could not be edited. Try again.",
-    });
   };
 
   const saveReaction = (message: DirectMessage, emoji: string) => {
     if (!user) return;
-    const operation = (async () => {
-      const idToken = await user.getIdToken();
-      return DirectMessagesService.reactToMessage({
-        idToken,
-        conversationId: message.conversationId,
-        messageId: message.id,
-        emoji,
-      });
+    void (async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const updated = await DirectMessagesService.reactToMessage({
+          idToken,
+          conversationId: message.conversationId,
+          messageId: message.id,
+          emoji,
+        });
+        replaceMessage(updated);
+        setMessageActionError(null);
+      } catch {
+        setMessageActionError({
+          messageId: message.id,
+          message: "Couldn’t add that reaction. Try again.",
+        });
+      }
     })();
-    void operation.then(replaceMessage).catch(() => undefined);
-    void morphyToast.promise(operation, {
-      loading: "Adding reaction…",
-      success: "Reaction added",
-      error: "Reaction could not be saved. Try again.",
-    });
   };
 
   const confirmDelete = () => {
     if (!user || !deleteRequest) return;
     const { message, scope } = deleteRequest;
-    const operation = (async () => {
-      const idToken = await user.getIdToken();
-      return DirectMessagesService.deleteMessage({
-        idToken,
-        conversationId: message.conversationId,
-        messageId: message.id,
-        scope,
-      });
+    void (async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const result = await DirectMessagesService.deleteMessage({
+          idToken,
+          conversationId: message.conversationId,
+          messageId: message.id,
+          scope,
+        });
+        if (result.message) replaceMessage(result.message);
+        else setMessages((current) => current.filter((item) => item.id !== message.id));
+        setMessageActionError(null);
+        setDeleteRequest(null);
+        setActiveMessageActions(null);
+      } catch {
+        setDeleteRequest(null);
+        setMessageActionError({
+          messageId: message.id,
+          message: "Couldn’t delete this message. Try again.",
+        });
+      }
     })();
-    void operation.then((result) => {
-      if (result.message) replaceMessage(result.message);
-      else setMessages((current) => current.filter((item) => item.id !== message.id));
-      setDeleteRequest(null);
-      setActiveMessageActions(null);
-    }).catch(() => undefined);
-    void morphyToast.promise(operation, {
-      loading: "Deleting message…",
-      success: deleteRequest.scope === "everyone"
-        ? "Message deleted for everyone"
-        : "Message deleted for you",
-      error: "Message could not be deleted. Try again.",
-    });
   };
 
   if (!user && !authLoading) {
@@ -972,6 +989,11 @@ export function DirectMessagesPage() {
                                 ))}
                               </div>
                             ) : null}
+                            {messageActionError?.messageId === message.id ? (
+                              <p className={styles.messageActionError} role="status">
+                                {messageActionError.message}
+                              </p>
+                            ) : null}
                             <time
                               className={cn(
                                 styles.messageMeta,
@@ -1034,7 +1056,10 @@ export function DirectMessagesPage() {
                       id="direct-message-draft"
                       ref={composerRef}
                       value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
+                      onChange={(event) => {
+                        setComposerError(null);
+                        setDraft(event.target.value);
+                      }}
                       placeholder={`Message ${selectedLabel}`}
                       maxLength={DIRECT_MESSAGE_MAX_LENGTH}
                       disabled={sending}
@@ -1083,6 +1108,11 @@ export function DirectMessagesPage() {
                     <span className="sr-only" aria-live="polite">
                       {draft.length}/{DIRECT_MESSAGE_MAX_LENGTH}
                     </span>
+                    {composerError ? (
+                      <p className={styles.composerError} role="status">
+                        {composerError}
+                      </p>
+                    ) : null}
                   </form>
                 ) : null}
               </AgentDockPortal>
