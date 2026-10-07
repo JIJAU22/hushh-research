@@ -65,7 +65,40 @@ _RECOVERY = {
     "GMAIL_RECONNECT_REQUIRED": "Reconnect Gmail, then review this draft again.",
     "GMAIL_SENDER_CHANGED": "The sending account changed. Review this draft again.",
     "DRAFT_CHANGED": "This draft changed. Review it again before sending.",
+    "RECIPIENT_LOOKUP_UNAVAILABLE": "I couldn't check the recipients. Your draft is still here.",
+    "RECIPIENT_CHANGED": "Review the email recipients again. Your draft is still here.",
+    "ACTION_NOT_FOUND": "This review expired. Review the draft again before sending.",
+    "ACTION_NOT_SENDABLE": "This review is no longer active. Review the draft again before sending.",
+    "DRIVE_ATTACHMENT_CHANGED": "The attachment changed. Review this draft again before sending.",
+    "GMAIL_SEND_FAILED": "Gmail rejected the email. Review the draft and try again.",
+    "GMAIL_NOT_READY": "Gmail is not ready. Reconnect it, then review this draft again.",
+    "GMAIL_SENDER_UNAVAILABLE": "The sending account is unavailable. Review this draft again.",
+    "SENDER_REVIEW_REQUIRED": "Review the sending account, then review this draft again.",
+    "SENDER_REVIEW_INVALID": "Review the sending account again before sending.",
+    "VOICE_APPROVAL_SUPERSEDED": "Review the current email again. Nothing was sent.",
 }
+
+# These failures happen before a provider POST (or are durably recorded as a
+# definite failure). They are safe to retire and present for a fresh review;
+# provider timeouts/transport errors remain outcome_unknown and locked.
+_REVIEWABLE_SEND_FAILURES = frozenset(
+    {
+        "RECIPIENT_LOOKUP_UNAVAILABLE",
+        "RECIPIENT_CHANGED",
+        "ACTION_NOT_FOUND",
+        "ACTION_NOT_SENDABLE",
+        "DRAFT_CHANGED",
+        "DRIVE_ATTACHMENT_CHANGED",
+        "GMAIL_SEND_FAILED",
+        "DELIVERY_FAILED",
+        "GMAIL_NOT_READY",
+        "GMAIL_SENDER_UNAVAILABLE",
+        "SENDER_REVIEW_REQUIRED",
+        "SENDER_REVIEW_INVALID",
+        "GMAIL_SENDER_CHANGED",
+        "VOICE_APPROVAL_SUPERSEDED",
+    }
+)
 
 
 def _refusal(reason: str, fact: str) -> Rejected:
@@ -137,6 +170,46 @@ class MailComposeRuntime:
                 "prepared": None,
                 "reason_code": reason,
             },
+        )
+
+    async def _recover_reviewable_send_failure(
+        self, ctx: ToolContext, task: ComposeDraft, reason: str
+    ) -> ComposeResult | None:
+        """Retire an unclaimed/definitely failed action before fresh review.
+
+        A failure classified here must never leave a prepared action attached to
+        a draft that the UI can review again. If retirement cannot prove a safe
+        terminal state, preserve the action and report an ambiguous outcome.
+        """
+        action = str(task.prepared.get("action_id") or "")
+        if not action:
+            task.state = "needs_input"
+            return self.needs_input(
+                task,
+                reason=reason,
+                fact=_RECOVERY.get(
+                    reason, "Your draft is still here. Review it again before sending."
+                ),
+            )
+        try:
+            retired = await self._retire_action(ctx, action)
+        except Exception:
+            task.state = "outcome_unknown"
+            return None
+        if not (
+            retired.get("cancelled")
+            or retired.get("state") in {"cancelled", "expired", "failed"}
+            or (reason == "ACTION_NOT_FOUND" and retired.get("state") is None)
+        ):
+            task.state = "outcome_unknown"
+            return None
+        task.prepared = {}
+        task.rendered = False
+        task.state = "needs_input"
+        return self.needs_input(
+            task,
+            reason=reason,
+            fact=_RECOVERY.get(reason, "Your draft is still here. Review it again before sending."),
         )
 
     async def _retire_action(self, ctx: ToolContext, action: str) -> dict[str, Any]:
@@ -567,22 +640,18 @@ class MailComposeRuntime:
                 )
                 reason = None
             except (GmailDeliveryError, GmailApiError) as exc:
-                state = (
-                    "failed"
-                    if exc.code
-                    in {
-                        *_RECOVERY,
-                        "RECIPIENT_CHANGED",
-                        "GMAIL_SEND_FAILED",
-                        "DELIVERY_FAILED",
-                        "SENDER_REVIEW_REQUIRED",
-                        "SENDER_REVIEW_INVALID",
-                    }
-                    else "outcome_unknown"
-                )
+                if exc.code in _REVIEWABLE_SEND_FAILURES:
+                    recoverable = await self._recover_reviewable_send_failure(ctx, task, exc.code)
+                    if recoverable is not None:
+                        return recoverable
+                    state = "outcome_unknown"
+                else:
+                    state = "outcome_unknown"
                 reason = exc.code
                 if reason == "VOICE_APPROVAL_SUPERSEDED":
-                    state = "needs_input"
+                    # The helper normally returns above; keep the fallback
+                    # locked if action retirement could not be verified.
+                    state = "outcome_unknown"
             except Exception:
                 state, reason = "outcome_unknown", "delivery_unverified"
             task.state = state
@@ -758,6 +827,25 @@ async def _status(ctx: ToolContext, args: DraftStatusInput) -> ToolResult:
                 else:
                     task.state = str(row["state"])
                 task.rendered = False
+            elif row.get("state") == "prepared" and task.state in {
+                "sending",
+                "failed",
+                "outcome_unknown",
+            }:
+                # The authoritative ledger proves no claim/provider attempt
+                # occurred. Retire that stale prepared action and reopen the
+                # draft for a fresh review; never heal an ambiguous row this way.
+                try:
+                    retired = await owner._retire_action(ctx, action)
+                except Exception:
+                    retired = None
+                if retired and (
+                    retired.get("cancelled")
+                    or retired.get("state") in {"cancelled", "expired", "failed"}
+                ):
+                    task.prepared = {}
+                    task.state = "needs_input"
+                    task.rendered = False
     return owner.result(
         task,
         status=task.state,

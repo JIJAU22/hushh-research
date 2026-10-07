@@ -230,3 +230,51 @@ async def test_tap_binds_input_before_pending_await_and_never_clears_new_speech(
     assert captured == [((1, False), 2, not completed)]
     assert session._mail_input_active is not completed
     assert session._mail_approval_input.get() is None
+
+
+@pytest.mark.asyncio
+async def test_reviewed_tap_send_does_not_block_client_correction(monkeypatch):
+    session, _live = pump_session()
+    session.ctx = ToolContext(
+        user_id="owner",
+        conversation_id="conversation",
+        entities=EntityContext(),
+        screen=ScreenContext(),
+        vault_owner_token="test-owner",  # noqa: S106 - test credential
+    )
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def confirm(**_):
+        return SimpleNamespace(
+            id="pending-mail",
+            tool_name="send_reviewed_mail",
+            origin_turn_id=None,
+        )
+
+    async def execute(*_):
+        started.set()
+        await release.wait()
+        return SimpleNamespace(result=SimpleNamespace(status="sent"), pending=None)
+
+    session.pending = SimpleNamespace(get=AsyncMock(return_value=None), confirm=confirm)
+    session.executor = SimpleNamespace(execute_pending=execute)
+    monkeypatch.setattr(session, "_after_execution", AsyncMock())
+
+    tap = asyncio.create_task(
+        session._confirm_by_tap(
+            protocol.ConfirmActionFrame(
+                type="confirm_action",
+                pending_action_id="11111111-1111-4111-8111-111111111111",
+            )
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    before = session._mail_input_generation
+
+    await session._handle_client_frame(protocol.TextFrame(type="text", text="change the body"))
+
+    assert session._mail_input_generation == before + 1
+    assert session._mail_execution_tasks
+    release.set()
+    await tap
+    await asyncio.sleep(0)

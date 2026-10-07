@@ -234,18 +234,39 @@ async def test_edit_during_recipient_validation_fences_send(compose, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_non_sendable_action_is_unknown_and_cannot_create_another(compose):
+async def test_non_sendable_action_reopens_review_without_duplicate(compose):
     runtime, ctx, delivery = compose
     ref, revision = await ready(compose)
     ctx.prepared = runtime.prepare_send(ref, revision).snapshot
     delivery.execute.side_effect = GmailDeliveryError("ACTION_NOT_SENDABLE", "private error")
     result = await runtime.send(ctx, ref, revision)
-    assert result.status == "outcome_unknown"
+    assert result.status == "needs_input"
+    assert result.client_step["kind"] == "review_mail_draft"
+    assert result.client_step["prepared"] is None
     other = await runtime.create(ctx, {"to": "friend@example.com", "body": "Hi"})
     assert other.status == "draft_already_open"
     assert "private error" not in str(result.model_public())
     await runtime.send(ctx, ref, revision)
     delivery.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recipient_lookup_failure_retires_prepared_action_and_reopens_review(compose):
+    runtime, ctx, delivery = compose
+    ref, revision = await ready(compose)
+    ctx.prepared = runtime.prepare_send(ref, revision).snapshot
+    delivery.execute.side_effect = GmailDeliveryError(
+        "RECIPIENT_LOOKUP_UNAVAILABLE", "temporary lookup failure"
+    )
+
+    result = await runtime.send(ctx, ref, revision)
+
+    assert result.status == "needs_input"
+    assert result.reason_code == "RECIPIENT_LOOKUP_UNAVAILABLE"
+    assert result.client_step["prepared"] is None
+    assert runtime.tasks[ref].state == "needs_input"
+    assert runtime.tasks[ref].prepared == {}
+    delivery.cancel_prepared.assert_awaited_once_with(user_id="owner", action_id="a" * 36)
 
 
 @pytest.mark.asyncio

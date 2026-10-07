@@ -464,6 +464,10 @@ class VoiceSession:
         # always re-read from the ledger through ``_mail_delivery_status``.
         self.mail_deliveries: dict[str, dict[str, Any]] = {}
         self._mail_delivery_status = mail_delivery_status or get_owner_send_action
+        # A tap arrives on the client pump, while the reviewed send may wait on
+        # recipient/Gmail I/O. Keep that execution out of the receive loop so
+        # corrections and cancellation can revoke its admission in time.
+        self._mail_execution_tasks: set[asyncio.Task[None]] = set()
         self.pending_receipts: dict[str, str] = {}
         # Answered typed name edits by operation id: a resend gets the same
         # name_edit.result back and never proposes a second card.
@@ -733,6 +737,45 @@ class VoiceSession:
             await self.transport.close(code, reason)
         except Exception:  # noqa: BLE001 - already closing
             pass
+
+    def _track_mail_execution(self, pending: PendingAction, *, origin_turn_id: str | None) -> None:
+        """Run a reviewed send without blocking client-frame intake.
+
+        The task deliberately keeps running after socket close: once a delivery
+        has reached the ledger, cancelling the coroutine could strand a
+        ``sending`` row without a truthful outcome. The wrapper suppresses late
+        transport errors and removes itself from the bounded task set.
+        """
+        task = asyncio.create_task(
+            self._execute_mail_pending(pending, origin_turn_id=origin_turn_id),
+            name=f"one-voice-mail-send:{getattr(pending, 'id', 'unknown')}",
+        )
+        self._mail_execution_tasks.add(task)
+
+        def _finished(done: asyncio.Task[None]) -> None:
+            self._mail_execution_tasks.discard(done)
+            if not done.cancelled():
+                try:
+                    done.exception()
+                except Exception:  # noqa: BLE001 - done task is already logged by wrapper
+                    pass
+
+        task.add_done_callback(_finished)
+
+    async def _execute_mail_pending(
+        self, pending: PendingAction, *, origin_turn_id: str | None
+    ) -> None:
+        # ToolExecutor stores its prepared snapshot on the context while the
+        # handler runs. A shallow context copy prevents a concurrent read/edit
+        # from replacing that snapshot underneath the send.
+        execution_ctx = replace(self.ctx, prepared=None)
+        try:
+            outcome = await self.executor.execute_pending(execution_ctx, pending)
+            await self._after_execution(outcome, source="tap", origin_turn_id=origin_turn_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - ledger outcome remains authoritative
+            logger.warning("one_voice.mail_execution_failed", exc_info=True)
 
     async def _fail(self, code: int, error_code: str, message: str) -> None:
         try:
@@ -1329,6 +1372,12 @@ class VoiceSession:
         self._bump(confirmations_completed=1)
         if origin_turn_id is not None:
             await self._send(protocol.voice_state("executing", turn_id=origin_turn_id))
+        if confirmed.tool_name == "send_reviewed_mail":
+            # The CAS above is the admission point. The task inherits the
+            # ContextVar snapshot captured by _confirm_by_tap, while this pump
+            # immediately returns to receive typed edits/cancellation frames.
+            self._track_mail_execution(confirmed, origin_turn_id=origin_turn_id)
+            return
         outcome = await self.executor.execute_pending(self.ctx, confirmed)
         await self._after_execution(outcome, source="tap", origin_turn_id=origin_turn_id)
 

@@ -1748,7 +1748,8 @@ async def get_owner_send_action(*, user_id: str, action_id: str) -> dict[str, An
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT state, created_at, gmail_thread_id, safe_error_code
+            SELECT action_id, state, created_at, sent_at, gmail_message_id,
+                   gmail_thread_id, safe_error_code
             FROM gmail_owner_send_actions
             WHERE action_id = $1 AND user_id = $2
             """,
