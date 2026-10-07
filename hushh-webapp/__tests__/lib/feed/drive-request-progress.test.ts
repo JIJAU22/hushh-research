@@ -134,7 +134,7 @@ describe("projectFeedDriveProgress", () => {
       title: "Document request expired",
       description: "Your request for files from V expired before payment.",
     });
-    expect(row?.href).toContain("consentView=previous");
+    expect(row?.href).toContain("tab=previous");
   });
 
   it("marks an expired Stripe link separately so it can be recreated", () => {
@@ -151,6 +151,17 @@ describe("projectFeedDriveProgress", () => {
       title: "Payment link expired",
       description: "The $10 link expired. Create a new link to continue.",
     });
+  });
+
+  it("treats a legacy expired payment status as a renewable link while pending", () => {
+    const payment = entry({ kind: "outgoing_request", metadata: {
+      ...entry().metadata,
+      direction: "outgoing",
+      paymentStatus: "expired",
+      paymentAmountCents: 1000,
+      paymentCurrency: "usd",
+    } });
+    expect(projectFeedDrivePayments([payment])[0]?.status).toBe("link_expired");
   });
 
   it("keeps separate payment rows for separate requests", () => {

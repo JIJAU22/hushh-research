@@ -42,11 +42,13 @@ WITH participants AS (
     {payment_status} AS payment_status,
     {payment_amount_cents} AS payment_amount_cents,
     {payment_currency} AS payment_currency,
-    {payment_reconciliation_required} AS payment_reconciliation_required
+    {payment_reconciliation_required} AS payment_reconciliation_required,
+    {payment_link_expired} AS payment_link_expired,
+    {checkout_expires_at} AS checkout_expires_at
   FROM drive_share_requests WHERE user_id=:user OR recipient_user_id=:user
   UNION ALL
   SELECT request_id,revocation_revision,created_at,'share','incoming','management_only',
-    NULL::text,NULL::text,FALSE,FALSE,FALSE,FALSE,NULL::text,NULL::integer,NULL::text,NULL::boolean
+    NULL::text,NULL::text,FALSE,FALSE,FALSE,FALSE,NULL::text,NULL::integer,NULL::text,NULL::boolean,FALSE,NULL::timestamptz
   FROM drive_share_management_contexts
   WHERE user_id=:user AND private_request_erased_at IS NOT NULL{queries}
 ), classified AS (
@@ -105,7 +107,7 @@ _QUERIES = """
         AND decided_at < now() - interval '300 seconds' THEN 'expired'
       WHEN status='running' THEN 'pending'
       ELSE status END,
-    NULL::text,NULL::text,FALSE,FALSE,FALSE,FALSE,NULL::text,NULL::integer,NULL::text,NULL::boolean
+    NULL::text,NULL::text,FALSE,FALSE,FALSE,FALSE,NULL::text,NULL::integer,NULL::text,NULL::boolean,FALSE,NULL::timestamptz
   FROM drive_live_query_requests WHERE user_id=:user OR requester_user_id=:user"""
 
 _OWNER_SEARCH_STATE = """(
@@ -219,6 +221,20 @@ def _projection(
           WHERE pay.request_id=drive_share_requests.request_id)"""
         if payments
         else "NULL::boolean",
+        "payment_link_expired": """(SELECT (pay.status NOT IN ('paid','refunded')
+          AND pay.stripe_checkout_expires_at IS NOT NULL
+          AND pay.stripe_checkout_expires_at <= clock_timestamp())
+          FROM drive_request_payment_orders pay
+          WHERE pay.request_id=drive_share_requests.request_id
+            AND drive_share_requests.recipient_user_id=:user)"""
+        if payments
+        else "FALSE",
+        "checkout_expires_at": """(SELECT pay.stripe_checkout_expires_at
+          FROM drive_request_payment_orders pay
+          WHERE pay.request_id=drive_share_requests.request_id
+            AND drive_share_requests.recipient_user_id=:user)"""
+        if payments
+        else "NULL::timestamptz",
     }.items():
         projection = projection.replace("{" + name + "}", expression)
     return projection
@@ -324,6 +340,12 @@ def entry(row: Any) -> dict[str, Any]:
                     "paymentAmountCents": row["payment_amount_cents"],
                     "paymentCurrency": row["payment_currency"],
                     "paymentReconciliationRequired": row["payment_reconciliation_required"] is True,
+                    "paymentLinkExpired": row["payment_link_expired"] is True,
+                    "checkoutExpiresAt": (
+                        row["checkout_expires_at"].isoformat()
+                        if row.get("checkout_expires_at") is not None
+                        else None
+                    ),
                 }
                 if row["direction"] == "outgoing" and row.get("payment_status") is not None
                 else {}

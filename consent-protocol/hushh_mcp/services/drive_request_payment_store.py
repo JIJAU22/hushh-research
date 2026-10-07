@@ -189,16 +189,21 @@ class DriveRequestPaymentStore(ExternalConnectorLifecycleStore):
             _, order, notified = self._ensure_ready(
                 connection, user_id=request["user_id"], request_id=request_id, share_id=None
             )
-            if order is None and (
-                request["status"] in {"cancelled", "declined", "expired"}
-                or request["expires_at"] <= datetime.now(UTC)
-            ):
+            request_expired = request["status"] in {"cancelled", "declined", "expired"} or (
+                request["expires_at"] <= datetime.now(UTC)
+            )
+            checkout_expired = bool(
+                order
+                and order["status"] not in {"paid", "refunded"}
+                and order["stripe_checkout_expires_at"] is not None
+                and order["stripe_checkout_expires_at"] <= datetime.now(UTC)
+            )
+            if order is None and request_expired:
                 status = "expired"
             elif order is None:
                 status = "preparing"
             elif order["status"] not in {"paid", "refunded"} and (
-                request["status"] in {"cancelled", "declined", "expired"}
-                or request["expires_at"] <= datetime.now(UTC)
+                request_expired or checkout_expired
             ):
                 status = "expired"
             else:
@@ -207,6 +212,12 @@ class DriveRequestPaymentStore(ExternalConnectorLifecycleStore):
                 "status": status,
                 "amountCents": 1000,
                 "currency": "usd",
+                "paymentLinkExpired": checkout_expired and not request_expired,
+                "checkoutExpiresAt": (
+                    order["stripe_checkout_expires_at"].isoformat()
+                    if order and order["stripe_checkout_expires_at"] is not None
+                    else None
+                ),
                 "reconciliationRequired": bool(
                     order and order["reconciliation_required"] and order["status"] != "refunded"
                 ),

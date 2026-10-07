@@ -72,7 +72,6 @@ function paymentState(entry: ConsentCenterEntry): FeedDrivePaymentStatus | null 
   const paymentStatus = nonEmptyString(metadata.paymentStatus).toLowerCase();
   const requestStatus = nonEmptyString(entry.status).toLowerCase();
   if (requestStatus === "expired") return "expired";
-  if (paymentStatus === "expired" && entry.kind === "outgoing_request") return "expired";
 
   // A Stripe session may expire while the order remains `checkout_open`.
   // Accept either a server marker or its expiry instant for old/new payloads.
@@ -94,6 +93,10 @@ function paymentState(entry: ConsentCenterEntry): FeedDrivePaymentStatus | null 
     checkoutExpired ||
     (checkoutExpiresAt !== null && checkoutExpiresAt <= Date.now())
   ) return "link_expired";
+  // Older projections only exposed the provider's terminal status. For an
+  // otherwise-open request that status means the Checkout link expired; the
+  // request itself can still be paid through a replacement link.
+  if (paymentStatus === "expired" && isOpenRequest) return "link_expired";
   if (paymentStatus !== "awaiting_payment" && paymentStatus !== "checkout_open") return null;
   return "ready";
 }

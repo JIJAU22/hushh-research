@@ -200,7 +200,8 @@ class DriveSharingStore(DriveDocumentStore):
     def _payment_metadata(connection, request_id):
         order = (
             connection.execute(
-                text("""SELECT status,amount_cents,currency,reconciliation_required
+                text("""SELECT status,amount_cents,currency,reconciliation_required,
+                    stripe_checkout_expires_at
                 FROM drive_request_payment_orders WHERE request_id=:request"""),
                 {"request": request_id},
             )
@@ -213,6 +214,16 @@ class DriveSharingStore(DriveDocumentStore):
                 "paymentAmountCents": order["amount_cents"],
                 "paymentCurrency": order["currency"],
                 "paymentReconciliationRequired": order["reconciliation_required"] is True,
+                "paymentLinkExpired": bool(
+                    order["status"] not in {"paid", "refunded"}
+                    and order["stripe_checkout_expires_at"] is not None
+                    and order["stripe_checkout_expires_at"] <= datetime.now(UTC)
+                ),
+                "checkoutExpiresAt": (
+                    order["stripe_checkout_expires_at"].isoformat()
+                    if order["stripe_checkout_expires_at"] is not None
+                    else None
+                ),
             }
             if order
             else {}

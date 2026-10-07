@@ -53,6 +53,9 @@ def _signed_event(
     amount: int = 1000,
     session_id: str = "cs_test_bound",
     attempt_id: str | None = None,
+    event_type: str = "checkout.session.completed",
+    payment_status: str = "paid",
+    payment_intent: str | None = "pi_test_bound",
 ):
     payer_ref = hashlib.sha256(f"{request_id}:recipient".encode()).hexdigest()
     metadata = {"payment_kind": "drive_request", "request_id": request_id, "payer_ref": payer_ref}
@@ -62,7 +65,7 @@ def _signed_event(
         {
             "id": "evt_test_" + uuid4().hex,
             "object": "event",
-            "type": "checkout.session.completed",
+            "type": event_type,
             "data": {
                 "object": {
                     "id": session_id,
@@ -70,11 +73,11 @@ def _signed_event(
                     "client_reference_id": request_id,
                     "metadata": metadata,
                     "mode": "payment",
-                    "payment_status": "paid",
+                    "payment_status": payment_status,
                     "amount_total": amount,
                     "currency": "usd",
                     "livemode": False,
-                    "payment_intent": "pi_test_bound",
+                    "payment_intent": payment_intent,
                 }
             },
         }
@@ -278,6 +281,44 @@ async def test_webhook_rejects_invalid_raw_body_signature_before_database(monkey
         await DriveRequestPaymentService(db=object()).process_webhook(
             payload=payload + b" ", signature=signature
         )
+
+
+@pytest.mark.asyncio
+async def test_webhook_maps_missing_signature_type_error_to_client_error(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_local_only_synthetic")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_payment_test_secret")
+    monkeypatch.setenv("APP_FRONTEND_ORIGIN", "https://test.example")
+    stripe_api = SimpleNamespace(
+        Webhook=SimpleNamespace(
+            construct_event=Mock(side_effect=TypeError("signature header is required"))
+        )
+    )
+    with pytest.raises(DriveSharingError, match="payment_invalid_signature"):
+        await DriveRequestPaymentService(db=object(), stripe_api=stripe_api).process_webhook(
+            payload=b"{}", signature=None
+        )
+
+
+@pytest.mark.asyncio
+async def test_webhook_rejects_non_mapping_stripe_event(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_local_only_synthetic")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_payment_test_secret")
+    monkeypatch.setenv("APP_FRONTEND_ORIGIN", "https://test.example")
+    stripe_api = SimpleNamespace(Webhook=SimpleNamespace(construct_event=Mock(return_value=None)))
+    with pytest.raises(DriveSharingError, match="payment_invalid_event"):
+        await DriveRequestPaymentService(db=object(), stripe_api=stripe_api).process_webhook(
+            payload=b"{}", signature="valid"
+        )
+
+
+def test_checkout_reservation_keeps_attempt_id_for_concurrent_tabs():
+    source = inspect.getsource(DriveRequestPaymentService.checkout)
+    assert 'if order["checkout_attempt_id"] is None' in source
+    assert (
+        "idempotency_key=f\"drive-request-{request_id}-{order['checkout_attempt_id']}\"" in source
+    )
 
 
 @pytest.mark.asyncio
@@ -611,6 +652,85 @@ async def test_signed_webhook_requires_exact_order_binding_and_replays_once(shar
     assert order["status"] == "paid" and order["paid_at"] is not None
     assert order["stripe_checkout_url"] is None
     assert events == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_checkout_webhook_marks_link_expired_and_is_idempotent(sharing, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_local_only_synthetic")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_payment_test_secret")
+    monkeypatch.setenv("APP_FRONTEND_ORIGIN", "https://test.example")
+    created = await request(sharing)
+    request_id = created["requestId"]
+    attempt = str(uuid4())
+    with sharing.db.engine.begin() as connection:
+        connection.execute(
+            text("UPDATE drive_share_requests SET payment_required=TRUE WHERE request_id=:id"),
+            {"id": request_id},
+        )
+        connection.execute(
+            text("""INSERT INTO drive_request_payment_orders
+          (request_id,user_id,requester_user_id,status,checkout_attempt_id,
+           stripe_checkout_session_id,stripe_checkout_url,stripe_checkout_expires_at)
+          VALUES (:id,'owner','recipient','checkout_open',:attempt,'cs_test_expired',
+                  'https://checkout.stripe.com/expired',clock_timestamp()+interval '1 hour')"""),
+            {"id": request_id, "attempt": attempt},
+        )
+    service = DriveRequestPaymentService(db=sharing.db)
+    payload, signature = _signed_event(
+        request_id,
+        session_id="cs_test_expired",
+        event_type="checkout.session.expired",
+        payment_status="unpaid",
+        payment_intent=None,
+        attempt_id=attempt,
+    )
+    await service.process_webhook(payload=payload, signature=signature)
+    await service.process_webhook(payload=payload, signature=signature)
+    with sharing.db.engine.begin() as connection:
+        order = (
+            connection.execute(
+                text("""SELECT status,stripe_checkout_session_id,stripe_checkout_url
+                  FROM drive_request_payment_orders WHERE request_id=:id"""),
+                {"id": request_id},
+            )
+            .mappings()
+            .one()
+        )
+        events = connection.execute(
+            text("""SELECT count(*) FROM drive_request_payment_webhook_events
+              WHERE request_id=:id"""),
+            {"id": request_id},
+        ).scalar_one()
+    assert order["status"] == "expired"
+    assert order["stripe_checkout_session_id"] == "cs_test_expired"
+    assert order["stripe_checkout_url"] is None
+    assert events == 1
+
+
+@pytest.mark.asyncio
+async def test_payment_state_reports_expired_checkout_link(sharing):
+    created = await request(sharing)
+    request_id = created["requestId"]
+    with sharing.db.engine.begin() as connection:
+        connection.execute(
+            text("UPDATE drive_share_requests SET payment_required=TRUE WHERE request_id=:id"),
+            {"id": request_id},
+        )
+        connection.execute(
+            text("""INSERT INTO drive_request_payment_orders
+          (request_id,user_id,requester_user_id,status,checkout_attempt_id,
+           stripe_checkout_session_id,stripe_checkout_url,stripe_checkout_expires_at)
+          VALUES (:id,'owner','recipient','checkout_open',:attempt,'cs_test_old',
+                  'https://checkout.stripe.com/old',clock_timestamp()-interval '1 second')"""),
+            {"id": request_id, "attempt": str(uuid4())},
+        )
+    state = await DriveRequestPaymentService(db=sharing.db).payment_state(
+        requester_user_id="recipient", request_id=request_id
+    )
+    assert state["status"] == "expired"
+    assert state["paymentLinkExpired"] is True
+    assert state["checkoutExpiresAt"] is not None
 
 
 @pytest.mark.asyncio
