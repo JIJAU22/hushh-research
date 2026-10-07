@@ -188,6 +188,10 @@ function paymentCopy(
 /** The outgoing server projection is the discovery authority, including after an app restart. */
 export function projectFeedDrivePayments(entries: ConsentCenterEntry[], now = Date.now()): FeedDrivePayment[] {
   const byRequest = new Map<string, FeedDrivePayment>();
+  // The Consent Center can merge pages while a payment webhook is settling.
+  // Once any projection says the order is paid/refunded, suppress an older
+  // awaiting row too; otherwise a stale page could resurrect a Pay action.
+  const settledRequestIds = new Set<string>();
   for (const entry of entries) {
     if (!isDocumentShareEntry(entry)) continue;
     const requestId = documentShareRequestId(entry.id);
@@ -197,6 +201,13 @@ export function projectFeedDrivePayments(entries: ConsentCenterEntry[], now = Da
       Number(metadata.paymentAmountCents) !== 1000 ||
       nonEmptyString(metadata.paymentCurrency).toLowerCase() !== "usd"
     ) continue;
+    const paymentStatus = nonEmptyString(metadata.paymentStatus).toLowerCase();
+    if (paymentStatus === "paid" || paymentStatus === "refunded") {
+      settledRequestIds.add(requestId);
+      byRequest.delete(requestId);
+      continue;
+    }
+    if (settledRequestIds.has(requestId)) continue;
     const status = paymentState(entry, now);
     if (!status) {
       // Expired request rows may be emitted as history, but must retain a

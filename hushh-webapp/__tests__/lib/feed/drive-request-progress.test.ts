@@ -226,6 +226,19 @@ describe("projectFeedDriveProgress", () => {
     expect(projectFeedDrivePayments([payment])).toEqual([]);
   });
 
+  it("does not resurrect an older payment row beside a settled duplicate", () => {
+    const awaiting = entry({ kind: "outgoing_request", metadata: {
+      ...entry().metadata, direction: "outgoing", paymentStatus: "awaiting_payment",
+      paymentAmountCents: 1000, paymentCurrency: "usd",
+    } });
+    const paid = entry({ kind: "outgoing_request", metadata: {
+      ...entry().metadata, direction: "outgoing", paymentStatus: "paid",
+      paymentAmountCents: 1000, paymentCurrency: "usd",
+    } });
+    expect(projectFeedDrivePayments([awaiting, paid])).toEqual([]);
+    expect(projectFeedDrivePayments([paid, awaiting])).toEqual([]);
+  });
+
   it("keeps one concise payment row per request", () => {
     const first = entry({ id: "document_share_request:11111111-1111-4111-8111-111111111111", kind: "outgoing_request", metadata: {
       ...entry().metadata, direction: "outgoing", paymentStatus: "awaiting_payment",
