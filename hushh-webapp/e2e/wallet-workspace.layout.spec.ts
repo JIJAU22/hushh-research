@@ -19,6 +19,7 @@ const BOUNDARY_MODULES = [
   "@/hooks/use-auth",
   "@/lib/vault/vault-context",
   "@/lib/services/wallet-service",
+  "@/lib/services/api-service",
   "@/lib/services/consent-center-service",
   "@/lib/consent/use-consent-actions",
   "@/lib/pkm/secrets-vault-service",
@@ -191,7 +192,8 @@ async function open(
   const { height = 852, shell = false } = options;
   await page.setViewportSize({ width, height });
   const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("pageerror", (error) => { errors.push(error.message); console.log("FIXTURE_PAGEERROR", error.stack || error.message); });
+  page.on("console", (message) => console.log("FIXTURE_CONSOLE", message.type(), message.text()));
   await page.route("http://wallet-fixture.local/**", async (route) => {
     const requestUrl = new URL(route.request().url());
     const assetPath = requestUrl.searchParams.get("url") ?? requestUrl.pathname;

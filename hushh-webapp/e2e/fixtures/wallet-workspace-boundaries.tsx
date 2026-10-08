@@ -162,6 +162,19 @@ export const toDurationBucket = (durationMs: number) => {
 export const trackApiRequestCompleted = () => undefined;
 export const NativeTestBeacon = () => null;
 
+// The production Wallet Card service imports ApiService through the shared
+// client. Keep that transport inert in this fixture so a layout test never
+// initializes Firebase or performs a network request just to load an empty
+// card state.
+export const ApiService = {
+  getDirectBackendUrl: () => "",
+  apiFetch: async () =>
+    new Response(JSON.stringify({}), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+};
+
 export class ConsentCenterService {
   static async listEntries({ surface, page }: { surface: string; page: number }) {
     return { user_id: "fixture-owner", page, has_more: false, items: [{
