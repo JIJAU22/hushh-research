@@ -745,3 +745,11 @@
     }
   }
 }
+
+@media (max-height: 600px) and (max-width: 767px) {
+  /* Keep the growing capability roster and action inside short phone screens.
+     Compact decorative icons while retaining readable labels and hit targets. */
+  .agent { min-height: 4.5rem; padding: 0.25rem 0; }
+  .agentContents { gap: 0.25rem; }
+  .agentContents > :first-child { width: 2rem; height: 2rem; }
+}
