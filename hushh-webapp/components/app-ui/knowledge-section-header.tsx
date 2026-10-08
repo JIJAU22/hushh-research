@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "@/components/icons";
 
 /** Supporting section beneath the public workspace's shared title and tabs. */
 export function KnowledgeSectionHeader({ title, description, icon: Icon, tone = "blue" }: {
