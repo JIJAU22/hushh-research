@@ -192,8 +192,7 @@ async function open(
   const { height = 852, shell = false } = options;
   await page.setViewportSize({ width, height });
   const errors: string[] = [];
-  page.on("pageerror", (error) => { errors.push(error.message); console.log("FIXTURE_PAGEERROR", error.stack || error.message); });
-  page.on("console", (message) => console.log("FIXTURE_CONSOLE", message.type(), message.text()));
+  page.on("pageerror", (error) => errors.push(error.message));
   await page.route("http://wallet-fixture.local/**", async (route) => {
     const requestUrl = new URL(route.request().url());
     const assetPath = requestUrl.searchParams.get("url") ?? requestUrl.pathname;
