@@ -113,6 +113,10 @@ jobs:
             echo "Commerce preview does not publish or install pod images." >&2; exit 1
           fi
           python3 scripts/deploy/commerce-preview-target.py --target "$REQUESTED_TARGET" --github-env "$GITHUB_ENV"
+          # Cloud Run limits service name + tag to 46 characters. Bind one
+          # bounded tag to this run/attempt for both probes and cleanup.
+          candidate_digest="$(printf '%s' "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" | sha256sum)"
+          echo "DEV_CANDIDATE_TAG=c${candidate_digest:0:12}" >> "$GITHUB_ENV"
 
       - name: Capture deployment timing start
         id: timing-start
@@ -713,7 +717,7 @@ jobs:
         id: verify-candidates
         shell: bash
         env:
-          CANDIDATE_TAG: dev-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          CANDIDATE_TAG: ${{ env.DEV_CANDIDATE_TAG }}
         run: |
           set -euo pipefail
           if [ "${{ steps.scope.outputs.deploy_backend }}" = "true" ]; then
@@ -1515,7 +1519,7 @@ jobs:
           for service in "${{ env.BACKEND_SERVICE }}" "${{ env.FRONTEND_SERVICE }}"; do
             gcloud run services update-traffic "$service" \
               --project="${{ env.GCP_PROJECT_ID }}" --region="${{ env.GCP_REGION }}" \
-              --remove-tags="dev-candidate-${{ github.run_id }}-${{ github.run_attempt }}" --quiet
+              --remove-tags="${{ env.DEV_CANDIDATE_TAG }}" --quiet
           done
 
       - name: Fail workflow when dev release did not end healthy
