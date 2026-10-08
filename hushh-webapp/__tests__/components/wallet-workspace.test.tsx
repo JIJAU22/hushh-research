@@ -174,9 +174,7 @@ describe("WalletWorkspace at scale", () => {
     await screen.findByTestId("wallet-add-collection");
     fireEvent.click(screen.getByRole("tab", { name: "Add" }));
     fillCard();
-    // Finish the async save and tab switch before navigating the Cards pane;
-    // its inactive copy can expose the saved card before that switch settles.
-    await act(async () => { fireEvent.click(screen.getByTestId("secure-card-save")); });
+    fireEvent.click(screen.getByTestId("secure-card-save"));
     await screen.findByTestId("wallet-selected-card");
     expect(screen.getByRole("button", { name: "Open New card, ending 4242" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("tab", { name: "Cards" })).toHaveAttribute("aria-selected", "true");
