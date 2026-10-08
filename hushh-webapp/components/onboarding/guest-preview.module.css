@@ -673,11 +673,19 @@
   .agentHint {
     font-size: var(--type-caption1-size, 13px);
   }
+  /* Nine agents need three compact rows. Keep labels readable and each
+     tile above the 44px hit-target minimum, with the next action in view. */
   .agents {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     row-gap: 0.25rem;
   }
   .agent {
-    min-height: 5rem;
+    min-height: 4.5rem;
+    padding: 0.25rem 0;
+  }
+  .agentContents > :first-child {
+    width: 2.5rem;
+    height: 2.5rem;
   }
   .agentContents {
     gap: 0.25rem;
