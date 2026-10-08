@@ -56,6 +56,33 @@ import {
   ProfilePaneSecurityIcon,
   ProfilePaneSignOutIcon,
 } from "@/components/profile/profile-pane-icons";
+import {
+  ProfileInnerPeopleIcon,
+  ProfileInnerReviewIcon,
+} from "@/components/profile/profile-inner-icons";
+import {
+  ProfileSecondaryFingerprintIcon,
+  ProfileSecondaryInboxIcon,
+  ProfileSecondaryLocationIcon,
+  ProfileSecondaryPassphraseIcon,
+  ProfileSecondaryReceiptIcon,
+  ProfileSecondaryRefreshIcon,
+  ProfileSecondaryUnlinkIcon,
+  ProfileSecondaryVisibilityIcon,
+} from "@/components/profile/profile-secondary-icons";
+import {
+  ProfileAccountDeleteIcon,
+  ProfileAccountMailIcon,
+  ProfileAccountNameIcon,
+  ProfileAccountPhoneIcon,
+  ProfileAccountProviderIcon,
+  ProfileAccountResetIcon,
+  ProfileAccountWalletIcon,
+} from "@/components/profile/profile-your-account-icons";
+import accountStyles from "@/components/profile/profile-your-account.module.css";
+import auxiliaryTabStyles from "@/components/profile/profile-auxiliary-tabs.module.css";
+import secondaryTypographyStyles from "@/components/profile/profile-secondary-typography.module.css";
+import { ProfileAppearancePreferences } from "@/components/profile/profile-appearance-preferences";
 import { toast } from "sonner";
 
 import {
@@ -3334,7 +3361,12 @@ function ProfilePageContent({
   );
 
   const accessContent = (
-    <div className="space-y-4 sm:space-y-5">
+    <div
+      className={cn(
+        "space-y-4 sm:space-y-5",
+        isPanePresentation && secondaryTypographyStyles.paneAccess,
+      )}
+    >
       <PkmAccessManagerPanel
         signedIn={Boolean(user)}
         loading={profileManagerLoading}
@@ -3358,7 +3390,7 @@ function ProfilePageContent({
 
       <SettingsGroup>
         <SettingsRow
-          icon={LocationAgentIcon}
+          icon={isPanePresentation ? ProfileSecondaryLocationIcon : LocationAgentIcon}
           iconTone="capability"
           title="Location sharing"
           description="Manage live location."
@@ -3368,7 +3400,7 @@ function ProfilePageContent({
           onClick={() => router.push(ROUTES.ONE_LOCATION)}
         />
         <SettingsRow
-          icon={ConsentAgentIcon}
+          icon={isPanePresentation ? ProfileInnerReviewIcon : ConsentAgentIcon}
           iconTone="capability"
           title="Consent center"
           description="Review sharing."
@@ -3378,7 +3410,7 @@ function ProfilePageContent({
           onClick={() => router.push(ROUTES.CONSENTS)}
         />
         <SettingsRow
-          icon={DiscoverableRowIcon}
+          icon={isPanePresentation ? ProfileInnerPeopleIcon : DiscoverableRowIcon}
           iconTone="capability"
           title="Find and connect me by phone number"
           description={contactDiscoverableStatusText}
@@ -3396,7 +3428,7 @@ function ProfilePageContent({
           }
         />
         <SettingsRow
-          icon={MarketplaceAgentIcon}
+          icon={isPanePresentation ? ProfileSecondaryVisibilityIcon : MarketplaceAgentIcon}
           iconTone="capability"
           title="Marketplace visibility"
           description={marketplaceStatusText}
@@ -3426,10 +3458,10 @@ function ProfilePageContent({
   };
 
   const accountContent = (
-    <div className="profile-account-content">
+    <div className={cn("profile-account-content", isPanePresentation && accountStyles.paneAccountContent)}>
       <SettingsGroup title="Identity">
         <SettingsRow
-          icon={AccountProfileIcon}
+          icon={isPanePresentation ? ProfileAccountNameIcon : AccountProfileIcon}
           iconTone="capability"
           title="Display name"
           description={user.displayName || "Not available"}
@@ -3442,7 +3474,7 @@ function ProfilePageContent({
         />
         {editingDisplayName ? (
           <div
-            className="px-4 pb-3"
+            className={cn("px-4 pb-3", isPanePresentation && accountStyles.paneEditor)}
             data-testid="profile-account-display-name-editor"
           >
             <DisplayNameEditor
@@ -3453,13 +3485,13 @@ function ProfilePageContent({
           </div>
         ) : null}
         <SettingsRow
-          icon={GmailAgentIcon}
+          icon={isPanePresentation ? ProfileAccountMailIcon : GmailAgentIcon}
           iconTone="capability"
           title="Mail"
           description={user.email || "Not available"}
         />
         <SettingsRow
-          icon={PhoneRowIcon}
+          icon={isPanePresentation ? ProfileAccountPhoneIcon : PhoneRowIcon}
           iconTone="capability"
           title="Phone number"
           description={phoneSummaryText}
@@ -3474,17 +3506,19 @@ function ProfilePageContent({
           }
         />
         <SettingsRow
-          leading={
+          icon={isPanePresentation ? ProfileAccountProviderIcon : undefined}
+          iconTone="capability"
+          leading={isPanePresentation ? undefined : (
             <span className="profile-account-provider-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
               <ProviderIcon providerId={provider.id} email={user.email} />
             </span>
-          }
+          )}
           title="Sign-in provider"
           description={provider.name}
         />
         {walletCardEntryEnabled ? (
           <SettingsRow
-            icon={WalletAgentIcon}
+            icon={isPanePresentation ? ProfileAccountWalletIcon : WalletAgentIcon}
             iconTone="capability"
             className="profile-account-service-row"
             title={WALLET_CARD_COPY.profileEntry.title}
@@ -3496,7 +3530,7 @@ function ProfilePageContent({
       </SettingsGroup>
       <SettingsGroup title="Account actions">
         <SettingsRow
-          icon={ResetRowIcon}
+          icon={isPanePresentation ? ProfileAccountResetIcon : ResetRowIcon}
           iconTone="capability"
           className="profile-account-reset-row"
           title="Reset account"
@@ -3505,7 +3539,7 @@ function ProfilePageContent({
           onClick={() => void handleResetClick()}
         />
         <SettingsRow
-          icon={DeleteRowIcon}
+          icon={isPanePresentation ? ProfileAccountDeleteIcon : DeleteRowIcon}
           iconTone="capability"
           className="profile-account-delete-row"
           testId="profile-account-delete-row"
@@ -3521,6 +3555,18 @@ function ProfilePageContent({
 
   const preferencesContent = (
     <div className="profile-preferences-content space-y-4">
+      {isPanePresentation ? (
+        <ProfileAppearancePreferences
+          accent={appAccent}
+          onAccentChange={writeAccent}
+          onGeminiClick={() =>
+            updateProfileView({ panel: "preferences", detail: "gemini" }, "push")
+          }
+          onVoiceClick={() =>
+            updateProfileView({ panel: "preferences", detail: "voice" }, "push")
+          }
+        />
+      ) : (
       <SettingsGroup>
         <SettingsRow
           className="profile-preferences-control-row"
@@ -3604,6 +3650,7 @@ function ProfilePageContent({
           }
         />
       </SettingsGroup>
+      )}
       <CommunicationPreferencesSection
         userId={user?.uid ?? null}
         vaultKey={vaultKey}
@@ -3617,7 +3664,7 @@ function ProfilePageContent({
     <div className="space-y-4">
       <SettingsGroup>
         <SettingsRow
-          icon={FingerprintProfileIcon}
+          icon={isPanePresentation ? ProfilePaneSecurityIcon : FingerprintProfileIcon}
           iconTone="capability"
           title="Vault methods"
           description="Passphrase, passkey, and unlock method."
@@ -3631,7 +3678,7 @@ function ProfilePageContent({
   );
 
   const supportContent = (
-    <div className="mx-auto flex w-full max-w-[580px] flex-col px-0">
+    <div className={cn("mx-auto flex w-full max-w-[580px] flex-col px-0", auxiliaryTabStyles.support)}>
       {supportComposerState.status === "sent" ? (
         <section
           aria-labelledby="support-success-heading"
@@ -3795,10 +3842,15 @@ function ProfilePageContent({
   );
 
   const gmailContent = (
-    <div className="space-y-4 sm:space-y-5">
+    <div
+      className={cn(
+        "space-y-4 sm:space-y-5",
+        isPanePresentation && secondaryTypographyStyles.paneGmail,
+      )}
+    >
       <SettingsGroup>
         <SettingsRow
-          icon={GmailAgentIcon}
+          icon={isPanePresentation ? ProfileAccountMailIcon : GmailAgentIcon}
           iconTone="capability"
           title="Connection"
           description={gmailSettingsDescription}
@@ -3813,7 +3865,7 @@ function ProfilePageContent({
           }
         />
         <SettingsRow
-          icon={SyncRowIcon}
+          icon={isPanePresentation ? ProfileSecondaryRefreshIcon : SyncRowIcon}
           iconTone="capability"
           title="Actions"
           description="Sync, receipts, or disconnect."
@@ -3830,24 +3882,31 @@ function ProfilePageContent({
   );
 
   const connectedSystemsContent = (
-    <ConnectedSystemsPanel
-      cacheUserId={user?.uid}
-      vaultOwnerToken={vaultOwnerToken}
-      onRequestUnlock={() => requestVaultUnlock("profile_data")}
-      profile={{
-        displayName: user?.displayName,
-        email: user?.email,
-        phone: phoneNumber,
-      }}
-    />
+    <div className={auxiliaryTabStyles.connectedSystems}>
+      <ConnectedSystemsPanel
+        cacheUserId={user?.uid}
+        vaultOwnerToken={vaultOwnerToken}
+        onRequestUnlock={() => requestVaultUnlock("profile_data")}
+        profile={{
+          displayName: user?.displayName,
+          email: user?.email,
+          phone: phoneNumber,
+        }}
+      />
+    </div>
   );
 
   const vaultMethodsContent = (
-    <div className="profile-account-content profile-vault-methods-content">
+    <div
+      className={cn(
+        "profile-account-content profile-vault-methods-content",
+        isPanePresentation && secondaryTypographyStyles.paneVaultMethods,
+      )}
+    >
       <SettingsGroup title="Vault">
         {vaultAccess.needsVaultCreation ? (
           <SettingsRow
-            icon={VaultRowIcon}
+            icon={isPanePresentation ? ProfilePaneSecurityIcon : VaultRowIcon}
             iconTone="capability"
             title="Create your vault"
             description="Secure saved details."
@@ -3867,7 +3926,7 @@ function ProfilePageContent({
           <>
             {vaultMethod ? (
               <SettingsRow
-                icon={VaultRowIcon}
+                icon={isPanePresentation ? ProfilePaneSecurityIcon : VaultRowIcon}
                 iconTone="capability"
                 title="Default unlock"
                 trailing={
@@ -3918,7 +3977,7 @@ function ProfilePageContent({
             ) : null}
             {!vaultAccess.canMutateSecureData ? (
               <SettingsRow
-                icon={VaultRowIcon}
+                icon={isPanePresentation ? ProfilePaneSecurityIcon : VaultRowIcon}
                 iconTone="capability"
                 title="Unlock vault"
                 description="Change methods or passphrase."
@@ -3929,7 +3988,7 @@ function ProfilePageContent({
 
             {vaultAccess.canMutateSecureData && recommendedQuickMethod ? (
               <SettingsRow
-                icon={FingerprintProfileIcon}
+                icon={isPanePresentation ? ProfileSecondaryFingerprintIcon : FingerprintProfileIcon}
                 iconTone="capability"
                 title={
                   enrolledPasskeyWrappers.length > 0
@@ -3950,7 +4009,7 @@ function ProfilePageContent({
               return (
                 <SettingsRow
                   key={vaultWrapperKey(wrapper)}
-                  icon={FingerprintProfileIcon}
+                  icon={isPanePresentation ? ProfileSecondaryFingerprintIcon : FingerprintProfileIcon}
                   iconTone="capability"
                   title={
                     enrolledPasskeyWrappers.length > 1
@@ -4012,7 +4071,7 @@ function ProfilePageContent({
 
             {vaultMethod ? (
               <SettingsRow
-                icon={PassphraseRowIcon}
+                icon={isPanePresentation ? ProfileSecondaryPassphraseIcon : PassphraseRowIcon}
                 iconTone="capability"
                 title="Change passphrase"
                 disabled={switchingVaultMethod}
@@ -4028,10 +4087,15 @@ function ProfilePageContent({
   );
 
   const gmailConnectionContent = (
-    <div className="space-y-4 sm:space-y-5">
+    <div
+      className={cn(
+        "space-y-4 sm:space-y-5",
+        isPanePresentation && secondaryTypographyStyles.paneGmail,
+      )}
+    >
       <SettingsGroup title="Connection">
         <SettingsRow
-          icon={GmailAgentIcon}
+          icon={isPanePresentation ? ProfileAccountMailIcon : GmailAgentIcon}
           iconTone="capability"
           title="Status"
           description={gmailSettingsDescription}
@@ -4039,7 +4103,7 @@ function ProfilePageContent({
           stackTrailingOnMobile
         />
         <SettingsRow
-          icon={InboxRowIcon}
+          icon={isPanePresentation ? ProfileSecondaryInboxIcon : InboxRowIcon}
           iconTone="capability"
           title="Inbox"
           description={
@@ -4051,7 +4115,7 @@ function ProfilePageContent({
           }
         />
         <SettingsRow
-          icon={SyncRowIcon}
+          icon={isPanePresentation ? ProfileSecondaryRefreshIcon : SyncRowIcon}
           iconTone="capability"
           title="Latest sync"
           description={gmailLastSyncText}
@@ -4077,7 +4141,7 @@ function ProfilePageContent({
     <SettingsGroup title="Actions">
       {gmailPresentation.isConnected ? (
         <SettingsRow
-          icon={SyncRowIcon}
+          icon={isPanePresentation ? ProfileSecondaryRefreshIcon : SyncRowIcon}
           iconTone="capability"
           title="Sync now"
           description="Fetch new receipt mail messages and refresh extracted records."
@@ -4087,7 +4151,7 @@ function ProfilePageContent({
         />
       ) : (
         <SettingsRow
-          icon={GmailAgentIcon}
+          icon={isPanePresentation ? ProfileAccountMailIcon : GmailAgentIcon}
           iconTone="capability"
           title={
             gmailPresentation.state === "needs_reauthentication"
@@ -4102,7 +4166,7 @@ function ProfilePageContent({
       )}
 
       <SettingsRow
-        icon={SyncRowIcon}
+        icon={isPanePresentation ? ProfileSecondaryRefreshIcon : SyncRowIcon}
         iconTone="capability"
         title="Refresh status"
         description="Re-check your Mail connection, sync status, and inbox details."
@@ -4112,7 +4176,7 @@ function ProfilePageContent({
       />
 
       <SettingsRow
-        icon={MemoryAgentIcon}
+        icon={isPanePresentation ? ProfileSecondaryReceiptIcon : MemoryAgentIcon}
         iconTone="capability"
         title="Open receipts"
         description="Review synced receipts, merchants, and extracted totals."
@@ -4122,7 +4186,7 @@ function ProfilePageContent({
 
       {gmailPresentation.isConnected ? (
         <SettingsRow
-          icon={DisconnectRowIcon}
+          icon={isPanePresentation ? ProfileSecondaryUnlinkIcon : DisconnectRowIcon}
           iconTone="capability"
           title="Disconnect Mail"
           description="Revoke Mail, stop future syncs, and delete Mail receipt data."
@@ -4227,7 +4291,7 @@ function ProfilePageContent({
               onCompleted={handleAccountPhoneCompleted}
               onCancel={popProfileStack}
               confirmLabel="Save phone number"
-              className="gap-5"
+              className={cn("gap-5", isPanePresentation && accountStyles.phoneDetail)}
               helperText={
                 phoneNumber
                   ? "Enter the new phone number."
@@ -4326,12 +4390,20 @@ function ProfilePageContent({
         title: selectedConnection.requesterLabel,
         description: "Scopes and access.",
         content: (
-          <PkmAccessConnectionDetailPanel
-            connection={selectedConnection}
-            onRevokeAccess={async (scope) => {
-              await handleRevoke(scope);
-            }}
-          />
+          <div
+            className={
+              isPanePresentation
+                ? secondaryTypographyStyles.paneAccess
+                : undefined
+            }
+          >
+            <PkmAccessConnectionDetailPanel
+              connection={selectedConnection}
+              onRevokeAccess={async (scope) => {
+                await handleRevoke(scope);
+              }}
+            />
+          </div>
         ),
       });
     }
@@ -4355,6 +4427,7 @@ function ProfilePageContent({
       ...buildProfileLegalStackEntries({
         detail: activeDetail,
         updateView: updateProfileView,
+        paneIcons: isPanePresentation,
       }),
     );
   } else if (!routeBlockedByVault && activePanel === "preferences") {
@@ -4431,7 +4504,7 @@ function ProfilePageContent({
         content: (
           <SettingsGroup title={PROFILE_LABELS.accountAccess}>
             <SettingsRow
-              icon={SignOutProfileIcon}
+              icon={isPanePresentation ? ProfilePaneSignOutIcon : SignOutProfileIcon}
               iconTone="capability"
               title="Sign out"
               description="Sign out on this device."
@@ -4446,7 +4519,7 @@ function ProfilePageContent({
         key: "detail:trusted-devices",
         title: "Trusted devices",
         description: "Devices connected to your private agent.",
-        content: <TrustedDevicesPage />,
+        content: <TrustedDevicesPage panePresentation={isPanePresentation} />,
       });
     }
   } else if (!routeBlockedByVault && activePanel === "gmail") {
@@ -4476,7 +4549,7 @@ function ProfilePageContent({
       key: "panel:referrals",
       title: PROFILE_LABELS.referrals,
       description: "Your link and referrals.",
-      content: <ReferralsPanel />,
+      content: <ReferralsPanel panePresentation={isPanePresentation} />,
     });
   } else if (!routeBlockedByVault && activePanel === "support") {
     profileStackEntries.push({
@@ -4640,7 +4713,11 @@ function ProfilePageContent({
       as="div"
       width="reading"
       fitContent
-      className={cn("relative isolate", isPanePresentation ? "profile-pane-page" : "pb-3")}
+      className={cn(
+        "relative isolate",
+        isPanePresentation ? "profile-pane-page" : "pb-3",
+        isPanePresentation && activePanel !== null && "profile-pane-page--inner",
+      )}
       nativeTest={
         isPanePresentation
           ? undefined
@@ -4830,7 +4907,10 @@ function ProfilePageContent({
       </AlertDialog>
 
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <AlertDialogContent className="w-[calc(100%-1rem)] sm:max-w-lg">
+        <AlertDialogContent
+          className={cn("w-[calc(100%-1rem)] sm:max-w-lg", isPanePresentation && accountStyles.accountDialog, isPanePresentation && accountStyles.dangerDialog)}
+          overlayClassName={isPanePresentation ? accountStyles.accountDialogOverlay : undefined}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-[color:var(--app-destructive)]">
               <Icon icon={AlertTriangle} size="md" />
@@ -4863,7 +4943,10 @@ function ProfilePageContent({
       </AlertDialog>
 
       <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
-        <AlertDialogContent className="w-[calc(100%-1rem)] sm:max-w-lg">
+        <AlertDialogContent
+          className={cn("w-[calc(100%-1rem)] sm:max-w-lg", isPanePresentation && accountStyles.accountDialog)}
+          overlayClassName={isPanePresentation ? accountStyles.accountDialogOverlay : undefined}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <Icon icon={RefreshCw} size="md" />
