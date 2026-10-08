@@ -77,6 +77,6 @@ export function assertBusinessMemoryTarget(
     throw new Error("This would combine different or unidentified businesses. Nothing was changed.");
   // A create replaces the whole existing entity. A narrowed consent selection
   // must not erase fields the owner previously saved (also checked on retries).
-  if (String(card.merge_mode || card.merge_decision?.merge_mode) === "create_entity")
+  if (String(card.merge_decision?.merge_mode || "create_entity").trim().toLowerCase() === "create_entity")
     throw new Error("This business already exists. Review an update instead of replacing its saved details.");
 }

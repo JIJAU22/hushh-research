@@ -11,7 +11,8 @@ export function businessReviewFields(card: AgentPkmPreviewCard): BusinessReviewF
     if (value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length) {
       for (const [key, child] of Object.entries(value)) {
         if (["__proto__", "prototype", "constructor"].includes(key)) throw new Error("Invalid business field.");
-        if (key !== "_business_origin") walk(child, [...path, key]);
+        const writerBookkeeping = !path.length && ["entity_id", "created_at", "updated_at"].includes(key);
+        if (key !== "_business_origin" && !writerBookkeeping) walk(child, [...path, key]);
       }
     } else if (path.length) fields.push({ id: JSON.stringify(path), path,
       label: path.map(key => key.replaceAll("_", " ")).join(" › "), value });
@@ -58,7 +59,12 @@ export function selectBusinessReviewFields(card: AgentPkmPreviewCard, selectedId
   delete result.context_quotes;
   // Generated readable metadata must be rebuilt from approved content. A model
   // summary of the original full profile is not consent to store omitted facts.
-  if (result.structure_decision) delete result.structure_decision.summary_projection;
+  if (result.structure_decision) {
+    delete result.structure_decision.summary_projection;
+    // This explanation reaches the plaintext mutation receipt. Never carry
+    // content-derived prose from the unfiltered model preview into that plan.
+    delete result.structure_decision.explanation;
+  }
   if (result.manifest_draft) result.manifest_draft.summary_projection = {};
   if (result.retrieval_hints) delete result.retrieval_hints.aliases;
   return result;

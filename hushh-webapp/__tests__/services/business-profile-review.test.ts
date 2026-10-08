@@ -37,8 +37,8 @@ const args = (cards = [card()]) => ({ job: createBusinessReviewJob("owner", cand
 describe("business profile reviewed-memory boundary", () => {
   it("freezes approved nested fields without excluded payloads or summaries and replays them exactly", async () => {
     const original = { ...card(), source_text: "Secret phone +15555550100", context_quotes: ["+15555550100"],
-      structure_decision: { target_domain: "professional", summary_projection: { phone: "+15555550100" } },
-      candidate_payload: { businesses: { entities: { mem_one: { name: "Approved", contact: { phone: "+15555550100", website: "https://approved.test" } } },
+      structure_decision: { target_domain: "professional", explanation: "The phone is +15555550100", summary_projection: { phone: "+15555550100" } },
+      candidate_payload: { businesses: { entities: { mem_one: { name: "Approved", entity_id: "mem_one", updated_at: "writer metadata", contact: { phone: "+15555550100", website: "https://approved.test" } } },
         unreviewed: "+15555550100" } } };
     const fields = businessReviewFields(original);
     const projected = selectBusinessReviewFields(original, fields.filter(field => field.path.at(-1) !== "phone").map(field => field.id))!;
