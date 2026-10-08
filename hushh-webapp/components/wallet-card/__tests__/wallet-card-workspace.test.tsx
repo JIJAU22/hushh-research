@@ -1,4 +1,5 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { registerBackLayer, unwindBackLayer } from "@/lib/navigation/back-layers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
@@ -17,7 +18,7 @@ vi.mock("@/lib/navigation/use-scroll-reset", () => ({ useScrollReset: () => {} }
 vi.mock("@/components/app-ui/native-test-beacon", () => ({ NativeTestBeacon: () => null }));
 vi.mock("@/components/profile/pkm-settings-shell", () => ({ PkmSettingsShell: ({ children }: { children: ReactNode }) => <div>{children}</div> }));
 vi.mock("@/components/wallet-card/wallet-card-confirm-dialog", () => ({ WalletCardConfirmDialog: () => null }));
-vi.mock("@/components/wallet-card/wallet-card-manage", () => ({ WalletCardManage: ({ card, shareLink }: { card: { displayName: string }; shareLink: { shareUrl: string } | null }) => <div>{card.displayName}<span>{shareLink?.shareUrl}</span></div> }));
+vi.mock("@/components/wallet-card/wallet-card-manage", () => ({ WalletCardManage: ({ card, shareLink, onAction }: { card: { displayName: string }; shareLink: { shareUrl: string } | null; onAction: (action: "edit" | "preview") => void }) => <div>{card.displayName}<span>{shareLink?.shareUrl}</span><button onClick={() => onAction("edit")}>Edit profile</button><button onClick={() => onAction("preview")}>Preview profile</button></div> }));
 vi.mock("@/lib/services/wallet-card-service", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/services/wallet-card-service")>(),
   canAddToAppleWallet: () => false,
@@ -25,6 +26,7 @@ vi.mock("@/lib/services/wallet-card-service", async (importOriginal) => ({
     getCard: mocks.getCard,
     ensureCard: mocks.ensureCard,
     readShareLink: mocks.readShareLink,
+    previewAsVisitor: async () => ({ state: "unavailable", message: "Preview unavailable" }),
     subscribe: (_owner: string, changed: () => void) => { mocks.changed = changed; return () => { mocks.changed = null; }; },
   },
 }));
@@ -40,6 +42,32 @@ describe("Wallet Profile owner isolation", () => {
     mocks.changed = null;
   });
   afterEach(cleanup);
+
+  it("closes embedded edit and preview before the containing card and cleans up on unmount", async () => {
+    mocks.getCard.mockResolvedValue({ enabled: true, exists: true, card: { status: "active", displayName: "Owner profile", cardPayload: {} } });
+    const view = render(<WalletCardWorkspace embedded />);
+    await screen.findByRole("button", { name: "Edit profile" });
+    const parent = vi.fn(() => true);
+    const release = registerBackLayer({ pathname: "/one/wallet", depth: 1, back: parent });
+    try {
+      for (const action of ["Edit profile", "Preview profile"]) {
+        fireEvent.click(screen.getByRole("button", { name: action }));
+        expect(screen.queryByRole("button", { name: "Edit profile", exact: true })).toBeNull();
+        act(() => { expect(unwindBackLayer("/one/wallet")).toBe(true); });
+        expect(screen.getByRole("button", { name: "Edit profile" })).toBeVisible();
+        expect(parent).not.toHaveBeenCalled();
+      }
+      act(() => { expect(unwindBackLayer("/one/wallet")).toBe(true); });
+      expect(parent).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+      view.rerender(<WalletCardWorkspace embedded active={false} />);
+      act(() => { expect(unwindBackLayer("/one/wallet")).toBe(true); });
+      expect(parent).toHaveBeenCalledTimes(2);
+      view.rerender(<WalletCardWorkspace embedded />);
+      view.unmount();
+    } finally { release(); }
+    expect(unwindBackLayer("/one/wallet")).toBe(false);
+  });
 
   it("does not show a prior owner's late automatic creation after account switch", async () => {
     let finishFirstOwner!: (value: unknown) => void;
@@ -102,6 +130,9 @@ describe("Wallet Profile owner isolation", () => {
     mocks.getCard.mockResolvedValue({ enabled: true, exists: true, card });
     const view = render(<WalletCardWorkspace embedded />);
     await screen.findByText("First owner");
+    // Settle the initial manage-stage refresh before simulating a new rotation.
+    // Notifications during that read are intentionally coalesced by its owner.
+    await act(async () => {});
     mocks.readShareLink.mockImplementation((owner) => owner === "owner-a" ? null : { shareUrl: "/c/second" });
     let finish!: (result: unknown) => void;
     mocks.ensureCard.mockReturnValue(new Promise((resolve) => { finish = resolve; }));

@@ -73,6 +73,12 @@ Durable persona rationale lives in `docs/reference/operations/hussh-code-persona
 
 Repository rules, skills, workflow packs, tests, generated contracts, and runtime evidence override this kernel when they are more specific.
 
+## Back navigation contracts
+
+Back uses one hierarchy across shell, iOS edge gesture and Android system Back: top overlay, route-scoped feature layer, then authored route parent. Register local nested states with `useBackLayer`; reuse the feature's existing cancel/review-reset callback. Never fall back to raw history for application route Back. The narrowly reviewed pane/auth/error/map history owners are ratcheted against new bypasses.
+
+Every route declares `backVerification` in `hushh-webapp/lib/navigation/app-route-layout.contract.json`, including query parents or an explained entry/redirect/hidden boundary. Add behavior cases when changing query state or nested interactions. Run `cd hushh-webapp && npm run build:back-contracts` after reviewing the cases, commit the source revision and owning contracts, then run `npm run verify:back-contracts`. The independent Back Navigation Contracts job and both required aggregate gates reject failures and skipped checks. A source stamp proves freshness, not the meaning of a new interaction.
+
 ## Project-Wide Bacterial Software Architecture Gate
 
 Parent and child agents must apply [Bacterial Software Architecture](docs/vision/bacterial-software-architecture.md) as a top-level engineering north star.

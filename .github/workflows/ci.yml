@@ -276,6 +276,22 @@ jobs:
           fi
         if: always()
 
+  back-navigation-contracts:
+    name: "Back Navigation Contracts"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: hushh-webapp/package-lock.json
+      - run: npm ci --prefer-offline --no-audit --progress=false
+        working-directory: hushh-webapp
+      - run: npm run verify:back-contracts
+        working-directory: hushh-webapp
+
   preflight-gate:
     name: "Preflight Gate"
     needs:
@@ -285,6 +301,7 @@ jobs:
       - repo-governance
       - paths
       - main-freshness-gate
+      - back-navigation-contracts
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -317,6 +334,11 @@ jobs:
               fail=1
             fi
           done
+
+          if [ "${{ needs['back-navigation-contracts'].result }}" != "success" ]; then
+            echo "Back navigation contracts must pass; skipped checks cannot approve a PR."
+            fail=1
+          fi
 
           if [ "$fail" -ne 0 ]; then
             echo "Preflight failed; skipping expensive web/protocol/integration lanes."
@@ -1084,6 +1106,7 @@ jobs:
       - mcp-package-check
       - integration-check
       - main-freshness-gate
+      - back-navigation-contracts
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1149,6 +1172,11 @@ jobs:
               fail=1
             fi
           done
+
+          if [ "${{ needs['back-navigation-contracts'].result }}" != "success" ]; then
+            echo "Back navigation contracts must pass; skipped checks cannot approve a PR."
+            fail=1
+          fi
 
           if [ "$fail" -ne 0 ]; then
             echo "One or more CI jobs failed."

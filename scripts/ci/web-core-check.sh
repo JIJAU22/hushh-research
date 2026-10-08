@@ -15,5 +15,6 @@ npm run verify:design-system
 npm run verify:docs
 npm run typecheck
 npm run lint
+npm run verify:back-contracts
 
 web_ci_build

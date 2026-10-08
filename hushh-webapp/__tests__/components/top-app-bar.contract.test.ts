@@ -194,7 +194,7 @@ describe("Top app bar responsive contract", () => {
     // An open panel or Location action closes in place; everything else is a
     // step in the trail and retraces.
     expect(back).toContain(
-      "if (profilePanelOpen || locationActionOpen || connectCircleFlowOpen)",
+      "if (profilePanelOpen || locationActionOpen || connectCircleFlowOpen || sameScreenParent)",
     );
     expect(back).toContain('return action(breadcrumb.backHref, "replace")');
     expect(back).toContain("params.navigate(action);");
