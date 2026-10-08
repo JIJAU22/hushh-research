@@ -74,7 +74,6 @@ export function WalletDemoCardDetails({ cardId, profile }: { cardId: string; pro
     ["Phone", payload?.phone || null],
     ["Website", payload?.website || null],
     ["LinkedIn", payload?.linkedin || null],
-    ["GitHub", payload?.github || null],
     ["Portfolio", payload?.portfolio || null],
   ].filter((field): field is [string, string] => Boolean(field[1]));
   return (
