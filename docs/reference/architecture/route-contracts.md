@@ -218,6 +218,16 @@ The access manager is the One-owned `/one/consent` workspace. Legacy
 `/consents` links redirect there while preserving transient query state such as
 the selected review tab and request identifier.
 
+## Hierarchical Back verification
+
+The runtime parent authority remains `resolveTopShellBackAction`. Shell Back and iOS edge gestures call `navigateTopShellBack`; Android calls the same owner after overlay and feature handling. Precedence is top overlay, deepest matching feature layer, route parent, then native root minimise. An overlay refusing Escape consumes Back. A same-path query climb uses replace/contextual navigation.
+
+Memory registers card, nested path and category unwind without putting private details or queries in URLs. Location Share/Ask unwind their selection steps before leaving the flow; Share also clears its consent-review flag. SMS Circle retains Settings/SOS origin. Circle-owned tasks retain their Circle parent. Profile keeps a validated origin through detail, panel and root.
+
+`backVerification` in the existing route layout contract is verification metadata, not a second runtime router. Its cases exercise production parent resolution, canonical targets, query replacements and eventual root reachability. Every physical route needs coverage, every Location action needs cases for Now/People/Links, and new history bypasses fail. Existing entry, redirect and hidden surfaces explicitly describe their shell boundary; this gate does not invent a parent for them.
+
+After reviewing changed behavior and updating cases, run `npm run build:back-contracts`. It runs the shared hierarchy regressions before stamping the source revision. CI runs `npm run verify:back-contracts` read-only, including stale-source checks, mutation controls, Memory integration and native gesture regressions. Both Preflight Gate and CI Status Gate require success, including on documentation-only PRs. Authenticated browser and physical-device certification remains a separate release check.
+
 ## Shell and navigation
 
 The standard navigation is four layers and one law, defined once in
@@ -327,13 +337,3 @@ private vault and saves the encrypted key through the existing settings route.
 - [api-contracts.md](./api-contracts.md) describes the API surface itself.
 - `hushh-webapp/lib/navigation/routes.ts` is the code-owned navigation source of truth.
 - [../mobile/capacitor-parity-audit.md](../mobile/capacitor-parity-audit.md) defines the stricter mobile release gate layered on top of route contracts.
-
-## Hierarchical Back verification
-
-The runtime parent authority remains `resolveTopShellBackAction`. Shell Back and iOS edge gestures call `navigateTopShellBack`; Android calls the same owner after overlay and feature handling. Precedence is top overlay, deepest matching feature layer, route parent, then native root minimise. An overlay refusing Escape consumes Back. A same-path query climb uses replace/contextual navigation.
-
-Memory registers card, nested path and category unwind without putting private details or queries in URLs. Location Share/Ask unwind their selection steps before leaving the flow; Share also clears its consent-review flag. SMS Circle retains Settings/SOS origin. Circle-owned tasks retain their Circle parent. Profile keeps a validated origin through detail, panel and root.
-
-`backVerification` in the existing route layout contract is verification metadata, not a second runtime router. Its cases exercise production parent resolution, canonical targets, query replacements and eventual root reachability. Every physical route needs coverage, every Location action needs cases for Now/People/Links, and new history bypasses fail. Existing entry, redirect and hidden surfaces explicitly describe their shell boundary; this gate does not invent a parent for them.
-
-After reviewing changed behavior and updating cases, run `npm run build:back-contracts`. It runs the shared hierarchy regressions before stamping the source revision. CI runs `npm run verify:back-contracts` read-only, including stale-source checks, mutation controls, Memory integration and native gesture regressions. Both Preflight Gate and CI Status Gate require success, including on documentation-only PRs. Authenticated browser and physical-device certification remains a separate release check.
