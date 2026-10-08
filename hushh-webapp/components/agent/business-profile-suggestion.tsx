@@ -12,7 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { BusinessSuggestionService } from "@/lib/services/business-suggestion-service";
 import { createAgentPkmCaptureGuard } from "@/lib/agent/agent-pkm-capture-runtime";
 import { connectorMemorySharingImpact, prepareConnectorMemoryReview } from "@/lib/agent/connector-memory-review";
-import { attachBusinessOrigin, buildSyntheticBusinessPreview, BusinessOriginValidationError, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
+import { attachBusinessOrigin, buildSyntheticBusinessPreview, BusinessOriginValidationError, businessCandidateSnapshot, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
 import type { AgentPkmPreviewCard } from "@/lib/agent/agent-pkm-memory";
 
 type Props = {
@@ -144,7 +144,8 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     await guard.assertCurrent();
     const fresh = await BusinessSuggestionService.get(context.vaultOwnerToken!, controller.current?.signal);
     await guard.assertCurrent();
-    if (!review || !fresh.candidates.some(candidate => candidate.businessUid === review.candidate.businessUid))
+    const refreshedCandidate = review && fresh.candidates.find(candidate => candidate.businessUid === review.candidate.businessUid);
+    if (!review || !refreshedCandidate || businessCandidateSnapshot(review.candidate) !== businessCandidateSnapshot(refreshedCandidate))
       throw new Error("The suggestion is no longer available. Nothing new was saved.");
   };
   const update = (next: Review) => setState({ context, review: next });

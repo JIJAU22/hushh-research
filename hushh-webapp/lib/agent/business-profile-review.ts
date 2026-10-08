@@ -9,6 +9,24 @@ import { withPkmSaveJobLock } from "@/lib/pkm/pkm-save-job";
 import { businessMemoryEntity } from "@/lib/pkm/business-memory-origin";
 
 export type BusinessCandidate = BusinessSuggestion["candidates"][number];
+
+/**
+ * A stable listing UID does not mean the public fields are unchanged. Keep a
+ * deterministic snapshot so a stale review cannot be written after refresh.
+ */
+function stableCandidateValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableCandidateValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableCandidateValue(child)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+export function businessCandidateSnapshot(candidate: BusinessCandidate): string {
+  return stableCandidateValue(candidate);
+}
 export class BusinessOriginValidationError extends Error {
   constructor(readonly reason: "path" | "id" | "scope") {
     super("The proposed destination changed. Review the details again.");

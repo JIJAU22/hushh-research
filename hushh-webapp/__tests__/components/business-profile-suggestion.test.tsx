@@ -11,6 +11,7 @@ vi.mock("@/lib/agent/business-profile-review", () => ({
   loadBusinessReview: mocks.load, saveBusinessReview: mocks.save, decideBusinessReview: mocks.decide,
   createBusinessReviewJob: mocks.create, attachBusinessOrigin: mocks.attach,
   buildSyntheticBusinessPreview: mocks.syntheticPreview,
+  businessCandidateSnapshot: (candidate: unknown) => JSON.stringify(candidate),
   businessDraftMessage: (_candidate: unknown, name: string, website: string) => `${name}\n${website}`,
 }));
 vi.mock("@/lib/agent/connector-memory-review", () => ({ prepareConnectorMemoryReview: mocks.prepare,
@@ -114,6 +115,16 @@ describe("post-onboarding business suggestion", () => {
     render(<BusinessProfileSuggestion {...props} />);
     fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
     await screen.findByText("Synthetic company detail"); mocks.get.mockResolvedValue({ candidates: [] });
+    fireEvent.click(screen.getByTestId("agent-pkm-review-save"));
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(3));
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it("rejects a changed public snapshot even when the business UID is unchanged", async () => {
+    mocks.syntheticPreview.mockReturnValue([]);
+    render(<BusinessProfileSuggestion {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
+    await screen.findByText("Synthetic company detail");
+    mocks.get.mockResolvedValue({ candidates: [{ ...candidate, draft: { ...candidate.draft, website: "https://changed.test" } }] });
     fireEvent.click(screen.getByTestId("agent-pkm-review-save"));
     await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(3));
     expect(mocks.save).not.toHaveBeenCalled();
