@@ -3520,9 +3520,10 @@ function ProfilePageContent({
   );
 
   const preferencesContent = (
-    <div className="space-y-4">
+    <div className="profile-preferences-content space-y-4">
       <SettingsGroup>
         <SettingsRow
+          className="profile-preferences-control-row"
           icon={AppearanceRowIcon}
           iconTone="capability"
           title="Appearance"
@@ -3530,12 +3531,13 @@ function ProfilePageContent({
           trailing={
             <ThemeToggleLean
               size="expanded"
-              className="w-full sm:w-60 min-w-0"
+              className="h-12 w-full min-w-0 p-0.5 sm:w-full [&_button]:min-h-11 [&_span.text-xs]:inline"
             />
           }
           stackTrailingOnMobile
         />
         <SettingsRow
+          className="profile-preferences-control-row"
           icon={AccentRowIcon}
           iconTone="capability"
           title="Accent"
@@ -3548,7 +3550,7 @@ function ProfilePageContent({
               }}
             >
               <SelectTrigger
-                className="w-full sm:w-60 min-w-[11rem]"
+                className="h-11 w-full min-w-0"
                 aria-label="App accent color"
               >
                 <SelectValue placeholder="iOS Blue" />

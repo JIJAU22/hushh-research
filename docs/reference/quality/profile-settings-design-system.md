@@ -47,6 +47,7 @@ Rules:
 5. Description must stay compact; do not write paragraph-length helper text.
 6. Group spacing should come from the shared density variables, not ad-hoc `space-y-*` tuning inside route files.
 7. Inside the Profile pane, every panel and nested detail uses transparent group shells and rows so the pane material remains continuous. Preserve separators and control surfaces; do not limit this treatment to the Profile home screen.
+8. Appearance and accent controls respond to their section width, including narrow panes on desktop. Below 560px, place controls below the label, aligned with its text; retain visible theme labels and touch targets of at least 44px.
 
 ### `SettingsRow`
 

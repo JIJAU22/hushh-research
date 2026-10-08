@@ -2402,6 +2402,44 @@ html.dark .profile-pane-sheet[data-slot="sheet-content"],
   background: transparent !important;
 }
 
+/* Profile can be a narrow pane in a wide viewport. Size controls to the
+   section, so their labels keep the same leading alignment as other rows. */
+.profile-preferences-content {
+  container: profile-preferences / inline-size;
+}
+
+.profile-preferences-content .profile-preferences-control-row {
+  --profile-control-icon-size: 34px;
+}
+
+.profile-preferences-content .profile-preferences-control-row > .grid {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: var(--settings-row-stack-gap);
+}
+
+.profile-preferences-control-row[data-settings-density="compact"] {
+  --profile-control-icon-size: 28px;
+}
+
+.profile-preferences-control-row [data-slot="settings-row-trailing"] {
+  width: 100%;
+  min-width: 0;
+  padding-inline-start: calc(var(--profile-control-icon-size) + var(--settings-row-gap));
+  padding-top: 4px;
+}
+
+@container profile-preferences (min-width: 560px) {
+  .profile-preferences-content .profile-preferences-control-row > .grid {
+    grid-template-columns: minmax(0, 1fr) 240px;
+    row-gap: 0;
+  }
+
+  .profile-preferences-control-row [data-slot="settings-row-trailing"] {
+    padding-inline-start: 0;
+    padding-top: 0;
+  }
+}
+
 .profile-pane-scroll-root .profile-home-content [data-row-layout="settings"] {
   --settings-row-px: 6px !important;
   --settings-row-py: 6px !important;
