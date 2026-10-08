@@ -4375,7 +4375,10 @@ describe("OneLocationAgentPage", () => {
   });
 
   it("renders the canonical Location Settings URL and owns Saved Locations there", async () => {
-    mockGetState.mockResolvedValue({ ...locationState(), circles: [{ id: "circle-sms", name: "SMS Circle", kind: "other", role: "owner", memberCount: 1, memberLimit: 20, isSystem: true, systemKind: "sms" }] });
+    const settingsState = { ...locationState(), circles: [{ id: "circle-sms", name: "SMS Circle", kind: "other" as const, role: "owner" as const, memberCount: 1, memberLimit: 20, isSystem: true, systemKind: "sms" as const }] };
+    mockGetState.mockResolvedValue(settingsState);
+    const { OneLocationStateResource } = await import("@/lib/one-location/one-location-state-resource");
+    OneLocationStateResource.write("user_a", settingsState);
     mockLocationSearchParams("action=settings");
     render(<OneLocationAgentPage />);
     await skipLocationEntryFlow({ expectMain: false });
@@ -4387,7 +4390,7 @@ describe("OneLocationAgentPage", () => {
       screen.getByRole("region", { name: "Saved Locations" }),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Manage sharing" })).toBeNull();
-    fireEvent.click(screen.getByTestId("one-location-sms-contacts-entry"));
+    fireEvent.click(within(screen.getByTestId("one-location-sms-contacts-entry")).getByRole("button"));
     await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith(expect.stringContaining("source=settings"), { scroll: false }));
     const opened = new URL(String(mockRouterPush.mock.calls.at(-1)?.[0]), "https://app.test");
     expect(opened.searchParams.get("circleId")).toBe("circle-sms");

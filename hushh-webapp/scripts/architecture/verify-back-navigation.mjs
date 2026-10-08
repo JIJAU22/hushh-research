@@ -36,7 +36,7 @@ export function historyBypasses(source, file = 'screen.tsx') {
       const target = node.expression.expression.getText(ast);
       const method = ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : node.expression.argumentExpression?.text;
       const isOwner = owners.has(target) || /(^|\.)(history|router)$/.test(target);
-      if ((method === 'back' && isOwner) || (method === 'go' && isOwner && node.arguments[0]?.getText(ast).startsWith('-')) || (['call','apply','bind'].includes(method) && (methods.has(target) || [...owners].some(owner => target === `${owner}.back` || target === `${owner}.go`)))) calls.push(node.getText(ast));
+      if ((method === 'back' && isOwner) || (method === 'go' && isOwner) || (['call','apply','bind'].includes(method) && (methods.has(target) || [...owners].some(owner => target === `${owner}.back` || target === `${owner}.go`)))) calls.push(node.getText(ast));
     }
     ts.forEachChild(node, visit);
   }

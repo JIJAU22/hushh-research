@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { backSourceRevision, validateHistoryBypasses } from './verify-back-navigation.mjs';
 
 test('new router/history Back bypasses fail even when a reviewed owner already exists', () => {
-  for (const call of ['router.back()', 'window.history.back()', 'history.go(-1)', 'const nav = useRouter(); nav.back()', 'const h = window.history; h["back"]()', 'const {back} = history; back()', 'history.back.bind(history)()']) {
+  for (const call of ['router.back()', 'window.history.back()', 'history.go(-1)', 'history.go(delta)', 'const {go} = history; go(delta)', 'const nav = useRouter(); nav.back()', 'const h = window.history; h["back"]()', 'const {back} = history; back()', 'history.back.bind(history)()']) {
     assert.throws(() => validateHistoryBypasses(new Map([['app/new/page.tsx', call]])), /hierarchy bypass/);
   }
   assert.throws(() => validateHistoryBypasses(new Map([['app/global-error.tsx', 'history.back(); history.back();']])), /hierarchy bypass/);

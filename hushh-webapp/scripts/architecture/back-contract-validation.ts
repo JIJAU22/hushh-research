@@ -34,13 +34,14 @@ export function validateBackContracts(entries: readonly Entry[], resolve: Resolv
       const seen = new Set<string>();
       for (let depth = 0; ; depth++) {
         const current = internal(href);
-        const key = current.pathname + "?" + [...current.searchParams].sort().map(([k,v]) => `${k}=${v}`).join("&");
+        current.searchParams.sort();
+        const key = current.pathname + "?" + current.searchParams.toString();
         if (seen.has(key) || depth > entries.length * 2) throw new Error(`Back cycle: ${scenario.href} -> ${href}`);
         seen.add(key);
         const parent = resolve(href);
         if (!parent) {
           const terminal = entries.find(candidate => matches(candidate.route, current.pathname))?.backVerification;
-          if (!terminal || (terminal.kind === "parent" && href === scenario.href)) throw new Error(`Unclassified Back root: ${href}`);
+          if (!terminal || terminal.kind === "parent") throw new Error(`Unclassified Back root: ${href}`);
           break;
         }
         const target = internal(parent.href);
