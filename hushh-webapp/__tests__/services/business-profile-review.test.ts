@@ -149,14 +149,14 @@ describe("business profile reviewed-memory boundary", () => {
   });
   it("a stale Later preserves the other tab's exact pending job", async () => {
     const job = args().job; checkpoint = { version: 1, job };
-    await decideBusinessReview({ ownerId: "owner", vaultKey: "key", decision: "later", assertCurrent: async () => undefined });
+    await decideBusinessReview({ ownerId: "owner", vaultKey: "key", businessUid: candidate.businessUid, decision: "later", assertCurrent: async () => undefined });
     expect(checkpoint?.job).toEqual(job); expect(checkpoint?.decision).toBe("later");
   });
   it("Not me cannot discard a pending job and Later cannot overwrite a completed save", async () => {
     checkpoint = { version: 1, job: args().job };
-    await expect(decideBusinessReview({ ownerId: "owner", vaultKey: "key", decision: "not_me", assertCurrent: async () => undefined })).rejects.toThrow();
+    await expect(decideBusinessReview({ ownerId: "owner", vaultKey: "key", businessUid: candidate.businessUid, decision: "not_me", assertCurrent: async () => undefined })).rejects.toThrow();
     checkpoint = { version: 1, decision: "saved" };
-    await decideBusinessReview({ ownerId: "owner", vaultKey: "key", decision: "later", assertCurrent: async () => undefined });
+    await decideBusinessReview({ ownerId: "owner", vaultKey: "key", businessUid: candidate.businessUid, decision: "later", assertCurrent: async () => undefined });
     expect(checkpoint).toEqual({ version: 1, decision: "saved" });
   });
 });

@@ -48,12 +48,12 @@ export type BusinessReviewCheckpoint = {
   until?: number;
   job?: BusinessReviewJob;
 };
-const FIXTURE_UID = "urn:hushh:business:uat:hushh.ai:v1";
 const resource = (businessUid: string) => `business_profile_review:uat:v1:${encodeURIComponent(businessUid)}`;
 const TTL = 30 * 24 * 60 * 60 * 1000;
 
 /** Control/recovery information only; the authoritative profile stays in PKM. */
-export async function loadBusinessReview(ownerId: string, vaultKey: string, businessUid = FIXTURE_UID) {
+export async function loadBusinessReview(ownerId: string, vaultKey: string, businessUid?: string) {
+  if (!businessUid?.trim()) throw new Error("Business identity is required.");
   const value = await SecureResourceCacheService.readRequired<BusinessReviewCheckpoint>({
     userId: ownerId, vaultKey, resourceKey: resource(businessUid),
   });
@@ -72,7 +72,8 @@ export async function loadBusinessReview(ownerId: string, vaultKey: string, busi
   return value;
 }
 
-export async function persistBusinessReview(ownerId: string, vaultKey: string, value: BusinessReviewCheckpoint, businessUid = FIXTURE_UID) {
+export async function persistBusinessReview(ownerId: string, vaultKey: string, value: BusinessReviewCheckpoint, businessUid?: string) {
+  if (!businessUid?.trim()) throw new Error("Business identity is required.");
   await SecureResourceCacheService.writeRequired({ userId: ownerId, vaultKey,
     resourceKey: resource(businessUid), value, ttlMs: TTL });
 }
@@ -106,27 +107,15 @@ export function businessDraftMessage(candidate: BusinessCandidate, name: string,
 }
 
 /**
- * The UAT test business is already trusted fixture data. Build its review card
- * locally so localhost testing is not blocked by an unavailable Vertex/PKM
- * model. Ordinary directory candidates still use the model-backed preparation
- * path; only the explicitly labeled UAT test identity uses this shortcut.
+ * Build a local card only for explicitly synthetic unit-test fixtures. Live
+ * directory records never use this shortcut and remain model-backed.
  */
 export function buildSyntheticBusinessPreview(candidate: BusinessCandidate, name: string, website: string): AgentPkmPreviewCard[] {
-  const isFixture = candidate.synthetic && candidate.businessUid === "urn:hushh:business:uat:hushh.ai:v1";
-  let isLiveUatDirectory = false;
-  if (!candidate.synthetic && candidate.sourceIdentity.source === "directory" && candidate.sourceIdentity.vertical === "business") {
-    try {
-      const identity = JSON.parse(candidate.sourceIdentity.sourceKey) as Record<string, unknown>;
-      isLiveUatDirectory = identity.source === "uat_test"
-        && typeof identity.source_key === "string"
-        && identity.source_key.startsWith("hushh-ai-");
-    } catch { /* malformed directory identities remain model-backed */ }
-  }
-  // The richer fixture is the production UAT contract. Keeping the guard
-  // strict also prevents ordinary directory candidates from bypassing preparation.
-  if ((!isFixture && !isLiveUatDirectory) || Object.keys(candidate.draft).length < 3) return [];
-  const entityId = isFixture ? "hushh_uat_test_business"
-    : `hushh_uat_${candidate.sourceIdentity.sourceKey.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`.slice(0, 80);
+  // This helper is retained for isolated synthetic test fixtures only. Live
+  // directory candidates—including operator-seeded UAT rows—always use the
+  // model-backed preparation path in the chat component.
+  if (!candidate.synthetic || candidate.sourceIdentity.source !== "uat_fixture" || Object.keys(candidate.draft).length < 3) return [];
+  const entityId = `hushh_fixture_${candidate.sourceIdentity.sourceKey.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`.slice(0, 80);
   const entity = Object.fromEntries(Object.entries({
     ...candidate.draft, name: name.trim(), website: website.trim(),
   }).filter(([, value]) => typeof value === "string" && value.trim())) as Record<string, string>;
@@ -148,8 +137,7 @@ export function buildSyntheticBusinessPreview(candidate: BusinessCandidate, name
 
 /** Keep immutable origin on the agent-selected entity, never invent its destination. */
 export function attachBusinessOrigin(card: AgentPkmPreviewCard, candidate: BusinessCandidate): AgentPkmPreviewCard {
-  const fixture = candidate.businessUid === FIXTURE_UID && candidate.synthetic === true &&
-    candidate.sourceIdentity.source === "uat_fixture" && candidate.sourceIdentity.sourceKey === "hushh.ai:v1";
+  const fixture = candidate.synthetic === true && candidate.sourceIdentity.source === "uat_fixture";
   const directory = candidate.synthetic === false && candidate.sourceIdentity.source === "directory" &&
     !!candidate.sourceIdentity.sourceKey && /^urn:hushh:business:directory:(hotel|healthcare|ria|insurance|business):[a-f0-9]{64}$/.test(candidate.businessUid) &&
     candidate.businessUid.includes(`:directory:${candidate.sourceIdentity.vertical}:`);
