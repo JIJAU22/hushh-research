@@ -1,8 +1,27 @@
-import { useId, type ReactNode, type SVGProps } from "react";
+import { useId, type ReactNode } from "react";
+import Image from "next/image";
 
 import { AGENT_APP_ICON_PALETTE } from "@/lib/design/home-icon-palette";
 
 export type AgentAppIconId = keyof typeof AGENT_APP_ICON_PALETTE;
+
+// The supplied artwork covers nine home agents. Keep the existing vector
+// artwork for the three capabilities without a supplied icon.
+const ARTWORK_BY_ID: Partial<Record<AgentAppIconId, string>> = {
+  messages: "messages",
+  finance: "finance",
+  wallet: "wallet",
+  location: "location",
+  ria: "advisor",
+  gmail: "mail",
+  calendar: "calendar",
+  pkm: "memory",
+  consent: "consent",
+};
+
+export function hasAgentAppArtwork(id: AgentAppIconId): boolean {
+  return ARTWORK_BY_ID[id] !== undefined;
+}
 
 // One 32-unit drawing grid. Filled silhouettes and open counters remain legible
 // at the 40px list size; larger launchers use exactly the same vector artwork.
@@ -97,11 +116,34 @@ const TILE = "M22 0h20c8.2 0 12.3 0 17 4.7S64 13.8 64 22v20c0 8.2 0 12.3-4.7 17S
 export function AgentAppIcon({
   id,
   className,
-  ...props
-}: Omit<SVGProps<SVGSVGElement>, "id"> & { id: AgentAppIconId }) {
+}: { id: AgentAppIconId; className?: string }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const gradientId = `agent-app-${id}-${uid}`;
   const palette = AGENT_APP_ICON_PALETTE[id];
+  const artwork = ARTWORK_BY_ID[id];
+
+  if (artwork) {
+    return (
+      <span className={`${className ?? ""} block overflow-hidden rounded-[24%]`}>
+        <Image
+          src={`/agents-icon-set/${artwork}-light.webp`}
+          alt=""
+          width={256}
+          height={256}
+          unoptimized
+          className="block h-full w-full object-contain dark:hidden"
+        />
+        <Image
+          src={`/agents-icon-set/${artwork}-dark.webp`}
+          alt=""
+          width={256}
+          height={256}
+          unoptimized
+          className="hidden h-full w-full object-contain dark:block"
+        />
+      </span>
+    );
+  }
 
   return (
     <svg
@@ -113,7 +155,6 @@ export function AgentAppIcon({
       className={className}
       aria-hidden="true"
       focusable="false"
-      {...props}
     >
       <defs>
         <linearGradient id={gradientId} x1="32" y1="0" x2="32" y2="64" gradientUnits="userSpaceOnUse">
