@@ -50,6 +50,8 @@ Rules:
 
 ### `SettingsRow`
 
+Every Profile section shares the home menu's glass row highlight on hover and keyboard focus, in light and dark themes. Keep backdrop blur on the outer sheet so nested sections do not add blur layers. Light-mode surfaces remain translucent enough to reveal the colors behind the pane.
+
 Use as the default interactive row pattern.
 
 Rules:

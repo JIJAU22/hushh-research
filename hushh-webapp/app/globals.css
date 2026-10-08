@@ -2189,9 +2189,9 @@ body:has([data-profile-account-preview-root]) nextjs-portal {
     100dvh - var(--profile-pane-top-inset) - var(--profile-pane-bottom-inset)
   );
   --profile-pane-height: min(820px, var(--profile-pane-available-height));
-  --profile-pane-surface: rgba(255, 255, 255, 0.68);
-  --profile-pane-surface-strong: rgba(255, 255, 255, 0.84);
-  --profile-pane-surface-soft: rgba(255, 255, 255, 0.46);
+  --profile-pane-surface: rgba(255, 255, 255, 0.48);
+  --profile-pane-surface-strong: rgba(255, 255, 255, 0.76);
+  --profile-pane-surface-soft: rgba(255, 255, 255, 0.24);
   --profile-pane-hair: rgba(36, 43, 52, 0.12);
   --profile-pane-shadow:
     0 36px 90px rgba(35, 42, 51, 0.22),
@@ -2428,9 +2428,11 @@ html.dark .profile-pane-sheet[data-slot="sheet-content"],
   transform: translateX(3px);
 }
 
-.profile-pane-scroll-root .profile-home-content [data-row-layout="settings"]:has(button:hover)::before,
-.profile-pane-scroll-root .profile-home-content [data-row-layout="settings"]:has(button:focus-visible)::before,
-.profile-pane-scroll-root .profile-home-content [data-row-layout="settings"][data-state="active"]::before {
+/* Share the home menu's glass highlight across every Profile section,
+   including keyboard focus on preference fields. The sheet owns the blur. */
+.profile-pane-scroll-root [data-row-layout="settings"]:has(:is(button, input, textarea):not(:disabled):hover)::before,
+.profile-pane-scroll-root [data-row-layout="settings"]:has(:focus-visible)::before,
+.profile-pane-scroll-root [data-row-layout="settings"][data-state="active"]::before {
   content: "";
   position: absolute;
   z-index: 0;
