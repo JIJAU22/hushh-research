@@ -228,6 +228,12 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
         try {
           const checkpoint = await loadBusinessReview(context.ownerId!, context.vaultKey!, review.candidate.businessUid);
           await guard.assertCurrent();
+          if (checkpoint?.decision === "saved") {
+            setSaved(true);
+            props.onSaved?.(review.candidate.businessUid);
+            setState(null); setOpen(false);
+            return;
+          }
           const job = checkpoint?.job || attemptedJob;
           update({ ...review, job, cards: job?.cards || review.cards,
             selected: job?.cards.map(card => card.card_id) || review.selected, phase: "review" });

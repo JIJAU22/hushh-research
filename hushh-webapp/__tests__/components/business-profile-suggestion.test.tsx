@@ -129,4 +129,16 @@ describe("post-onboarding business suggestion", () => {
     await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(3));
     expect(mocks.save).not.toHaveBeenCalled();
   });
+  it("reconciles a lost save response from the durable saved checkpoint", async () => {
+    mocks.syntheticPreview.mockReturnValue([]);
+    let reads = 0;
+    mocks.load.mockImplementation(async () => reads++ === 0 ? null : { version: 1, decision: "saved" });
+    mocks.save.mockRejectedValueOnce(new Error("response lost after commit"));
+    render(<BusinessProfileSuggestion {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
+    await screen.findByText("Synthetic company detail");
+    fireEvent.click(screen.getByTestId("agent-pkm-review-save"));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Is this your business?" })).toBeNull());
+  });
 });
