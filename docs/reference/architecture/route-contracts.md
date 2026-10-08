@@ -128,6 +128,7 @@ use `ApiService.apiFetch` and never embed a real person reference at build time.
 - `/one/setup/[capability]`
 - `/one/calendar`
 - `/one/wallet` (Wallet, formerly Cards; naming map in `docs/reference/one/wallet.md`)
+- `/one/wallet-card` (Wallet Profile management; also composed inside Profile/NWS card details in Wallet, with automatic owner-session provisioning)
 - `/one/pkm/recent`
 - `/one/pkm/location` — readable saved places, visits and Location memory details
 - `/one/pkm/location/detail?memory=<opaque-selector>` — existing actions for a current Location memory field; Back returns to Location memory
