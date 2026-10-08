@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ShellActionSurface } from "@/components/app-ui/shell-action-surface";
 import { useStaleResource } from "@/lib/cache/use-stale-resource";
 import type { User } from "firebase/auth";
-import { ArrowLeft, Link2, Users, ShieldCheck, Zap, Flame, Trophy } from "lucide-react";
+import { ArrowLeft, Link2, Users, ShieldCheck, Zap, Trophy } from "@/components/icons";
 import "./referral-dashboard.css";
 
 import { NativeTestBeacon } from "@/components/app-ui/native-test-beacon";
@@ -1442,7 +1442,7 @@ function RulesTab({ policyRes, onRetry }: { policyRes: Res<ReferralPolicy>; onRe
                   className="flex min-h-[50px] items-center justify-between gap-4 text-[15px]"
                   style={{ borderTop: i === 0 ? undefined : `1px solid ${COLORS.sep}` }}
                 >
-                  <span className="referral-rule-label">{i < 3 ? (i === 1 ? <Flame aria-hidden="true" /> : <Zap aria-hidden="true" />) : <ShieldCheck aria-hidden="true" />}{label}</span>
+                  <span className="referral-rule-label">{i < 3 ? (i === 1 ? <FlameIcon active /> : <Zap aria-hidden="true" />) : <ShieldCheck aria-hidden="true" />}{label}</span>
                   <b className="referral-rule-value text-right font-semibold tabular-nums">{value}</b>
                 </li>
               ))}

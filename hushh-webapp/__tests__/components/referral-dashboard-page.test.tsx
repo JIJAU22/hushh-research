@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
@@ -263,7 +265,7 @@ describe("ReferralDashboardPage", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
-  it("uses the reference design's literal colours, not the app's theme/accent tokens", async () => {
+  it("keeps the reference colours through a route-scoped accent override", async () => {
     render(<ReferralDashboardPage />);
 
     const clockHeadline = await screen.findByText("Weekly challenge ends in");
@@ -272,10 +274,19 @@ describe("ReferralDashboardPage", () => {
     expect(clockCard.style.background).toContain("#242426");
 
     const copyButton = screen.getByRole("button", { name: "Copy invite link" });
-    // jsdom normalizes an inline hex to its rgb() form; this still proves the
-    // literal `#007aff` was set, not an app-theme `var(--app-accent)` that
-    // could resolve to the account's gold accent preference instead.
-    expect(copyButton.style.background).toBe("rgb(0, 122, 255)");
+    expect(copyButton.style.background).toBe("var(--app-accent)");
+    // The shared token is deliberately overridden at this route, so a saved
+    // account accent cannot recolour the approved referral design.
+    const css = readFileSync(path.join(process.cwd(), "app/globals.css"), "utf8");
+    const routeStyle = document.createElement("style");
+    routeStyle.textContent = css.match(/\.referral-dashboard\s*\{[^}]*\}/)?.[0] ?? "";
+    document.head.appendChild(routeStyle);
+    try {
+      const dashboard = copyButton.closest(".referral-dashboard")!;
+      expect(getComputedStyle(dashboard).getPropertyValue("--app-accent").trim()).toBe("#007aff");
+    } finally {
+      routeStyle.remove();
+    }
   });
 
   it("shows the Day streak flame for an active streak and marks it accessibly", async () => {
