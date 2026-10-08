@@ -4625,25 +4625,23 @@
       "alias": null,
       "api_dependencies": [],
       "cache": {
-        "policy": "memory-only",
-        "refresh_trigger": "stale-aware background refresh; explicit user refresh may force",
+        "policy": "none",
+        "refresh_trigger": "none",
         "resource_classes": [
           "unknown"
         ]
       },
       "implementation_override": null,
       "lifecycle": "canonical",
-      "native_surface_id": "native-route-profile",
+      "native_surface_id": "native-route-one-referrals",
       "page_file": "app/one/profile/referrals/page.tsx",
       "pathname": "/one/profile/referrals",
-      "route_mode": "standard",
+      "route_mode": "redirect",
       "semantic_routes": [],
       "voice": {
-        "action_ids": [
-          "route.profile_referrals_panel"
-        ],
+        "action_ids": [],
         "delegate_agent_ids": [],
-        "playbook_id": "route.profile.support"
+        "playbook_id": "route.profile.referrals.redirect"
       }
     },
     {
@@ -4863,6 +4861,47 @@
         "action_ids": [],
         "delegate_agent_ids": [],
         "playbook_id": "route.one.puppy"
+      }
+    },
+    {
+      "alias": null,
+      "api_dependencies": [
+        {
+          "backend_endpoint_family": "/api/one/referrals/*",
+          "native_transport": "Direct backend via ApiService.apiFetch; authenticated owner-scoped reads.",
+          "nextjs_api_route": "/api/one/{path*}",
+          "nextjs_proxy_file": "app/api/one/[...path]/route.ts",
+          "service_file": "lib/services/referral-service.ts",
+          "service_methods": [
+            "getSummary",
+            "getPoints",
+            "getChallenge",
+            "getMilestones",
+            "getEngagement",
+            "getLeaderboard",
+            "getCircleLeaderboard",
+            "getCircleSelection"
+          ]
+        }
+      ],
+      "cache": {
+        "policy": "memory-only",
+        "refresh_trigger": "stale-aware background refresh; explicit user refresh may force",
+        "resource_classes": [
+          "unknown"
+        ]
+      },
+      "implementation_override": null,
+      "lifecycle": "canonical",
+      "native_surface_id": "native-route-one-referrals",
+      "page_file": "app/one/referrals/page.tsx",
+      "pathname": "/one/referrals",
+      "route_mode": "hidden",
+      "semantic_routes": [],
+      "voice": {
+        "action_ids": [],
+        "delegate_agent_ids": [],
+        "playbook_id": "route.one.referrals"
       }
     },
     {
@@ -5942,13 +5981,13 @@
     "a2a_scope_map": "7379039859448ff3db422aa5ee50124bbcadcecc8c9c49e3c1471791f54208c1",
     "action_gateway": "f1345cd5c40ee9acc3e4bd30e393a4d6604f061364653ce48dcd1c07c34b9788",
     "agent_registry": "d5b9f001a88245b6b0a643a59e045280e6da0af2692ba79958882300a4d6bab1",
-    "cache_manifest": "a6f8f117fa4683cbb28bb247a7d12a4ae144c12b036118fcfb663d829958174b",
+    "cache_manifest": "c6685c4f51f38154a3ef6d475908889438f932090009ecfe4665902acfe71e75",
     "data_plane": "55176c9459055fc96549a92343dab8c7399d26e498cc00eb9d08efa3e15498b1",
     "in_process_dispatch": "11ad2e84c6953e3788b1221d422d60bc105401eb7028e0eb64f9a794b6094dc7",
     "one_specialist_tools": "3dc81d307ef8cf9932ca3f80c2d54915515161968d0303feccea401e8afebce9",
-    "route_index": "666164d521beccc0a5f6c1cd04bf60133ea1e4a8a73ffb28a7f3bc364b690ac0",
-    "route_layout": "5a77364b3aca34fca4d2249ae26fc5d8dc85c33fcf34ce2ae8d7cddd4be2fa46",
-    "surface_map": "f4f66948b7ed911441ef3dcbb59579521e3c6d0b9e6e238d05524b703c7dae15",
+    "route_index": "d287b08c9109f963591911627d5559b63e263d102380348a66775c9b810b4545",
+    "route_layout": "e23c10dd6ce8120e5b0bfb543c312cdea5662b084b5274ff828b0e6a4cea81e7",
+    "surface_map": "2aba95636010b876338a9ef4d609a6fd48d14fb39055f7a5534dca8fe2b1c52d",
     "topology_contract": "b803d58913d6ce2094f193ed837d89a6a08b09f172abd7857c760406ece82003",
     "world_model_compat": "10fc27eefad30ff56c69ef71a8953b727ab323a6e982ec783711fbbe1c1ee425"
   },
@@ -5960,7 +5999,7 @@
     "decision_required": 2,
     "in_process_specialists": 5,
     "one_specialist_tools": 6,
-    "physical_routes": 145,
+    "physical_routes": 146,
     "semantic_routes": 14,
     "table_families": 89
   }
