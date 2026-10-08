@@ -93,6 +93,26 @@ flowchart TB
 
 ## Route Categories
 
+### Wallet Profile lifecycle
+
+The Wallet cards surface and `/one/wallet-card` share the same identity pass
+authority. Owner endpoints under `/api/one/wallet-card` require the existing
+`VAULT_OWNER` token and an exact owner match. `POST /ensure` accepts `userId`,
+optional `cardPayload`, `avatarUrl` and a known `shareToken`; it creates only a
+missing profile from account basics and returns the existing mutation response.
+It preserves edits, pause, removal and the current QR during repeat/concurrent
+requests. An authenticated owner can recover a new token from its encrypted
+envelope or adopt a valid legacy device token; the envelope never leaves the
+service. `GET` remains the status/snapshot read. Existing save, preview,
+pause/resume, rotate, revoke, public resolve and signed pass routes remain the
+same. The `username` payload field is optional and server-validated (3–30
+lowercase letters/digits/single internal dots, reserved/blocked labels rejected).
+
+Public QR resolves count aggregate visits only, without identifying scanners.
+Payment-card secrets remain exclusively in the encrypted `wallet` PKM domain.
+See [Wallet](../one/wallet.md) and the
+[Wallet Profile contract](../../superpowers/specs/2026-08-03-wallet-card-contract.md).
+
 ### Public (No Auth)
 
 | Method | Path                                      | Description                                                                                             |
