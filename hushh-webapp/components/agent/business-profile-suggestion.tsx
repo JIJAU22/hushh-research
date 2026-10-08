@@ -12,7 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { BusinessSuggestionService } from "@/lib/services/business-suggestion-service";
 import { createAgentPkmCaptureGuard } from "@/lib/agent/agent-pkm-capture-runtime";
 import { connectorMemorySharingImpact, prepareConnectorMemoryReview } from "@/lib/agent/connector-memory-review";
-import { attachBusinessOrigin, buildSyntheticBusinessPreview, BusinessOriginValidationError, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
+import { attachBusinessOrigin, buildSyntheticBusinessPreview, BusinessOriginValidationError, businessCandidateSnapshot, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
 import type { AgentPkmPreviewCard } from "@/lib/agent/agent-pkm-memory";
 
 type Props = {
@@ -21,6 +21,10 @@ type Props = {
   /** The chat owns the assistant bubble; this capability owns only its card. */
   renderMessage?: (id: string, text: string, card: ReactNode) => ReactNode;
   onVisibleChange?: (visible: boolean) => void;
+  /** Remove a saved candidate from the owning chat turn immediately. */
+  onSaved?: (businessUid: string) => void;
+  /** Candidates already saved in this session stay suppressed if discovery refreshes. */
+  dismissedBusinessUids?: ReadonlySet<string>;
 };
 type Review = {
   candidate: BusinessCandidate; name: string; website: string; message: string;
@@ -69,14 +73,19 @@ export function BusinessProfileSuggestion(props: Props) {
   }, [ownerId, vaultKey, vaultOwnerToken, enabled, tokenExpiresAt, attempt]);
   if (!enabled || !ownerId || !vaultKey || !vaultOwnerToken || tokenExpiresAt === null || Date.now() >= tokenExpiresAt ||
     discovery?.ownerId !== ownerId || discovery.token !== vaultOwnerToken || discovery.key !== vaultKey) return null;
+  const candidates = discovery.candidates.filter(candidate => !props.dismissedBusinessUids?.has(candidate.businessUid));
+  const retryableStatus = discovery.status === "unavailable" || discovery.incomplete;
+  if (!candidates.length && !retryableStatus && discovery.status !== "insufficient_signals") return null;
   return <div className="space-y-[var(--app-form-section-gap)]">
-    {discovery.incomplete && <div className="space-y-[var(--app-form-field-gap)]">
-      <HelperText>Business lookup is incomplete. Available suggestions may not include every business.</HelperText>
+    {retryableStatus && <div className="space-y-[var(--app-form-field-gap)]">
+      <HelperText>{discovery.status === "unavailable"
+        ? "Business lookup is temporarily unavailable. Nothing was saved; try again when the directory is reachable."
+        : "Business lookup is incomplete. Available suggestions may not include every business."}</HelperText>
       <Button variant="link" size="standard" onClick={() => setAttempt(value => value + 1)}>Retry business lookup</Button>
     </div>}
     {discovery.status === "insufficient_signals" && <HelperText>Your verified contacts could not be used for business lookup yet. Nothing has been saved.</HelperText>}
-    {discovery.candidates.length > 1 && <HelperText>I found several possible businesses. Review each one separately; you can save more than one.</HelperText>}
-    {discovery.candidates.map(candidate => <BusinessCandidateReview key={candidate.businessUid} {...props} candidate={candidate} onCandidateVisible={onCandidateVisible} />)}
+    {candidates.length > 1 && <HelperText>I found several possible businesses. Review each one separately; you can save more than one.</HelperText>}
+    {candidates.map(candidate => <BusinessCandidateReview key={candidate.businessUid} {...props} candidate={candidate} onCandidateVisible={onCandidateVisible} />)}
   </div>;
 }
 
@@ -95,6 +104,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
+  const [saved, setSaved] = useState(false);
   const review = state?.context === context ? state.review : null;
   const reviewVisible = Boolean(review);
   const { onCandidateVisible } = props;
@@ -109,7 +119,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
 
   useEffect(() => {
     const abort = new AbortController(); controller.current = abort; busy.current = false;
-    setState(null); setAcknowledging(false); setOpen(false); setEditing(false);
+    setState(null); setAcknowledging(false); setOpen(false); setEditing(false); setSaved(false);
     const guard = createAgentPkmCaptureGuard({ userId: context.ownerId || "", signal: abort.signal, isEnabled: eligible });
     if (guard.isCurrent()) void (async () => {
       try {
@@ -137,7 +147,8 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     await guard.assertCurrent();
     const fresh = await BusinessSuggestionService.get(context.vaultOwnerToken!, controller.current?.signal);
     await guard.assertCurrent();
-    if (!review || !fresh.candidates.some(candidate => candidate.businessUid === review.candidate.businessUid))
+    const refreshedCandidate = review && fresh.candidates.find(candidate => candidate.businessUid === review.candidate.businessUid);
+    if (!review || !refreshedCandidate || businessCandidateSnapshot(review.candidate) !== businessCandidateSnapshot(refreshedCandidate))
       throw new Error("The suggestion is no longer available. Nothing new was saved.");
   };
   const update = (next: Review) => setState({ context, review: next });
@@ -203,6 +214,11 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
           selected: job.cards.map(card => card.card_id), phase: "review" });
         throw new Error("Some details still need saving. Retry this review.");
       }
+      // Persisted PKM state is authoritative, but also suppress this mounted
+      // card immediately. The parent callback covers a discovery refresh that
+      // would otherwise recreate the same ephemeral chat message.
+      setSaved(true);
+      props.onSaved?.(review.candidate.businessUid);
       setState(null); setOpen(false);
       return result;
     })();
@@ -215,6 +231,12 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
         try {
           const checkpoint = await loadBusinessReview(context.ownerId!, context.vaultKey!, review.candidate.businessUid);
           await guard.assertCurrent();
+          if (checkpoint?.decision === "saved") {
+            setSaved(true);
+            props.onSaved?.(review.candidate.businessUid);
+            setState(null); setOpen(false);
+            return;
+          }
           const job = checkpoint?.job || attemptedJob;
           update({ ...review, job, cards: job?.cards || review.cards,
             selected: job?.cards.map(card => card.card_id) || review.selected, phase: "review" });
@@ -237,7 +259,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     finally { if (guard.isCurrent()) busy.current = false; }
   };
 
-  if (!review || !eligible()) return null;
+  if (saved || !review || !eligible()) return null;
   const pending = review.phase === "preparing" || review.phase === "saving";
   const introduction = "I found a business you may be connected to. Check the public details below—is this yours?";
   const card = <section aria-label="Is this your business?"
@@ -257,7 +279,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
         <div className="space-y-1">
           {review.candidate.synthetic && <HelperText className="font-semibold text-foreground">UAT test suggestion</HelperText>}
           <HelperText className="leading-relaxed text-foreground/80">Why this appeared: {review.candidate.synthetic ? "your verified email domain matches the UAT test business" :
-            review.candidate.matchEvidence.map(item => item.kind === "verified_phone" ? "your linked phone matches the directory phone" : item.kind === "verified_email_identity" ? "your verified work email is assigned to this UAT test profile" : "your verified email domain matches the business website").join("; ")}. Business ownership has not been verified.</HelperText>
+            review.candidate.matchEvidence.map(item => item.kind === "verified_phone" ? "your linked phone matches the directory phone" : item.kind === "verified_email_identity" ? "your verified email matches this directory record" : "your verified email domain matches the business website").join("; ")}. Business ownership has not been verified.</HelperText>
           {!review.candidate.synthetic && <HelperText>Public directory · {review.candidate.sourceIdentity.vertical}</HelperText>}
         </div>
         <dl className="divide-y divide-[color:var(--app-separator)]">
