@@ -128,6 +128,7 @@ use `ApiService.apiFetch` and never embed a real person reference at build time.
 - `/one/setup/[capability]`
 - `/one/calendar`
 - `/one/wallet` (Wallet, formerly Cards; naming map in `docs/reference/one/wallet.md`)
+- `/one/wallet-card` (Wallet Profile management; also composed inside Profile/NWS card details in Wallet, with automatic owner-session provisioning)
 - `/one/pkm/recent`
 - `/one/pkm/location` — readable saved places, visits and Location memory details
 - `/one/pkm/location/detail?memory=<opaque-selector>` — existing actions for a current Location memory field; Back returns to Location memory
@@ -135,6 +136,7 @@ use `ApiService.apiFetch` and never embed a real person reference at build time.
 - `/one/email`
 - `/one/kyc`
 - `/one/career`
+- `/one/referrals` — authenticated referral dashboard; `/one/profile/referrals` redirects here. Account totals and milestone cards come from the referral API, with explicit unavailable states and no sample balances.
 - `/one/location`
 - `/one/location/map`
 - `/one/location/check-in`

@@ -202,6 +202,8 @@ export const ROUTES = {
   /** Retired mailbox-KYC compatibility target; personal Gmail KYC lives in Email. */
   ONE_KYC: "/one/email",
   ONE_CAREER: "/one/career",
+  /** Dedicated full-page weekly referral dashboard. `/one/profile/referrals` redirects here. */
+  ONE_REFERRALS: "/one/referrals",
   ONE_LOCATION: "/one/location",
   /** Immersive, consented multi-person Location map. */
   ONE_LOCATION_MAP: "/one/location/map",

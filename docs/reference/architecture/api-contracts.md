@@ -93,6 +93,26 @@ flowchart TB
 
 ## Route Categories
 
+### Wallet Profile lifecycle
+
+The Wallet cards surface and `/one/wallet-card` share the same identity pass
+authority. Owner endpoints under `/api/one/wallet-card` require the existing
+`VAULT_OWNER` token and an exact owner match. `POST /ensure` accepts `userId`,
+optional `cardPayload`, `avatarUrl` and a known `shareToken`; it creates only a
+missing profile from account basics and returns the existing mutation response.
+It preserves edits, pause, removal and the current QR during repeat/concurrent
+requests. An authenticated owner can recover a new token from its encrypted
+envelope or adopt a valid legacy device token; the envelope never leaves the
+service. `GET` remains the status/snapshot read. Existing save, preview,
+pause/resume, rotate, revoke, public resolve and signed pass routes remain the
+same. The `username` payload field is optional and server-validated (3–30
+lowercase letters/digits/single internal dots, reserved/blocked labels rejected).
+
+Public QR resolves count aggregate visits only, without identifying scanners.
+Payment-card secrets remain exclusively in the encrypted `wallet` PKM domain.
+See [Wallet](../one/wallet.md) and the
+[Wallet Profile contract](../../superpowers/specs/2026-08-03-wallet-card-contract.md).
+
 ### Public (No Auth)
 
 | Method | Path                                      | Description                                                                                             |
@@ -2671,3 +2691,33 @@ are added. Existing
 masked email/phone visibility remains unchanged. The Next proxy and native HTTP
 transport forward these additive fields. Older servers omit them; clients omit
 the badge rather than inventing a mutual relationship. No migration is required.
+
+
+## Referral dashboard reads
+
+`/one/referrals` uses the existing `/api/one/[...path]` proxy on web and
+`ApiService.apiFetch` direct backend transport on native. Each referral read
+requires a Firebase ID token; the verified UID selects the owner, never a
+client-supplied user identifier.
+
+- `GET /api/one/referrals/points` returns `{points: number}` from the owner's
+  cumulative ledger, independently of published leaderboard snapshots.
+- `GET /api/one/referrals/challenge` returns `active`, `week_started_at`,
+  `cutoff_at`, and `timezone`. Its weekly window derives from active program
+  settings. Missing settings or an unset schedule returns inactive with null
+  timestamps. A scheduled challenge does not imply weekly prize finalization
+  is enabled.
+- `GET /api/one/referrals/milestones` retains lifetime count, earned entitlements,
+  and next milestone, and adds `available_milestones` from the same active
+  settings version. The dashboard does not substitute a hardcoded catalogue.
+
+Migration 287 versions the milestone catalogue and schedule without modifying
+migration 275 or recomputing past awards. Applying it is separate from source
+verification. Summary reads can mint a referral link and authenticated reads
+can schedule identity synchronization; this dashboard is not a read-only probe
+against an environment where writes are prohibited.
+
+- `GET /api/one/referrals/policy` requires Firebase authentication and returns
+  active settings `version`, `points`, `streak_rules`, `weekly_schedule`,
+  `challenge_duration_days` (null when unscheduled), and `weekly_prizes_enabled`.
+  Rules uses these amounts directly; this read does not activate policy or award rewards.
