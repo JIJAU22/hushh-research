@@ -35,7 +35,7 @@ function demoFor(cardId: string) {
 }
 
 /** Only the preview branch calls this; real cards never receive these numbers. */
-export function WalletDemoCardFace({ summary, profile }: { summary: WalletCardSummary; profile?: WalletDemoProfile | null }) {
+export function WalletDemoCardFace({ summary, profile, onArtworkLoad }: { summary: WalletCardSummary; profile?: WalletDemoProfile | null; onArtworkLoad?: () => void }) {
   const demo = demoFor(summary.cardId);
   if (!demo) return <WalletCardFace summary={summary} collection />;
   // All supplied card artwork represents the same user's wallet identity. Keep
@@ -50,6 +50,7 @@ export function WalletDemoCardFace({ summary, profile }: { summary: WalletCardSu
             title={`${demo.name} Agent One card`}
             src={`/wallet/agent-one-card-${summary.cardId === "demo-0" ? "profile" : summary.cardId === "demo-1" ? "referral" : "nws"}.html?v=2`}
             className={styles.htmlArtwork}
+            onLoad={onArtworkLoad}
           />
           {profileArtwork?.displayName ? <span className={styles.dynamicCardName}>{profileArtwork.displayName}</span> : null}
           {profileArtwork?.shareUrl && summary.cardId !== "demo-2" ? <WalletCardQr value={profileArtwork.shareUrl} label="Wallet Profile QR code" className={styles.dynamicCardQr} /> : null}
