@@ -294,3 +294,7 @@ The AI tool is NEVER a contributor. Do not credit Claude/Anthropic (or any AI ag
 2. This is enforced by `includeCoAuthoredBy: false` in `.claude/settings.json` (committed) and each developer's `~/.claude/settings.json`. Keep it set; do not re-enable it.
 3. Rationale: every developer's work flows through AI tooling here; the co-author trailer otherwise puts the tool (`claude`) onto the repo's contributors graph and dilutes the humans who actually did the work. Human authorship must land under the developer's own linked git email.
 4. Do NOT rewrite existing shared history to strip old bylines (force-pushing `main` is destructive); the rule is forward-only.
+
+## Search web contracts
+
+For changes to web screens, routes, layouts or their imported UI modules, review the owning `.voice-action-contract.json` actions, reachability and context defaults. Search reads these contracts automatically; do not add a separate Search catalog. Run `cd hushh-webapp && npm run build:search-contracts`, commit authored contracts and generated mirrors, then run `npm run verify:search-contracts`. The independent Search Web Contracts CI job and required CI Status Gate reject stale outputs and skipped Search checks. Source fingerprints do not replace semantic review of new actions.

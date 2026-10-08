@@ -26,6 +26,7 @@ python3 scripts/ci/test_change_aware_verification_wiring.py
 # this proves the split still runs every pack, shard and verifier exactly once.
 python3 scripts/ci/test_back_contract_gate.py
 python3 scripts/ci/test_web_ci_lane_partition.py
+python3 scripts/ci/test_search_contract_gate.py
 python3 scripts/ci/test_pkm_upgrade_gate_scope.py
 python3 scripts/ci/test_private_native_artifact.py
 node --test scripts/release/dispatch-ios-appstore.test.mjs
