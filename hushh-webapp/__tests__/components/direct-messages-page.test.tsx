@@ -6,7 +6,7 @@ import {
   AgentDockVoiceBoundary,
 } from "@/components/agent/agent-dock";
 import { AgentBarSurface } from "@/components/agent/agent-bar-surface";
-import { DirectMessagesPage } from "@/components/direct-messages/direct-messages-page";
+import { DirectMessagesPage as ProductionDirectMessagesPage } from "@/components/direct-messages/direct-messages-page";
 import { ROUTES } from "@/lib/navigation/routes";
 
 const mocks = vi.hoisted(() => {
@@ -109,6 +109,13 @@ function renderConnectionThread() {
       <DirectMessagesPage />
     </AgentDockProvider>,
   );
+}
+
+function DirectMessagesPage() {
+  const params = new URLSearchParams(mocks.search);
+  const conversation = params.get("conversation");
+  const person = params.get("person");
+  return <ProductionDirectMessagesPage selection={conversation ? { kind: "conversation", ref: conversation } : person ? { kind: "person", ref: person } : null} />;
 }
 
 describe("DirectMessagesPage", () => {
