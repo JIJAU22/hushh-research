@@ -411,7 +411,7 @@ describe("PersonProfilePage native profile route", () => {
     expect(reviewButton).toBeDisabled();
     const actions = document.querySelectorAll('[aria-label="Relationship actions"] button');
     expect(Array.from(actions, (button) => button.getAttribute("aria-label") || button.textContent?.trim())).toEqual([
-      "Request", "Share profile", "Message", "Manage access",
+      "Request", "Share profile", "Manage access",
     ]);
     expect(reviewButton.parentElement).not.toHaveClass("sticky");
     expect(reviewButton.parentElement).not.toHaveClass("bottom-4");
