@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
   };
 
   return {
+    navigateSelection: vi.fn(),
     router: { push: vi.fn(), replace: vi.fn() },
     query: "person=person-1",
     user: {
@@ -42,6 +43,13 @@ const mocks = vi.hoisted(() => {
     requestAgentConversationAfterRoute: vi.fn(),
   };
 });
+
+vi.mock("@/lib/direct-messages/navigate-direct-message", () => ({
+  navigateDirectMessage: (router: { push: (href: string) => void }, selection: unknown) => {
+    mocks.navigateSelection(selection);
+    router.push("/one/messages?token=dm1.fixture");
+  },
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => mocks.router,
@@ -112,7 +120,7 @@ function renderConnectionThread() {
 }
 
 function DirectMessagesPage() {
-  const params = new URLSearchParams(mocks.search);
+  const params = new URLSearchParams(mocks.query);
   const conversation = params.get("conversation");
   const person = params.get("person");
   return <ProductionDirectMessagesPage selection={conversation ? { kind: "conversation", ref: conversation } : person ? { kind: "person", ref: person } : null} />;
@@ -186,18 +194,14 @@ describe("DirectMessagesPage", () => {
     vi.clearAllMocks();
   });
 
-  it("uses the shared Chat dock while sending to the selected connection", async () => {
+  it("keeps the composer in the conversation while sending to the selected connection", async () => {
     renderConnectionThread();
 
     expect(await screen.findByRole("button", { name: /Ankit Kumar Singh/ })).toBeVisible();
     const composer = await screen.findByRole("textbox", {
       name: "Message Ankit Kumar Singh",
     });
-    expect(screen.getByTestId("shared-chat-dock")).toHaveAttribute(
-      "data-agent-dock-surface",
-      "text",
-    );
-    expect(screen.getByText("Talk to One")).not.toBeVisible();
+    expect(composer.closest("form")?.parentElement).not.toBe(screen.getByTestId("shared-chat-dock"));
 
     fireEvent.change(composer, { target: { value: "Hello Ankit" } });
     fireEvent.submit(composer.closest("form")!);
@@ -221,10 +225,8 @@ describe("DirectMessagesPage", () => {
     expect(screen.queryByRole("textbox", { name: /Message/ })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /Ankit Kumar Singh/ }));
-    expect(mocks.router.replace).toHaveBeenCalledWith(
-      "/one/messages?conversation=conversation-1",
-      { scroll: false },
-    );
+    expect(mocks.navigateSelection).toHaveBeenCalledWith({ conversationId: "conversation-1" });
+    expect(mocks.router.push).toHaveBeenCalledWith("/one/messages?token=dm1.fixture");
   });
 
   it("clears the active chat badge while its messages are visible", async () => {

@@ -41,7 +41,7 @@ import {
   Loader2,
   MessageCircle,
   Mic,
-  MoreVertical,
+  ChevronDown,
   Pencil,
   PhoneCall,
   Quote,
@@ -1142,10 +1142,9 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                   </div>
                 ) : null}
                 {visibleMessages.map((message, index) => {
-                  const nextMessage = visibleMessages[index + 1];
 
                   return (
-                    <div key={message.id} className={styles.messageFeedItem}>
+                    <div key={message.id} className={styles.messageFeedItem} data-group-start={index === 0 || visibleMessages[index - 1]?.senderIsViewer !== message.senderIsViewer || isNewMessageDay(message, visibleMessages[index - 1])}>
                       {isNewMessageDay(message, visibleMessages[index - 1]) ? (
                         <div className={styles.messageDateMarker}>
                           <time dateTime={message.createdAt}>
@@ -1294,7 +1293,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                                       aria-label="Message options"
                                       aria-expanded={openMessageMenu === message.id}
                                     >
-                                      <MoreVertical className="h-4 w-4" aria-hidden="true" />
+                                      <ChevronDown className="h-4 w-4" aria-hidden="true" />
                                     </button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent
