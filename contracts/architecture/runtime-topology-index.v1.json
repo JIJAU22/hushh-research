@@ -5940,7 +5940,7 @@
   "schema_version": "hushh.runtime_topology_index.v1",
   "source_sha256": {
     "a2a_scope_map": "7379039859448ff3db422aa5ee50124bbcadcecc8c9c49e3c1471791f54208c1",
-    "action_gateway": "f1345cd5c40ee9acc3e4bd30e393a4d6604f061364653ce48dcd1c07c34b9788",
+    "action_gateway": "fd4d87184d44c37c05be7f4c76fca52c2cdbef2c8565dd826a7ec3f820e22f88",
     "agent_registry": "d5b9f001a88245b6b0a643a59e045280e6da0af2692ba79958882300a4d6bab1",
     "cache_manifest": "a6f8f117fa4683cbb28bb247a7d12a4ae144c12b036118fcfb663d829958174b",
     "data_plane": "7b01c32aa1634cd345e2618f09731dd0b55376b57ddf8ad11bfe7f2ce6ba47ac",

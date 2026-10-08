@@ -13,6 +13,7 @@ web_ci_install
 cd "$WEB_DIR"
 npm run verify:design-system
 npm run verify:docs
+npm run verify:search-contracts
 npm run typecheck
 npm run lint
 

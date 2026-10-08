@@ -86,5 +86,9 @@
       "state_exposure": [],
       "docs_references": ["hushh-webapp/app/one/kai/analysis/page.tsx"]
     }
-  ]
+  ],
+  "search": {
+    "source_revision": "9ca423d961122dd0e83a93d9d1c27c1c0b26bfcc84757e08c18c49de3f6f29d6",
+    "source_module_count": 1498
+  }
 }
