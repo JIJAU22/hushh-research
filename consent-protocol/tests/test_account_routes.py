@@ -1287,6 +1287,39 @@ def test_lost_vault_options_require_firebase_phone_when_shadow_has_no_claim(monk
     assert response.json()["phone_hint"] == "••76"
 
 
+def test_lost_vault_delete_cannot_bypass_firebase_phone_when_shadow_has_no_claim(
+    monkeypatch,
+):
+    from firebase_admin import auth as firebase_auth
+
+    app = _lost_vault_app(monkeypatch, firebase_phone="+15551239876")
+    deleted = []
+
+    async def _delete(_self, user_id: str, target: str = "both"):
+        deleted.append((user_id, target))
+        return {"success": True, "account_deleted": True}
+
+    monkeypatch.setattr(AccountService, "delete_account", _delete)
+    monkeypatch.setattr(
+        firebase_auth,
+        "verify_id_token",
+        lambda *_args, **_kwargs: {
+            "uid": "user_123",
+            "auth_time": account.time.time(),
+            "firebase": {"sign_in_provider": "google.com"},
+        },
+    )
+    response = TestClient(app).post(
+        "/api/account/delete-lost-vault",
+        headers={"Authorization": "Bearer fresh-provider-token"},
+        json={"method": "provider"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "ACCOUNT_DELETE_PHONE_PROOF_REQUIRED"
+    assert deleted == []
+
+
 def test_lost_vault_delete_requires_fresh_provider_proof_and_erases_full_account(monkeypatch):
     from firebase_admin import auth as firebase_auth
 
