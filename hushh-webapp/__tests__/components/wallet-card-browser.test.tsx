@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { unwindBackLayer } from "@/lib/navigation/back-layers";
 import { describe, expect, it, vi } from "vitest";
 import { WalletCardBrowser } from "@/components/wallet/wallet-card-browser";
 import type { WalletCardSummary } from "@/lib/services/wallet-service";
@@ -15,6 +16,18 @@ function setup(cards: WalletCardSummary[] = [], selectedCardId: string | null = 
 }
 
 describe("Wallet card browser", () => {
+  it("unwinds the selected card before leaving Wallet and releases the handler when inactive", () => {
+    const { dock, host, unmount, rerender, props } = setup();
+    fireEvent.click(dock.getByRole("button", { name: "Open Agent One Profile" }));
+    act(() => { expect(unwindBackLayer("/one/wallet")).toBe(true); });
+    expect(screen.getByTestId("wallet-card-browser")).toHaveAttribute("data-mode", "all");
+    expect(screen.queryByText("Live profile controls")).toBeNull();
+    expect(unwindBackLayer("/one/wallet")).toBe(false);
+    fireEvent.click(dock.getByRole("button", { name: "Open Agent One Profile" }));
+    rerender(<WalletCardBrowser {...props} active={false} />);
+    expect(unwindBackLayer("/one/wallet")).toBe(false);
+    unmount(); host.remove();
+  });
   it("preserves payment selection when mounted from search or after adding a card", () => {
     const card: WalletCardSummary = { cardId: "saved-card", nickname: "My card", brand: "visa", last4: "9876", expiryMonth: 5, expiryYear: 2030, issuingRegion: "IN", createdAt: "" };
     const { host, unmount } = setup([card], card.cardId);

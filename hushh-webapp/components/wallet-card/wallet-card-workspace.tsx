@@ -12,6 +12,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useEffectiveAvatarUrl } from "@/hooks/use-effective-avatar-url";
 import { Button } from "@/lib/morphy-ux/morphy";
 import { useScrollReset } from "@/lib/navigation/use-scroll-reset";
+import { useBackLayer } from "@/lib/navigation/back-layers";
+import { ROUTES } from "@/lib/navigation/routes";
 import { useVault } from "@/lib/vault/vault-context";
 import {
   normalizePublicWalletCard,
@@ -93,7 +95,7 @@ function WalletProfileShell({ embedded, title, description, children }: {
   </section> : <PkmSettingsShell title={title} description={description} innerClassName="mx-auto max-w-[580px]">{children}</PkmSettingsShell>;
 }
 
-type WalletCardWorkspaceProps = { embedded?: boolean; passVariant?: WalletPassVariant };
+type WalletCardWorkspaceProps = { embedded?: boolean; passVariant?: WalletPassVariant; active?: boolean };
 
 export function WalletCardWorkspace(props: WalletCardWorkspaceProps = {}) {
   const { user } = useAuth();
@@ -104,7 +106,7 @@ export function WalletCardWorkspace(props: WalletCardWorkspaceProps = {}) {
   return <WalletCardOwnerWorkspace key={ownerScope} {...props} />;
 }
 
-function WalletCardOwnerWorkspace({ embedded = false, passVariant = "profile" }: WalletCardWorkspaceProps) {
+function WalletCardOwnerWorkspace({ embedded = false, passVariant = "profile", active = true }: WalletCardWorkspaceProps) {
   const { user, loading: authLoading, phoneNumber } = useAuth();
   const { isVaultUnlocked, vaultOwnerToken } = useVault();
   const avatarUrl = useEffectiveAvatarUrl();
@@ -132,6 +134,19 @@ function WalletCardOwnerWorkspace({ embedded = false, passVariant = "profile" }:
   useScrollReset(stage, { enabled: true, behavior: "auto" });
   const [confirm, setConfirm] = useState<ConfirmKind | null>(null);
   const [applePassSupported, setApplePassSupported] = useState(false);
+
+  const localStageOpen = stage === "edit" || stage === "preview" || stage === "success";
+  const closeLocalStage = useCallback(() => {
+    if (!localStageOpen) return false;
+    if (saving || busyAction) return true;
+    setStage(card ? "manage" : "intro");
+    return true;
+  }, [localStageOpen, saving, busyAction, card]);
+  useBackLayer(
+    embedded ? ROUTES.ONE_WALLET : ROUTES.ONE_WALLET_CARD,
+    active && localStageOpen && isVaultUnlocked && vaultOwnerToken && userId ? 2 : 0,
+    closeLocalStage,
+  );
 
   // Platform capability is read after mount: the user agent is not available
   // during server rendering and would otherwise cause a hydration mismatch.
@@ -632,7 +647,7 @@ function WalletCardOwnerWorkspace({ embedded = false, passVariant = "profile" }:
           isEditingExisting={Boolean(card)}
           onChange={onDraftChange}
           onSubmit={() => void submitDraft()}
-          onCancel={() => setStage(card ? "manage" : "intro")}
+          onCancel={closeLocalStage}
         />
       ) : null}
 
@@ -724,7 +739,7 @@ function WalletCardOwnerWorkspace({ embedded = false, passVariant = "profile" }:
                   size="sm"
                   variant="none"
                   effect="fade"
-                  onClick={() => setStage("manage")}
+                  onClick={closeLocalStage}
                 >
                   Not now
                 </Button>
@@ -735,7 +750,7 @@ function WalletCardOwnerWorkspace({ embedded = false, passVariant = "profile" }:
                 size="sm"
                 variant="none"
                 effect="fade"
-                onClick={() => setStage("manage")}
+                onClick={closeLocalStage}
               >
                 <ArrowLeft className="mr-2 h-4 w-4" aria-hidden />
                 Back
@@ -759,7 +774,7 @@ function WalletCardOwnerWorkspace({ embedded = false, passVariant = "profile" }:
               description={WALLET_CARD_OWNER_COPY.updatesAutomatically}
             />
           </SettingsGroup>
-          <Button type="button" size="sm" onClick={() => setStage("manage")}>
+          <Button type="button" size="sm" onClick={closeLocalStage}>
             {WALLET_CARD_COPY.entryAfterSetup.title}
           </Button>
         </div>
