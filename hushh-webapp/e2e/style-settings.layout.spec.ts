@@ -217,6 +217,25 @@ for (const theme of ["light", "dark"] as const)
       expect(errors).toEqual([]);
     });
 
+test("writing controls align below readable labels in a narrow desktop profile pane", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await open(page, "light");
+  const section = page.getByTestId("style-settings");
+  for (const width of [272, 342, 398]) {
+    await section.evaluate((node, width) => { node.style.width = `${width}px`; }, width);
+    for (const row of await page.locator(".profile-preferences-control-row").all()) {
+      const title = await box(row.locator("[data-slot='settings-row-title']"));
+      const description = await box(row.locator("[data-slot='settings-row-description']"));
+      const control = await box(row.locator("input, [data-slot='select-trigger']"));
+      expect(title.width).toBeGreaterThan(150);
+      expect(Math.abs(control.x - title.x)).toBeLessThan(1);
+      expect(control.y).toBeGreaterThanOrEqual(description.y + description.height);
+      expect(control.height).toBeGreaterThanOrEqual(44);
+    }
+    expect(await section.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  }
+});
+
 test("the Save press ripples without scaling, and a chat offer reads as unsaved", async ({ page }) => {
   await page.setViewportSize({ width: 393, height: 852 });
   await open(page, "light", "suggested", "no-preference");
