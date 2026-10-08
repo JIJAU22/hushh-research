@@ -179,8 +179,11 @@ describe("WalletWorkspace at scale", () => {
     expect(screen.getByRole("button", { name: "Open New card, ending 4242" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("tab", { name: "Cards" })).toHaveAttribute("aria-selected", "true");
     expect(serviceMock.listCardSummaries).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "All (6)" }));
-    expect(screen.getAllByTestId(/^wallet-add-layer-/).map((el) => el.getAttribute("data-testid"))).toEqual(["wallet-add-layer-agent-one-profile", "wallet-add-layer-agent-one-referral", "wallet-add-layer-agent-one-nws", "wallet-add-layer-1000", "wallet-add-layer-1001", "wallet-add-layer-4242"]);
+    // Use the visible navigation action, then wait for the deck to render after
+    // the save-to-Cards transition instead of reading during its lifecycle.
+    fireEvent.click(screen.getByRole("button", { name: "All cards", exact: true }));
+    await waitFor(() => expect(screen.getAllByTestId(/^wallet-add-layer-/).map((el) => el.getAttribute("data-testid"))).toEqual(["wallet-add-layer-agent-one-profile", "wallet-add-layer-agent-one-referral", "wallet-add-layer-agent-one-nws", "wallet-add-layer-1000", "wallet-add-layer-1001", "wallet-add-layer-4242"]));
+    expect(serviceMock.listCardSummaries).toHaveBeenCalledTimes(1);
   });
 
   it("retains a failed save draft and rejects a late save after vault lock", async () => {
