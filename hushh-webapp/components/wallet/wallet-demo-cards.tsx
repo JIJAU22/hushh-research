@@ -52,7 +52,7 @@ export function WalletDemoCardFace({ summary, profile }: { summary: WalletCardSu
             className={styles.htmlArtwork}
           />
           {profileArtwork?.displayName ? <span className={styles.dynamicCardName}>{profileArtwork.displayName}</span> : null}
-          {profileArtwork?.shareUrl ? <WalletCardQr value={profileArtwork.shareUrl} label="Wallet Profile QR code" className={styles.dynamicCardQr} /> : null}
+          {profileArtwork?.shareUrl && summary.cardId !== "demo-2" ? <WalletCardQr value={profileArtwork.shareUrl} label="Wallet Profile QR code" className={styles.dynamicCardQr} /> : null}
         </div>
       </div>
     </div>
@@ -74,7 +74,6 @@ export function WalletDemoCardDetails({ cardId, profile }: { cardId: string; pro
     ["Phone", payload?.phone || null],
     ["Website", payload?.website || null],
     ["LinkedIn", payload?.linkedin || null],
-    ["GitHub", payload?.github || null],
     ["Portfolio", payload?.portfolio || null],
   ].filter((field): field is [string, string] => Boolean(field[1]));
   return (
