@@ -340,13 +340,19 @@ class DriveSharingStore(DriveDocumentStore):
                   SELECT r.request_id FROM drive_share_requests r
                   JOIN drive_owner_search_jobs j ON j.user_id=r.user_id
                     AND j.client_request_id=r.request_id
+                  LEFT JOIN drive_request_payment_orders o ON o.request_id=r.request_id
                   WHERE r.status='pending' AND r.bulk_search_started_at IS NOT NULL
                     AND r.preparation_error_code IN
                       ('trusted_auto_active','background_preparation_required')
                     AND r.preparation_next_at<=clock_timestamp()
                     AND r.expires_at>clock_timestamp()
                     AND j.status IN ('queued','running','completed')
-                  ORDER BY r.preparation_inspected_at,r.created_at,r.request_id
+                    AND (NOT r.payment_required OR o.request_id IS NULL
+                      OR (o.status='paid' AND o.paid_at IS NOT NULL
+                        AND o.reconciliation_required=FALSE))
+                  ORDER BY CASE WHEN r.payment_required AND o.status='paid'
+                    THEN 0 ELSE 1 END,
+                    r.preparation_inspected_at,r.created_at,r.request_id
                   LIMIT :limit FOR UPDATE OF r SKIP LOCKED
                 )
                 UPDATE drive_share_requests r SET preparation_inspected_at=clock_timestamp()
