@@ -900,6 +900,19 @@ and unlocked-vault admission, requiring known, unexpired owner authority.
 It opens a labelled synthetic suggestion with Review, Later and Not my business.
 Editing a name/HTTPS website invalidates prior proposals. Review uses the existing
 private-agent memory preparation and exact-card selection; it does not save.
+Business review additionally exposes the proposed entity's individual fields,
+including nested object leaves. Arrays and synthesized summaries are visible,
+atomic entries; they are not silently rewritten to remove an overlapping fact.
+The owner can select/deselect each entry and Save shows the selected field count.
+An empty selection cannot save. Consent narrowing retains the model's domain,
+entity identity and merge decision, but builds an incoming payload containing only
+selected fields and internal business provenance. Unreviewed sibling payloads and
+original model summary projections cannot ride along. Save checkpoints the narrowed
+cards and approved source text; the full listing snapshot remains encrypted recovery
+evidence, not information added to PKM. Pending jobs lock their field selection and
+retry the exact approved payload/scopes. Deselection does not delete existing memory.
+An existing same-UID entity cannot be replaced with `create_entity`; it requires a
+fresh model-prepared update to avoid erasing previously saved omitted fields.
 Save requires an explicit second action, plus separate acknowledgment when the
 selected memory affects active sharing. It rechecks fresh candidate eligibility
 before using `business_profile_review`, a governed memory-agent writer, through
