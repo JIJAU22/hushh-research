@@ -56,8 +56,17 @@ describe("auth session invalidation contract", () => {
     expect(route).toBe("/login?auth_notice=account_deleted");
     expect(readAuthSessionLandingNotice(params)).toEqual({
       code: "account_deleted",
-      message: "Account deleted. You have been securely signed out.",
+      message: "Account deleted. Sign in to start fresh.",
       toastId: "auth-session-account-deleted",
+    });
+  });
+
+  it("keeps fresh start pending until the old sign-in account is removed", () => {
+    const route = buildLoginRouteWithAuthSessionNotice("account_deletion_finishing");
+    const params = new URL(route, "https://one.hushh.ai").searchParams;
+    expect(readAuthSessionLandingNotice(params)).toMatchObject({
+      code: "account_deletion_finishing",
+      message: expect.stringContaining("finishing account removal"),
     });
   });
 

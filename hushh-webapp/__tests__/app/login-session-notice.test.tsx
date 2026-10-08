@@ -91,7 +91,7 @@ describe("login terminal-session notice", () => {
 
     await waitFor(() =>
       expect(mocks.toastSuccess).toHaveBeenCalledWith(
-        "Account deleted. You have been securely signed out.",
+        "Account deleted. Sign in to start fresh.",
         { id: "auth-session-account-deleted" },
       ),
     );
