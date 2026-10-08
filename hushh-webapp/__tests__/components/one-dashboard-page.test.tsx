@@ -179,7 +179,7 @@ describe("OneDashboardPage", () => {
     expect(screen.queryByText("Explore")).toBeNull();
     // Gmail and Calendar are first-class setup capabilities; Wallet, Memory,
     // and Consent remain direct workspaces and do not inflate setup progress.
-    expect(container.querySelectorAll('a[aria-label^="Open "]').length).toBe(8);
+    expect(container.querySelectorAll('a[aria-label^="Open "]').length).toBe(9);
     expect(
       screen.getByRole("link", { name: "Open Memory" }).getAttribute("href"),
     ).toBe(ROUTES.PKM);
