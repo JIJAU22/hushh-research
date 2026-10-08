@@ -341,8 +341,8 @@ describe("PersonProfilePage native profile route", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Message" }));
-    expect(mocks.push).toHaveBeenCalledWith(
+    expect(screen.queryByRole("button", { name: "Message" })).toBeNull();
+    expect(mocks.push).not.toHaveBeenCalledWith(
       "/one/messages?person=actual-public-ref",
     );
   });
