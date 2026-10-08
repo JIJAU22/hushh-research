@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -63,7 +63,11 @@ describe("lost vault deletion", () => {
     expect(mocks.deleteAccount).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: "Permanently delete account" }));
+    const deleteButton = screen.getByRole("button", { name: "Permanently delete account" });
+    act(() => {
+      fireEvent.click(deleteButton);
+      fireEvent.click(deleteButton);
+    });
 
     await waitFor(() => expect(mocks.deleteAccount).toHaveBeenCalledWith({
       userId: "owner-1",
@@ -71,6 +75,7 @@ describe("lost vault deletion", () => {
       firebaseIdToken: "fresh-provider-token",
       phoneIdToken: undefined,
     }));
+    expect(mocks.deleteAccount).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("link", { name: "Create a new account" })).toHaveAttribute("href", "/login");
   });
 

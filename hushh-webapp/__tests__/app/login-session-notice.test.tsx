@@ -91,7 +91,7 @@ describe("login terminal-session notice", () => {
 
     await waitFor(() =>
       expect(mocks.toastSuccess).toHaveBeenCalledWith(
-        "Account deleted. Sign in to start fresh.",
+        "Account deleted. You have been securely signed out.",
         { id: "auth-session-account-deleted" },
       ),
     );
@@ -101,6 +101,29 @@ describe("login terminal-session notice", () => {
       "",
       "/login",
     );
+  });
+
+  it("keeps confirmed fresh start visible after the success toast fades", async () => {
+    mocks.search = "auth_notice=account_deleted_ready_to_start_fresh";
+    render(<LoginPage />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Continue below to start fresh");
+    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      "Your old account is deleted. Continue below to start fresh.",
+      { id: "auth-session-account-deleted-ready" },
+    ));
+  });
+
+  it("shows pending identity cleanup without inviting a new account", async () => {
+    mocks.search = "auth_notice=account_deletion_finishing";
+    render(<LoginPage />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("finishing account removal");
+    expect(screen.getByRole("status")).not.toHaveTextContent("start fresh");
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+      expect.stringContaining("finishing account removal"),
+      { id: "auth-session-account-deletion-finishing" },
+    ));
   });
 
   it("explains a fail-closed sign-out without claiming uncertain deletion succeeded", async () => {

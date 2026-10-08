@@ -480,9 +480,11 @@ async function executeAccountDeletion(params: {
     // success, so it receives success copy; sibling/other devices still use
     // the authoritative account-not-found notice.
     dispatchAuthSessionInvalidated({
-      code: result.ready_to_start_fresh === false
-        ? "account_deletion_finishing"
-        : "account_deleted",
+      code: result.ready_to_start_fresh === true
+        ? "account_deleted_ready_to_start_fresh"
+        : result.ready_to_start_fresh === false
+          ? "account_deletion_finishing"
+          : "account_deleted",
       path: "account_delete_confirmed",
       userId: params.userId,
     });

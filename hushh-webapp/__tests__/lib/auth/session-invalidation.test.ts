@@ -56,8 +56,17 @@ describe("auth session invalidation contract", () => {
     expect(route).toBe("/login?auth_notice=account_deleted");
     expect(readAuthSessionLandingNotice(params)).toEqual({
       code: "account_deleted",
-      message: "Account deleted. Sign in to start fresh.",
+      message: "Account deleted. You have been securely signed out.",
       toastId: "auth-session-account-deleted",
+    });
+  });
+
+  it("offers a fresh start only after Firebase identity removal is confirmed", () => {
+    const route = buildLoginRouteWithAuthSessionNotice("account_deleted_ready_to_start_fresh");
+    const params = new URL(route, "https://one.hushh.ai").searchParams;
+    expect(readAuthSessionLandingNotice(params)).toMatchObject({
+      code: "account_deleted_ready_to_start_fresh",
+      message: expect.stringContaining("start fresh"),
     });
   });
 

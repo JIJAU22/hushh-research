@@ -47,6 +47,7 @@ export function LostVaultDeletePanel({ user, onBack }: { user: User; onBack: () 
   const [acknowledged, setAcknowledged] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const deleteAttemptRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -144,7 +145,8 @@ export function LostVaultDeletePanel({ user, onBack }: { user: User; onBack: () 
   }
 
   async function deleteAccount() {
-    if (!acknowledged || !providerIdToken || (options?.phone_available && !phoneIdToken)) return;
+    if (deleteAttemptRef.current || !acknowledged || !providerIdToken || (options?.phone_available && !phoneIdToken)) return;
+    deleteAttemptRef.current = true;
     setStage("deleting");
     setError(null);
     try {
@@ -163,6 +165,7 @@ export function LostVaultDeletePanel({ user, onBack }: { user: User; onBack: () 
       if (errorCode === "ACCOUNT_DELETION_OUTCOME_UNCERTAIN") {
         setStage("uncertain");
       } else {
+        deleteAttemptRef.current = false;
         setStage("review");
         setProviderIdToken("");
         setPhoneIdToken("");
