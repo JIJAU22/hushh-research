@@ -172,10 +172,9 @@ export function WalletCardBrowser({ cards, selectedCardId, onSelect, onOverview,
         {demo ? <><Button variant="ghost" size="compact" onClick={() => setPreviewAction("Statement")}>Statements <ArrowRight aria-hidden="true" className="size-4" /></Button><Button variant="ghost" size="compact" onClick={() => setPreviewAction("Autopay")}>Autopay <ArrowRight aria-hidden="true" className="size-4" /></Button></> : null}
       </div>
     </> : <div key={`${demo ? "demo" : "saved"}-${selected.cardId}`} className="motion-step-enter space-y-5" data-testid="wallet-selected-card">
-      <div className={styles.detailNavigation}><Button variant="ghost" size="compact" onClick={showAll} disabled={isBusy}><ArrowLeft aria-hidden="true" className="size-4" />All cards</Button><span>{index + 1} / {collection.length}</span><Button variant="ghost" size="compact" disabled={isBusy || index === collection.length - 1} aria-label="Next card" onClick={() => { const next = collection[index + 1]; if (next) choose(next.cardId); }}><ArrowRight aria-hidden="true" className="size-4" /></Button></div>
-      {demo ? <div className={styles.paymentHeader}><Button variant="secondary" size="compact" onClick={() => setPreviewAction("Payment")}>Payment</Button></div> : null}
+      <div className={styles.detailNavigation}><Button variant="ghost" size="compact" onClick={showAll} disabled={isBusy}><ArrowLeft aria-hidden="true" className="size-4" />All cards</Button><span>{index + 1} / {collection.length}</span><Button variant="ghost" size="compact" disabled={isBusy || index === collection.length - 1} aria-label="Next card" onClick={() => { const next = collection[index + 1]; if (next) choose(next.cardId); }}><ArrowRight aria-hidden="true" className="size-4" /></Button></div>\r?\n      {demo ? <div className={styles.paymentHeader}><Button variant="secondary" size="compact" onClick={() => setPreviewAction("Payment")}>Payment</Button></div> : null}
       <div data-swipe-views-horizontal-scroll onTouchStart={(event) => { const point = event.touches[0]; gesture.current = event.touches.length === 1 && point ? { x: point.clientX, y: point.clientY } : null; }} onTouchEnd={finishSwipe} onTouchCancel={() => { gesture.current = null; }} className={styles.selectedFace}>
-        {demo ? <WalletDemoCardFace summary={selected} profile={demoProfile} /> : <WalletCardFace summary={selected} collection />}
+        {demo ? <WalletDemoCardFace summary={selected} profile={demoProfile}  /> : <WalletCardFace summary={selected} collection />}
       </div>
       {demo ? <><DemoActivity cardId={selected.cardId} onPreview={setPreviewAction} /><WalletDemoCardDetails cardId={selected.cardId} profile={demoProfile} /></> : details}
     </div>}
@@ -188,3 +187,4 @@ export function WalletCardBrowser({ cards, selectedCardId, onSelect, onOverview,
     </Dialog>
   </div>;
 }
+
