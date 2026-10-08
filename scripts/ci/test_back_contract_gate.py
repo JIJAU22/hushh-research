@@ -20,6 +20,8 @@ def validate(workflow):
         raise ValueError("Back must run independently with failures enforced")
     if not re.search(r"^\s+- run: npm run verify:back-contracts\s*$", back, re.M):
         raise ValueError("Back verifier missing or failure suppressed")
+    if not re.search(r"^\s+- run: npm ci --prefer-offline --no-audit --progress=false\s*$", back, re.M):
+        raise ValueError("Back must install its peer dependencies with the canonical web recipe")
     for name in ("preflight-gate", "ci-status"):
         gate = job_block(workflow, name)
         needs = re.search(r"^    needs:\n((?:      - [^\n]+\n)+)", gate, re.M)
@@ -51,6 +53,11 @@ class BackGateTests(unittest.TestCase):
                 validate(self.workflow.replace("  back-navigation-contracts:\n", f"  back-navigation-contracts:\n    {rule}\n"))
         with self.assertRaises(ValueError):
             validate(self.workflow.replace("- run: npm run verify:back-contracts", "- run: npm run verify:back-contracts || true"))
+
+    def test_legacy_install_cannot_drop_the_dom_regression_dependencies(self):
+        for weakened in ("npm ci --legacy-peer-deps", "npm ci --omit=dev"):
+            with self.assertRaises(ValueError):
+                validate(self.workflow.replace("npm ci --prefer-offline --no-audit --progress=false", weakened))
 
     def test_each_aggregate_gate_rejects_removed_dependency_and_skip_check(self):
         for name in ("preflight-gate", "ci-status"):

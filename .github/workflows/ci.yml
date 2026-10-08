@@ -1081,7 +1081,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: hushh-webapp/package-lock.json
-      - run: npm ci --legacy-peer-deps
+      - run: npm ci --prefer-offline --no-audit --progress=false
         working-directory: hushh-webapp
       - run: npm run verify:back-contracts
         working-directory: hushh-webapp
