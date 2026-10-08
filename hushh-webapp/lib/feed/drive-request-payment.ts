@@ -79,6 +79,7 @@ function expiryTimestamp(value: unknown): number | null {
 
 function paymentState(entry: ConsentCenterEntry, now = Date.now()): FeedDrivePaymentStatus | null {
   const metadata = entry.metadata || {};
+  if (isTruthyMetadata(metadata.accessStopped)) return null;
   const paymentStatus = nonEmptyString(metadata.paymentStatus).toLowerCase();
   const requestStatus = nonEmptyString(entry.status).toLowerCase();
   if (requestStatus === "expired") return "expired";
@@ -102,18 +103,17 @@ function paymentState(entry: ConsentCenterEntry, now = Date.now()): FeedDrivePay
   // A completed/refunded order can retain the original Checkout expiry for
   // audit history. Never turn that historical timestamp back into a payment
   // action while the request projection is catching up.
-  if (
-    paymentStatus !== "awaiting_payment" &&
-    paymentStatus !== "checkout_open" &&
-    paymentStatus !== "expired"
-  ) return null;
+  // An awaiting order has no Stripe session or deadline yet. The worker
+  // creates the session before the Pay action becomes visible.
+  if (paymentStatus === "awaiting_payment") return null;
+  if (paymentStatus !== "checkout_open" && paymentStatus !== "expired") return null;
+  if (paymentStatus === "checkout_open" && checkoutExpiresAt === null) return null;
   if (
     checkoutExpired ||
     (checkoutExpiresAt !== null && checkoutExpiresAt <= now)
   ) return "link_expired";
-  // Older projections only exposed the provider's terminal status. For an
-  // otherwise-open request that status means the Checkout link expired; the
-  // request itself can still be paid through a replacement link.
+  // A bound Checkout expires once. The request can be inspected, but this
+  // payment order cannot produce a replacement link.
   if (paymentStatus === "expired" && isOpenRequest) return "link_expired";
   return "ready";
 }
@@ -215,11 +215,11 @@ function paymentCopy(
     return owner
       ? {
           title: "Payment link expired",
-          description: `The $10 link for files from ${owner} expired. Create a new link.`,
+          description: `The $10 link for files from ${owner} expired.`,
         }
       : {
           title: "Payment link expired",
-          description: "The $10 link expired. Create a new link to continue.",
+          description: "The $10 link expired.",
         };
   }
   return owner
@@ -298,10 +298,11 @@ export function projectFeedDrivePayments(entries: ConsentCenterEntry[], now = Da
       ownerLabel,
       expiresAt,
       href:
-        effectiveStatus === "expired"
-          ? buildConsentCenterHref("previous", {
+        effectiveStatus === "expired" || effectiveStatus === "link_expired"
+          ? buildConsentCenterHref(effectiveStatus === "expired" ? "previous" : "pending", {
               requestId: entry.id,
               from: "/one/feed",
+              requestView: effectiveStatus === "link_expired" ? "sent" : undefined,
             })
           : undefined,
     });

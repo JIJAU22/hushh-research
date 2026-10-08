@@ -118,6 +118,7 @@ function preparationError(value: unknown): SharingPreparationError | null {
 }
 export type SharingDelivery = {
   status: string;
+  accessStopStatus?: "pending" | "removed" | "needs_attention" | null;
   files: SharingDeliveryFile[];
   fileCount?: number;
   sharedCount?: number;
@@ -126,6 +127,10 @@ export type SharingDelivery = {
   counts?: DriveBulkShareCounts;
   issues?: DriveBulkShareIssue[];
 };
+function accessStopStatus(value: unknown): NonNullable<SharingDelivery["accessStopStatus"]> {
+  if (value === "pending" || value === "removed" || value === "needs_attention") return value;
+  throw new DriveSharingError("invalid_response");
+}
 export type SharingDeliveryFile = {
     name: string;
     status: string;
@@ -145,6 +150,8 @@ export type SharingRevocationReview = {
   reviewDigest: string;
   expiresAt: string;
   files: { grantId: string; name: string; recipientEmail: string }[];
+  affectedCount?: number;
+  pendingCount?: number;
 };
 export type TrustedDocumentRule = {
   ruleId: string;
@@ -1228,6 +1235,9 @@ export class DriveSharingService {
       throw new DriveSharingError("invalid_response");
     return {
       status: string(result.status, 80),
+      ...(result.accessStopStatus == null ? {} : {
+        accessStopStatus: accessStopStatus(result.accessStopStatus),
+      }),
       files: files(result.files, parseDeliveryFile),
       ...(result.bulkShareId == null ? {} : {
         bulkShareId: id(result.bulkShareId),
@@ -1460,6 +1470,8 @@ export class DriveSharingService {
         name: string(file.name, 1024),
         recipientEmail: string(file.recipientEmail, 320),
       })),
+      ...(result.affectedCount == null ? {} : { affectedCount: bulkCount(result.affectedCount, 10_000) }),
+      ...(result.pendingCount == null ? {} : { pendingCount: bulkCount(result.pendingCount, 10_000) }),
     };
   }
   static revoke(

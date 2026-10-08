@@ -839,13 +839,13 @@ export function useFeedActionables(): UseFeedActionablesResult {
 
     for (const payment of sentPayments) {
       const displayPayment = describeFeedDrivePayment(payment, paymentClockNow, paymentContexts[payment.requestId]);
-      const paymentIsExpired = displayPayment.status === "expired";
+      const paymentIsExpired = displayPayment.status !== "ready";
       const paymentAction = paymentIsExpired
         ? []
         : [
             {
-              key: displayPayment.status === "link_expired" ? "renew" : "pay",
-              label: displayPayment.status === "link_expired" ? "Create new link" : "Pay $10",
+              key: "pay",
+              label: "Pay $10",
               tone: "primary" as const,
               run: async () => {
                 try {

@@ -291,8 +291,19 @@ async def test_payment_push_accepts_approved_requests_but_suppresses_expired_che
         connection.execute(
             text("""INSERT INTO drive_request_payment_orders
               (request_id,user_id,requester_user_id,status,stripe_checkout_expires_at)
-              VALUES (:request,'owner','recipient','checkout_open',
+              VALUES (:request,'owner','recipient','awaiting_payment',
                 clock_timestamp()+INTERVAL '5 minutes')"""),
+            {"request": request_id},
+        )
+    assert not await notification_store.payment_ready_current(
+        request_id=request_id, user_id="recipient"
+    )
+    with sharing.db.engine.begin() as connection:
+        connection.execute(
+            text("""UPDATE drive_request_payment_orders
+              SET status='checkout_open',stripe_checkout_session_id='cs_test_notice',
+                stripe_checkout_url='https://checkout.stripe.com/c/pay/test'
+              WHERE request_id=:request"""),
             {"request": request_id},
         )
     assert await notification_store.payment_ready_current(
