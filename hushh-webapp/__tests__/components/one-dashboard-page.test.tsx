@@ -135,18 +135,15 @@ describe("OneDashboardPage", () => {
     for (const id of expectedAppIcons) {
       const icon = screen.getAllByTestId(`one-agent-icon-${id}`)[0];
       expect(icon).toBeTruthy();
-      expect(icon).toHaveAttribute("data-agent-icon-kind", "svg");
-      expect(icon.querySelector("svg")).toHaveAttribute("viewBox", "0 0 64 64");
-      expect(icon.querySelector("img, image")).toBeNull();
+      expect(icon).toHaveAttribute("data-agent-icon-kind", "image");
+      expect(icon.querySelectorAll("img")).toHaveLength(2);
     }
     const financeIcon = screen.getAllByTestId("one-agent-icon-finance")[0];
     // An unfinished workspace keeps its recognizable full-color artwork.
-    expect(financeIcon.querySelector("stop")).toHaveAttribute(
-      "stop-color", "#43CF73",
+    expect(financeIcon.querySelector("img")).toHaveAttribute(
+      "src", "/agents-icon-set/finance-light.webp",
     );
-    expect(financeIcon.querySelector("svg")?.className.baseVal).not.toContain(
-      "grayscale",
-    );
+    expect(financeIcon.className).not.toContain("grayscale");
     expect(financeIcon.querySelector(".backdrop-blur-\\[8px\\]")).toBeNull();
     const riaLink = screen.getByRole("link", { name: "Open Advisor" });
     expect(riaLink.getAttribute("href")).toBe(
@@ -217,8 +214,8 @@ describe("OneDashboardPage", () => {
 
     // Completed setup keeps the same capability artwork as unfinished setup.
     const financeIcon = screen.getAllByTestId("one-agent-icon-finance")[0];
-    expect(financeIcon.querySelector("stop")).toHaveAttribute(
-      "stop-color", "#43CF73",
+    expect(financeIcon.querySelector("img")).toHaveAttribute(
+      "src", "/agents-icon-set/finance-light.webp",
     );
     const rosterPaletteOrder = [
       "finance",
@@ -230,19 +227,15 @@ describe("OneDashboardPage", () => {
       "pkm",
       "consent",
     ] as const;
-    const iconBackgrounds = Object.fromEntries(
-      rosterPaletteOrder.map((id) => [
-        id,
-        screen
-          .getAllByTestId(`one-agent-icon-${id}`)[0]
-          .querySelector("stop")?.getAttribute("stop-color"),
-      ]),
+    const iconSources = rosterPaletteOrder.map((id) =>
+      screen
+        .getAllByTestId(`one-agent-icon-${id}`)[0]
+        .querySelector("img")?.getAttribute("src"),
     );
-    expect(Object.values(iconBackgrounds).every(Boolean)).toBe(true);
-    expect(new Set(Object.values(iconBackgrounds)).size).toBe(
+    expect(iconSources.every(Boolean)).toBe(true);
+    expect(new Set(iconSources).size).toBe(
       rosterPaletteOrder.length,
     );
-    expect(financeIcon.querySelector("svg g")).toHaveAttribute("fill", "white");
   });
 
   it("renders authored setup actions instead of transient checking states", () => {
