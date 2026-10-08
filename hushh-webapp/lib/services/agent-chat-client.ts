@@ -53,6 +53,7 @@ import {
   type AgentStructuredExperience,
 } from "@/lib/agent/agui-structured-experiences";
 import { ownerStyleRequestField, type OwnerStyleSettings } from "@/lib/agent/owner-style-settings";
+import type { ReceiptCanonicalIndex } from "@/lib/profile/gmail-receipt-memory-index";
 
 export type AgentChatMessage = {
   id: string;
@@ -1194,6 +1195,12 @@ export async function streamAgentChat(input: {
   /** One saved Drive result, checked against the current owner and live Drive before use. */
   driveSearchSelection?: { jobId: string; position: number };
   pendingEmailDraft?: PendingEmailDraftContext | null;
+  /**
+   * The owner's saved receipt index, decrypted on this device. It rides beside
+   * the turn only for the Email receipts read; the server validates it against
+   * a closed schema and keeps it for this one turn, never as conversation state.
+   */
+  receiptMemory?: ReceiptCanonicalIndex | null;
   screenContext?: Record<string, unknown> | null;
   signal?: AbortSignal;
   handlers?: AgentChatStreamHandlers;
@@ -1440,6 +1447,7 @@ export async function streamAgentChat(input: {
               gmailInformationRequestWorkflowId: input.gmailInformationRequestWorkflowId,
               ...(input.driveSearchSelection ? { driveSearchSelection: input.driveSearchSelection } : {}),
               ...(input.pendingEmailDraft ? { pendingEmailDraft: input.pendingEmailDraft } : {}),
+              ...(input.receiptMemory ? { receiptMemory: input.receiptMemory } : {}),
               screenContext: input.screenContext,
             },
             resume: [{ interruptId, status, payload }],
@@ -1892,6 +1900,7 @@ export async function streamAgentChat(input: {
                     gmailInformationRequestWorkflowId: input.gmailInformationRequestWorkflowId,
                     ...(input.driveSearchSelection ? { driveSearchSelection: input.driveSearchSelection } : {}),
                     ...(input.pendingEmailDraft ? { pendingEmailDraft: input.pendingEmailDraft } : {}),
+                    ...(input.receiptMemory ? { receiptMemory: input.receiptMemory } : {}),
                     screenContext: input.screenContext,
                     ...(approval ? { mcpApproval: {
                       directiveId: approval.directiveId, connectorId: approval.connectorId,
@@ -1990,6 +1999,7 @@ export async function streamAgentChat(input: {
         gmailInformationRequestWorkflowId: input.gmailInformationRequestWorkflowId,
         ...(input.driveSearchSelection ? { driveSearchSelection: input.driveSearchSelection } : {}),
         ...(input.pendingEmailDraft ? { pendingEmailDraft: input.pendingEmailDraft } : {}),
+        ...(input.receiptMemory ? { receiptMemory: input.receiptMemory } : {}),
         screenContext: input.screenContext,
         ...(input.consentContinuation ? { consentContinuation: input.consentContinuation } : {}),
         ...(input.feedAttention ? { feedAttention: { itemId: input.feedAttention.itemId } } : {}),

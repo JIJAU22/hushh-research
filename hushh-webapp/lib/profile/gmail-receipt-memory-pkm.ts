@@ -10,6 +10,10 @@ import {
   CURRENT_READABLE_SUMMARY_VERSION,
   currentDomainContractVersion,
 } from "@/lib/personal-knowledge-model/upgrade-contracts";
+import {
+  mergeReceiptsMemoryWithIndex,
+  type ReceiptCanonicalIndex,
+} from "@/lib/profile/gmail-receipt-memory-index";
 import type {
   ReceiptMemoryArtifact,
   ShoppingReceiptsMemoryPayload,
@@ -154,6 +158,116 @@ export function buildShoppingReceiptMemoryPreparedDomain(params: {
   return {
     domainData: nextDomainData,
     summary,
+    manifest,
+    structureDecision,
+  };
+}
+
+/**
+ * Prepares the `shopping` domain write for the owner-confirmed receipt memory
+ * save (`gmail_receipt_memory_save_button`). It extends the existing
+ * `receipts_memory` payload with the canonical transaction index built on this
+ * device from the rows Mail > Receipts shows; it never reads the retired server
+ * receipt table. Sibling shopping data is preserved, existing summary fields
+ * are kept, and every `receipts_memory` path stays non-shareable.
+ */
+export function buildShoppingReceiptCanonicalIndexPreparedDomain(params: {
+  currentDomainData: Record<string, unknown>;
+  currentManifest: DomainManifest | null;
+  index: ReceiptCanonicalIndex;
+  digest: string;
+  now: Date;
+}): {
+  domainData: Record<string, unknown>;
+  summary: Record<string, unknown>;
+  manifest: DomainManifest;
+  structureDecision: StructureDecision;
+} {
+  const receiptsMemory = mergeReceiptsMemoryWithIndex({
+    existing: params.currentDomainData.receipts_memory,
+    index: params.index,
+    digest: params.digest,
+    now: params.now,
+  });
+  const nextDomainData = {
+    ...params.currentDomainData,
+    receipts_memory: receiptsMemory,
+  };
+
+  const generated = buildPersonalKnowledgeModelStructureArtifacts({
+    domain: "shopping",
+    domainData: nextDomainData,
+    previousManifest: params.currentManifest,
+  });
+  const paths = buildPathDescriptors({
+    generatedPaths: generated.manifest.paths,
+    currentManifest: params.currentManifest,
+  });
+  const topLevelScopePaths = Array.from(
+    new Set(
+      [
+        ...(params.currentManifest?.top_level_scope_paths || []),
+        ...generated.manifest.top_level_scope_paths,
+      ].filter(Boolean)
+    )
+  );
+  const externalizablePaths = paths
+    .filter((path) => path.exposure_eligibility)
+    .map((path) => path.json_path);
+
+  const readableSummary = toRecord(receiptsMemory.readable_summary);
+  const summaryProjection = {
+    ...(params.currentManifest?.summary_projection || {}),
+    readable_summary: String(readableSummary.text || ""),
+    readable_highlights: Array.isArray(readableSummary.highlights)
+      ? readableSummary.highlights
+      : [],
+    readable_updated_at: String(readableSummary.updated_at || ""),
+    readable_source_label: String(readableSummary.source_label || "Gmail receipts"),
+    domain_contract_version: currentDomainContractVersion("shopping"),
+    readable_summary_version: CURRENT_READABLE_SUMMARY_VERSION,
+    receipt_memory_artifact_id: `canonical_index:${params.digest.slice(0, 16)}`,
+    receipt_memory_projection_hash: params.digest,
+    receipt_memory_enrichment_hash: null,
+    path_count: paths.length,
+    externalizable_path_count: externalizablePaths.length,
+    top_level_scope_count: topLevelScopePaths.length,
+  };
+
+  const structureDecision: StructureDecision = {
+    ...generated.structureDecision,
+    action: params.currentManifest ? "extend_domain" : generated.structureDecision.action,
+    target_domain: "shopping",
+    json_paths: paths.map((path) => path.json_path),
+    top_level_scope_paths: topLevelScopePaths,
+    externalizable_paths: externalizablePaths,
+    summary_projection: summaryProjection,
+    confidence: 1,
+    source_agent: "gmail_receipt_memory_v1",
+    contract_version: 1,
+  };
+
+  const manifest: DomainManifest = {
+    ...generated.manifest,
+    domain: "shopping",
+    manifest_version: Math.max(
+      generated.manifest.manifest_version,
+      (params.currentManifest?.manifest_version || 0) + 1
+    ),
+    domain_contract_version: currentDomainContractVersion("shopping"),
+    readable_summary_version: CURRENT_READABLE_SUMMARY_VERSION,
+    structure_decision: structureDecision,
+    summary_projection: summaryProjection,
+    top_level_scope_paths: topLevelScopePaths,
+    externalizable_paths: externalizablePaths,
+    path_count: paths.length,
+    externalizable_path_count: externalizablePaths.length,
+    paths,
+  };
+
+  return {
+    domainData: nextDomainData,
+    summary: { ...summaryProjection, source: "gmail_receipt_memory_v1" },
     manifest,
     structureDecision,
   };
