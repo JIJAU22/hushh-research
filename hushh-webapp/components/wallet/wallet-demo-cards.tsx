@@ -52,7 +52,7 @@ export function WalletDemoCardFace({ summary, profile }: { summary: WalletCardSu
             className={styles.htmlArtwork}
           />
           {profileArtwork?.displayName ? <span className={styles.dynamicCardName}>{profileArtwork.displayName}</span> : null}
-          {profileArtwork?.shareUrl ? <WalletCardQr value={profileArtwork.shareUrl} label="Wallet Profile QR code" className={styles.dynamicCardQr} /> : null}
+          {profileArtwork?.shareUrl && summary.cardId !== "demo-2" ? <WalletCardQr value={profileArtwork.shareUrl} label="Wallet Profile QR code" className={styles.dynamicCardQr} /> : null}
         </div>
       </div>
     </div>
