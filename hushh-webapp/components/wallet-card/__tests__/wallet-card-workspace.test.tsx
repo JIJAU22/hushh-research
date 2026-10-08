@@ -130,6 +130,9 @@ describe("Wallet Profile owner isolation", () => {
     mocks.getCard.mockResolvedValue({ enabled: true, exists: true, card });
     const view = render(<WalletCardWorkspace embedded />);
     await screen.findByText("First owner");
+    // Settle the initial manage-stage refresh before simulating a new rotation.
+    // Notifications during that read are intentionally coalesced by its owner.
+    await act(async () => {});
     mocks.readShareLink.mockImplementation((owner) => owner === "owner-a" ? null : { shareUrl: "/c/second" });
     let finish!: (result: unknown) => void;
     mocks.ensureCard.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
