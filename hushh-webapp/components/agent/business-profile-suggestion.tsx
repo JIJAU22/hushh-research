@@ -74,10 +74,13 @@ export function BusinessProfileSuggestion(props: Props) {
   if (!enabled || !ownerId || !vaultKey || !vaultOwnerToken || tokenExpiresAt === null || Date.now() >= tokenExpiresAt ||
     discovery?.ownerId !== ownerId || discovery.token !== vaultOwnerToken || discovery.key !== vaultKey) return null;
   const candidates = discovery.candidates.filter(candidate => !props.dismissedBusinessUids?.has(candidate.businessUid));
-  if (!candidates.length) return null;
+  const retryableStatus = discovery.status === "unavailable" || discovery.incomplete;
+  if (!candidates.length && !retryableStatus && discovery.status !== "insufficient_signals") return null;
   return <div className="space-y-[var(--app-form-section-gap)]">
-    {discovery.incomplete && <div className="space-y-[var(--app-form-field-gap)]">
-      <HelperText>Business lookup is incomplete. Available suggestions may not include every business.</HelperText>
+    {retryableStatus && <div className="space-y-[var(--app-form-field-gap)]">
+      <HelperText>{discovery.status === "unavailable"
+        ? "Business lookup is temporarily unavailable. Nothing was saved; try again when the directory is reachable."
+        : "Business lookup is incomplete. Available suggestions may not include every business."}</HelperText>
       <Button variant="link" size="standard" onClick={() => setAttempt(value => value + 1)}>Retry business lookup</Button>
     </div>}
     {discovery.status === "insufficient_signals" && <HelperText>Your verified contacts could not be used for business lookup yet. Nothing has been saved.</HelperText>}
