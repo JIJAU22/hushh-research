@@ -148,6 +148,18 @@ export function VaultUnlockDialog({ open, title }: { open: boolean; title?: stri
 }
 
 export const trackEvent = () => undefined;
+// The wallet fixture aliases the observability boundary so layout tests never
+// initialize analytics adapters. Keep the API-service surface complete while
+// recording no external events.
+export const toDurationBucket = (durationMs: number) => {
+  if (durationMs < 100) return "lt_100ms";
+  if (durationMs < 300) return "100ms_300ms";
+  if (durationMs < 1000) return "300ms_1s";
+  if (durationMs < 3000) return "1s_3s";
+  if (durationMs < 10000) return "3s_10s";
+  return "gte_10s";
+};
+export const trackApiRequestCompleted = () => undefined;
 export const NativeTestBeacon = () => null;
 
 export class ConsentCenterService {
