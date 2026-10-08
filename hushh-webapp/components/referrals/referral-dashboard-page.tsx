@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/firebase/auth-context";
 import { useReferralStream } from "@/lib/referral/use-referral-stream";
 import { Button, morphyToast } from "@/lib/morphy-ux/morphy";
 import { ROUTES } from "@/lib/navigation/routes";
+import { navigateTopShellBack } from "@/lib/navigation/top-shell-back";
 import {
   ReferralService,
   type CircleLeaderboardEntry,
@@ -433,7 +434,7 @@ function ShellRoot({
       >
         <div className="mx-auto grid h-16 max-w-[1008px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-6">
           <div className="flex items-center gap-3">
-            <ShellActionSurface aria-label="Back to One home" title="Back to One home" onClick={() => router.push(ROUTES.ONE_HOME)} className="referral-back-button !h-11 !w-11">
+            <ShellActionSurface aria-label="Back to One home" title="Back to One home" onClick={() => navigateTopShellBack({ pathname: ROUTES.ONE_REFERRALS, navigate: ({ href, mode }) => router[mode](href) })} className="referral-back-button !h-11 !w-11">
               <ArrowLeft className="size-5" aria-hidden="true" />
             </ShellActionSurface>
             <OneMark emojiSize={19} dotSize={17} />

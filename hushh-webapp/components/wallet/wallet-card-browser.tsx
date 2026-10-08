@@ -12,6 +12,8 @@ import { WalletCardFace } from "./wallet-card-face";
 import { WALLET_DEMO_CARDS, WalletDemoCardFace, isAgentWalletCard, type WalletDemoProfile } from "./wallet-demo-cards";
 import { cardNetworkLabel } from "./card-network-mark";
 import type { WalletCardSummary } from "@/lib/services/wallet-service";
+import { useBackLayer } from "@/lib/navigation/back-layers";
+import { ROUTES } from "@/lib/navigation/routes";
 import styles from "./wallet-card-browser.module.css";
 
 export function WalletCardBrowser({ cards, selectedCardId, onSelect, onOverview, onAdd, onRemove, busyCardId, disabled = false, details, dockHost, ownerId, active = true, demoProfile, referralSummary, referralError = false, onRetryReferral }: {
@@ -87,8 +89,7 @@ export function WalletCardBrowser({ cards, selectedCardId, onSelect, onOverview,
     };
   }, [active, dockHost]);
   const selected = collection.find((card) => card.cardId === (agentCardId ?? selectedCardId)) ?? collection[0];
-  if (!selected) return null;
-  const index = collection.indexOf(selected);
+  const index = selected ? collection.indexOf(selected) : -1;
   const isBusy = disabled || Boolean(busyCardId);
   const goToTop = () => {
     const element = content.current;
@@ -115,6 +116,11 @@ export function WalletCardBrowser({ cards, selectedCardId, onSelect, onOverview,
     onOverview();
     goToTop();
   };
+  useBackLayer(ROUTES.ONE_WALLET, active && mode === "card" ? 1 : 0, () => {
+    showAll();
+    return true;
+  });
+  if (!selected) return null;
   const finishSwipe = (event: TouchEvent) => {
     const start = gesture.current;
     gesture.current = null;
@@ -150,7 +156,7 @@ export function WalletCardBrowser({ cards, selectedCardId, onSelect, onOverview,
       </div>
       {selected.cardId === "agent-one-referral" ? <WalletReferralCardDetails summary={referralSummary ?? null} shareToken={demoProfile?.shareToken ?? null} failed={referralError} onRetry={onRetryReferral} /> : isAgentWalletCard(selected.cardId) ? <div className="space-y-4">
         {selected.cardId === "agent-one-nws" ? <p className="text-sm text-muted-foreground">Your net worth score is not available yet. This card shares your Wallet Profile and its scan totals.</p> : null}
-        <WalletCardWorkspace embedded passVariant={selected.cardId === "agent-one-nws" ? "nws" : "profile"} />
+        <WalletCardWorkspace embedded active={active} passVariant={selected.cardId === "agent-one-nws" ? "nws" : "profile"} />
       </div> : details}
     </div>}
     {active && dockHost ? createPortal(dock, dockHost) : null}
