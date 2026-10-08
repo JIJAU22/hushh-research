@@ -112,7 +112,7 @@ Line references below are to these evidence paths in this audit. Recheck them wh
 
 | Edge | From -- relation --> To | Current contract and evidence |
 | --- | --- | --- |
-| E01 | U -- opens --> S1 -- hands off --> S2 | Connected Mail Agent opens typed One Chat; first visit can queue a sample draft turn. WEB_ENTRY:56-77,117-145. |
+| E01 | U -- opens --> S1 -- hands off --> S2 | Connected Mail Agent opens typed One Chat with an empty composer; only the owner's request starts a turn. WEB_ENTRY:47-50,96-98. |
 | E02 | U -- authenticates --> A1 | Delivery endpoints require matching Firebase and vault owner. SEND_ROUTE:95-105,160-188,270-308. |
 | E03 | S2 -- admits --> A2 -- delegates --> R1 | Typed-only and feature-gated ask_email_agent; owner-bound bridge checks the token. ONE:790-813,1918-1931; BRIDGE:40-70. |
 | E04 | R1 -- selects --> R2 | One semantically chooses Email delegation; the Email planner then selects one structured read or clarification. ONE:790-813; MANIFEST:93-118; DELEGATE:145-184. |
