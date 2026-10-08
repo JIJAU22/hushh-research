@@ -1562,6 +1562,29 @@ class DriveSharingStore(DriveDocumentStore):
 
         return cast(dict, await self._transaction(operation))
 
+    async def requester_context(self, *, user_id: str, request_id: str) -> dict:
+        """The payer's own request text, never owner matches or review contents.
+
+        The caller requires current Vault Owner authority. Keep this separate
+        from the metadata-only status/projection, which can be cached. A paid
+        request was authored by its recipient; owner-initiated shares are free.
+        """
+
+        def operation(connection):
+            row = self._row(
+                connection,
+                """SELECT * FROM drive_share_requests
+                   WHERE request_id=:id AND recipient_user_id=:user
+                     AND payment_required=TRUE""",
+                {"id": str(UUID(request_id)), "user": user_id},
+            )
+            if not row:
+                raise DriveSharingError("request_unavailable")
+            purpose = ShareRequestPurpose.model_validate(self._open_request(row)["purpose"])
+            return {"requestId": str(row["request_id"]), "purpose": purpose.model_dump()}
+
+        return cast(dict, await self._transaction(operation))
+
     async def owner_review(self, *, user_id: str, request_id: str) -> dict:
         """Service must require current Vault Owner authority; never cache this result."""
 
