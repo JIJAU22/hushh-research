@@ -46,6 +46,7 @@ Rules:
 4. Optional eyebrow, title, and short supporting description above the group.
 5. Description must stay compact; do not write paragraph-length helper text.
 6. Group spacing should come from the shared density variables, not ad-hoc `space-y-*` tuning inside route files.
+7. Inside the Profile pane, every panel and nested detail uses transparent group shells and rows so the pane material remains continuous. Preserve separators and control surfaces; do not limit this treatment to the Profile home screen.
 
 ### `SettingsRow`
 

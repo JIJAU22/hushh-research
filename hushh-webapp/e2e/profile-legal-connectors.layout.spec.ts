@@ -139,13 +139,16 @@ function query(page: Page) {
 }
 
 test("Profile root and nested screens share one gutter", async ({ page }) => {
-  for (const width of [320, 393, 768]) {
+  for (const [width, rightInset] of [[320, 12], [393, 12], [768, 18]] as const) {
     await mount(page, { width, at: "/one?profile_pane=1" });
     // A visible sheet can still be travelling in from the right. Measure
     // only its settled grid, not the opening animation's translated frame.
+    // The floating Profile pane keeps a 12–18px viewport gutter; it is not
+    // an edge-to-edge drawer. Keep an independent expected inset so removing
+    // the product gutter still fails this assertion.
     await expect.poll(async () => {
       const frame = await pane(page).boundingBox();
-      return frame ? Math.abs(frame.x + frame.width - width) : Number.POSITIVE_INFINITY;
+      return frame ? Math.abs(frame.x + frame.width - (width - rightInset)) : Number.POSITIVE_INFINITY;
     }).toBeLessThanOrEqual(0.5);
     const cardEdges = () => pane(page).locator("[data-profile-stack-active='true'] [data-slot='settings-group-shell']").first().evaluate(node => {
       const box = node.getBoundingClientRect();

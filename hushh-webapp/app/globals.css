@@ -2390,11 +2390,16 @@ html.dark .profile-pane-sheet[data-slot="sheet-content"],
   line-height: 14px !important;
 }
 
-.profile-pane-scroll-root .profile-home-content [data-slot="settings-group-shell"] {
+/* Every Profile panel shares the pane's material, including nested details. */
+.profile-pane-scroll-root [data-slot="settings-group-shell"] {
   border: 0 !important;
   border-radius: 15px !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+.profile-pane-scroll-root [data-row-layout="settings"] {
+  background: transparent !important;
 }
 
 .profile-pane-scroll-root .profile-home-content [data-row-layout="settings"] {
@@ -2403,7 +2408,6 @@ html.dark .profile-pane-sheet[data-slot="sheet-content"],
   --settings-row-gap: 5px !important;
   min-height: 43px !important;
   padding: 0 !important;
-  background: transparent !important;
   transition: transform 320ms cubic-bezier(0.2, 0.9, 0.2, 1), color 200ms ease;
 }
 
