@@ -427,4 +427,28 @@ def test_preview_public_admission_follows_authenticated_health_and_application_p
         assert auth["with"]["create_credentials_file"] is False
         assert auth["with"]["export_environment_variables"] is False
     quarantine = next(step for step in steps if step.get("id") == "quarantine-preview")
-    assert "always() && failure()" in quarantine["if"]
+    expression = quarantine["if"].replace("&&", "and").replace("||", "or")
+    expression = expression.replace("env.DEV_TARGET", "target").replace(
+        "steps.classify-dev-release.outputs.release_failed", "classified"
+    )
+    for target, failed, classified, expected in (
+        ("scope-commerce-sandbox", False, "true", True),
+        ("scope-commerce-sandbox", True, "", True),
+        ("scope-commerce-sandbox", False, "false", False),
+        ("shared-dev", True, "true", False),
+    ):
+        # Evaluate the authored admission predicate, including the case where a
+        # continued semantic failure leaves the GitHub job status successful.
+        assert (
+            eval(  # noqa: S307 - repository-owned boolean expression, no builtins
+                expression,
+                {"__builtins__": {}},
+                {
+                    "always": lambda: True,
+                    "failure": lambda failed=failed: failed,
+                    "target": target,
+                    "classified": classified,
+                },
+            )
+            is expected
+        )
