@@ -103,6 +103,10 @@ def _auto_job(bulk, *, request_id):
 
 async def _frozen_auto_batch(sharing, bulk, *, payment_status=None):
     request_id = (await _request(sharing))["requestId"]
+    # Real search startup moves a trusted request from queued to active;
+    # the synthetic search rows below must preserve that scheduler gate.
+    context = await sharing.request_bulk_context(user_id="owner", request_id=request_id, start=True)
+    assert context["searchStarted"] is True
     job_id = _auto_job(bulk, request_id=request_id)
     review = await bulk.create_review(
         user_id="owner",
@@ -127,6 +131,14 @@ async def _frozen_auto_batch(sharing, bulk, *, payment_status=None):
             text("""UPDATE drive_owner_search_jobs SET status='completed',
               updated_at=clock_timestamp() WHERE job_id=:job"""),
             {"job": job_id},
+        )
+        assert (
+            connection.execute(
+                text("""SELECT preparation_error_code FROM drive_share_requests
+                  WHERE request_id=:request"""),
+                {"request": request_id},
+            ).scalar_one()
+            == "trusted_auto_active"
         )
     if payment_status is not None:
         with sharing.db.engine.begin() as connection:
