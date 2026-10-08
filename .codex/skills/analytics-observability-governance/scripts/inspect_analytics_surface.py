@@ -11,9 +11,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from google.auth.transport.requests import AuthorizedSession
-from google.oauth2 import service_account
+if TYPE_CHECKING:
+    from google.auth.transport.requests import AuthorizedSession
+
 
 
 DEFAULTS = {
@@ -240,6 +242,10 @@ def load_service_account_json(args: argparse.Namespace) -> str:
 
 
 def build_session(args: argparse.Namespace, *, readwrite: bool = False) -> AuthorizedSession:
+    # Offline scope acceptance uses only stdlib; load Google auth for live reads.
+    from google.auth.transport.requests import AuthorizedSession
+    from google.oauth2 import service_account
+
     payload = load_service_account_json(args)
     scopes = [
         "https://www.googleapis.com/auth/analytics.readonly",
