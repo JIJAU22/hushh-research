@@ -155,6 +155,23 @@ export const AGENT_THEME_BY_TONE: Record<OneCapabilityTone, AgentTheme> = {
       "--agent-icon-profile-fg-dark": "#FFE6BF",
     },
   },
+  messages: {
+    accent: "#007AFF",
+    softTint: "#DDEBFF",
+    onAccent: "#ffffff",
+    iconBackground: "#007AFF",
+    iconForeground: "#ffffff",
+    iconBackgroundDark: "#007AFF",
+    iconForegroundDark: "#ffffff",
+    iconClassName: "bg-[#007AFF] text-white",
+    iconStyle: { backgroundColor: "#007AFF" },
+    profileIconStyle: {
+      "--agent-icon-profile-bg": "#DDEBFF",
+      "--agent-icon-profile-fg": "#0051A8",
+      "--agent-icon-profile-bg-dark": "#173A70",
+      "--agent-icon-profile-fg-dark": "#DDEBFF",
+    },
+  },
   connected: {
     accent: "#30B0C7",
     softTint: "#D8F6FA",
@@ -187,6 +204,7 @@ export const ONE_CAPABILITY_ICON_CLASS_BY_TONE: Record<
   pkm: AGENT_THEME_BY_TONE.pkm.iconClassName,
   consent: AGENT_THEME_BY_TONE.consent.iconClassName,
   connected: AGENT_THEME_BY_TONE.connected.iconClassName,
+  messages: AGENT_THEME_BY_TONE.messages.iconClassName,
 };
 
 export const AGENT_PROFILE_LAUNCHER_PALETTE: readonly AgentProfileIconStyle[] =
