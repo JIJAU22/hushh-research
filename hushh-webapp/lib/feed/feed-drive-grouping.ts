@@ -11,15 +11,8 @@ const DRIVE_OUTCOME_EVENT = "document_share_outcome";
  * matching files" for one request. Remove only the contradicted state while
  * preserving valid progress, payment, and request rows.
  */
-const TERMINAL_STATUS_PRIORITY: Record<string, number> = {
-  no_match: 10,
-  no_files_shared: 10,
-  cancelled: 20,
-  declined: 20,
-  expired: 20,
-  partial: 30,
-  completed: 40,
-};
+const SUCCESSFUL_STATUSES = new Set(["partial", "completed"]);
+const EMPTY_STATUSES = new Set(["no_match", "no_files_shared"]);
 
 function requestId(item: FeedItem): string {
   const value = item.metadata?.request_id;
@@ -37,10 +30,6 @@ function isDriveLifecycleItem(item: FeedItem): boolean {
 function status(item: FeedItem): string {
   const value = item.metadata?.user_facing_status;
   return typeof value === "string" ? value.trim().toLowerCase() : "";
-}
-
-function outcomePriority(item: FeedItem): number {
-  return TERMINAL_STATUS_PRIORITY[status(item)] ?? 0;
 }
 
 /**
@@ -68,8 +57,8 @@ export function collapseDriveLifecycleRows(items: FeedItem[]): FeedItem[] {
   for (const [id, group] of groups) {
     for (const item of group) {
       if (item.event_type !== DRIVE_OUTCOME_EVENT) continue;
-      if (outcomePriority(item) >= 30) successfulOutcomeIds.add(id);
-      if (outcomePriority(item) <= 10) emptyOutcomeIds.add(id);
+      if (SUCCESSFUL_STATUSES.has(status(item))) successfulOutcomeIds.add(id);
+      if (EMPTY_STATUSES.has(status(item))) emptyOutcomeIds.add(id);
     }
   }
 
@@ -88,7 +77,7 @@ export function collapseDriveLifecycleRows(items: FeedItem[]): FeedItem[] {
     const hasEmptyOutcome = emptyOutcomeIds.has(id);
     if (
       item.event_type === DRIVE_OUTCOME_EVENT &&
-      outcomePriority(item) <= 10 &&
+      EMPTY_STATUSES.has(status(item)) &&
       hasSuccessfulOutcome
     ) {
       // A successful terminal state proves that the no-match row is stale.

@@ -16,6 +16,7 @@ function row(
     source_domain: "connected_systems",
     event_type,
     actor_label: "Roopmann V",
+    ...overrides,
     metadata: {
       request_id: REQUEST,
       user_facing_status,
@@ -23,7 +24,6 @@ function row(
     },
     read: false,
     created_at: "2026-10-08T01:08:00.000Z",
-    ...overrides,
   };
 }
 
@@ -67,6 +67,30 @@ describe("Drive lifecycle Feed rows", () => {
       "request-a",
       "request-b",
       "request",
+    ]);
+  });
+
+  it("preserves unknown outcomes and does not treat them as no-match", () => {
+    const rows = [
+      row("available", "document_share_decided", "pending"),
+      row("unknown", "document_share_outcome", ""),
+      row("success", "document_share_outcome", "completed"),
+    ];
+    expect(collapseDriveLifecycleRows(rows)).toEqual(rows);
+    expect(collapseDriveLifecycleRows(rows.slice(0, 2))).toEqual(rows.slice(0, 2));
+  });
+
+  it("folds partial success regardless of delivery order without changing payment expiry", () => {
+    const rows = [
+      row("empty", "document_share_outcome", "no_files_shared"),
+      row("payment-expired", "document_share_payment_ready", "expired"),
+      row("partial", "document_share_outcome", "partial"),
+      row("unidentified", "document_share_outcome", "no_match", {
+        metadata: { request_id: "" },
+      }),
+    ];
+    expect(collapseDriveLifecycleRows(rows).map((item) => item.id)).toEqual([
+      "payment-expired", "partial", "unidentified",
     ]);
   });
 });
