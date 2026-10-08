@@ -120,6 +120,14 @@ async def _frozen_auto_batch(sharing, bulk, *, payment_status=None):
         excluded=[],
         selected_positions=[1],
     )
+    # The frozen review survives search completion. Release the per-owner
+    # active-search slot before constructing another independent request.
+    with sharing.db.engine.begin() as connection:
+        connection.execute(
+            text("""UPDATE drive_owner_search_jobs SET status='completed',
+              updated_at=clock_timestamp() WHERE job_id=:job"""),
+            {"job": job_id},
+        )
     if payment_status is not None:
         with sharing.db.engine.begin() as connection:
             connection.execute(
