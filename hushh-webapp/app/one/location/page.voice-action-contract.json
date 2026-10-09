@@ -3952,8 +3952,8 @@
     }
   ],
   "search": {
-    "source_revision": "f3908e8ef4fa92ba3b6e0977036f3de07e9b9ccd6156ef558ae823efa85b8a1b",
-    "source_module_count": 1511,
+    "source_revision": "1804840b89c21effc055f1267f76ca30cbe8142b51e77223a0761c9af99b1eab",
+    "source_module_count": 1509,
     "subview_action_boost": {
       "": [
         "location.pause_updates",
