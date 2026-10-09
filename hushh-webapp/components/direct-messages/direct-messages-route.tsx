@@ -35,5 +35,5 @@ export function DirectMessagesRoute() {
     })();
     return () => { active = false; };
   }, [user, selected, token, conversationId, personRef, selectionKey, router]);
-  return <DirectMessagesPage key={selectionKey} resolvingSelection={loading || Boolean(user && selected && selection?.key !== selectionKey)} selection={selection?.key === selectionKey ? selection : null} />;
+  return <DirectMessagesPage key={user?.uid || "signed-out"} resolvingSelection={loading || Boolean(user && selected && selection?.key !== selectionKey)} selection={selection?.key === selectionKey ? selection : null} />;
 }

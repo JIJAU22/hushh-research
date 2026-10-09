@@ -99,7 +99,8 @@ vi.mock("@/lib/morphy-ux/morphy", () => ({
   morphyToast: mocks.morphyToast,
 }));
 
-vi.mock("@/lib/services/direct-messages-service", () => ({
+vi.mock("@/lib/services/direct-messages-service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/services/direct-messages-service")>()),
   DIRECT_MESSAGE_MAX_LENGTH: 2_000,
   DirectMessagesService: {
     listConversations: (...args: unknown[]) => mocks.listConversations(...args),
@@ -116,6 +117,24 @@ vi.mock("@/lib/services/direct-messages-service", () => ({
     reactToMessage: (...args: unknown[]) => mocks.reactToMessage(...args),
   },
 }));
+
+const messageIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const visibleMessage = {
+  id: "visible-message", conversationId: "conversation-1", senderIsViewer: false,
+  content: "Visible unread message", createdAt: "2026-10-06T10:01:00.000Z", readAt: null,
+};
+
+function exposeLatestMessage() {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.stubGlobal("IntersectionObserver", class {
+    constructor(private callback: IntersectionObserverCallback) {}
+    observe(target: Element) {
+      this.callback([{ target, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+    }
+    unobserve() {}
+    disconnect() {}
+  });
+}
 
 function ConnectionThread() {
   return (
@@ -210,6 +229,8 @@ describe("DirectMessagesPage", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("keeps the composer in the conversation while sending to the selected connection", async () => {
@@ -229,6 +250,8 @@ describe("DirectMessagesPage", () => {
         idToken: "test-token",
         content: "Hello Ankit",
         recipientPersonRef: "person-1",
+        clientMessageId: expect.stringMatching(messageIdPattern),
+        replyToMessageId: undefined,
       }),
     );
   });
@@ -288,6 +311,7 @@ describe("DirectMessagesPage", () => {
   });
 
   it("clears the active chat badge while its messages are visible", async () => {
+    exposeLatestMessage();
     const unreadConversation = { ...mocks.conversation, unreadCount: 3 };
     mocks.listConversations.mockResolvedValue({
       items: [unreadConversation],
@@ -303,7 +327,7 @@ describe("DirectMessagesPage", () => {
     });
     mocks.getConversationMessages.mockResolvedValue({
       conversation: unreadConversation,
-      items: [],
+      items: [visibleMessage],
       canSend: true,
       disconnectedNotice: null,
       nextBefore: null,
@@ -312,14 +336,18 @@ describe("DirectMessagesPage", () => {
     renderConnectionThread();
 
     expect(await screen.findByRole("button", { name: /Ankit Kumar Singh/ })).toBeVisible();
-    expect(screen.queryByLabelText("3 unread")).not.toBeInTheDocument();
-    expect(mocks.markConversationRead).toHaveBeenCalledWith({
+    await waitFor(() => expect(mocks.markConversationRead).toHaveBeenCalledWith({
       idToken: "test-token",
+      ownerUserId: "viewer-1",
       conversationId: "conversation-1",
-    });
+      throughMessageId: visibleMessage.id,
+      throughCreatedAt: visibleMessage.createdAt,
+    }));
+    expect(screen.queryByLabelText("3 unread")).not.toBeInTheDocument();
   });
 
-  it("acknowledges a conversation route even when history omits unread metadata", async () => {
+  it("acknowledges visible history and preserves later server unread counts", async () => {
+    exposeLatestMessage();
     mocks.query = "conversation=conversation-1";
     mocks.listConversations
       .mockResolvedValueOnce({
@@ -327,12 +355,12 @@ describe("DirectMessagesPage", () => {
         unreadCount: 2,
       })
       .mockResolvedValue({
-        items: [{ ...mocks.conversation, unreadCount: 2 }],
-        unreadCount: 2,
+        items: [{ ...mocks.conversation, unreadCount: 0 }],
+        unreadCount: 0,
       });
     mocks.getConversationMessages.mockResolvedValue({
       conversation: mocks.conversation,
-      items: [],
+      items: [visibleMessage],
       canSend: true,
       disconnectedNotice: null,
       nextBefore: null,
@@ -341,16 +369,27 @@ describe("DirectMessagesPage", () => {
     renderConnectionThread();
 
     expect(await screen.findByRole("heading", { name: "Ankit Kumar Singh" })).toBeVisible();
-    expect(screen.queryByLabelText("2 unread")).not.toBeInTheDocument();
     await waitFor(() =>
       expect(mocks.markConversationRead).toHaveBeenCalledWith({
         idToken: "test-token",
+        ownerUserId: "viewer-1",
         conversationId: "conversation-1",
+        throughMessageId: visibleMessage.id,
+        throughCreatedAt: visibleMessage.createdAt,
       }),
     );
+    expect(screen.queryByLabelText("2 unread")).not.toBeInTheDocument();
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(mocks.listConversations).toHaveBeenCalledTimes(2));
     expect(screen.queryByLabelText("2 unread")).not.toBeInTheDocument();
+    // A new server count is not cleared just because this conversation is open;
+    // those unseen messages have not crossed the visible read boundary.
+    mocks.listConversations.mockResolvedValue({
+      items: [{ ...mocks.conversation, unreadCount: 2 }], unreadCount: 2,
+    });
+    fireEvent(window, new Event("focus"));
+    expect(await screen.findByLabelText("2 unread")).toBeInTheDocument();
+    expect(mocks.markConversationRead).toHaveBeenCalledTimes(1);
   });
 
   it("searches the open thread and keeps voice access in the header", async () => {
@@ -563,6 +602,7 @@ describe("DirectMessagesPage", () => {
         idToken: "test-token",
         content: "Thanks",
         recipientPersonRef: "person-1",
+        clientMessageId: expect.stringMatching(messageIdPattern),
         replyToMessageId: "message-1",
       }),
     );
@@ -604,5 +644,11 @@ describe("DirectMessagesPage", () => {
     expect(composer).toHaveValue("Yes, I can.");
     expect(screen.getByText("Replying to Ankit Kumar Singh")).toBeVisible();
     expect(mocks.morphyToast.error).not.toHaveBeenCalled();
+    const originalAttempt = mocks.sendMessage.mock.calls[0]?.[0];
+    expect(originalAttempt.clientMessageId).toMatch(messageIdPattern);
+    fireEvent.submit(composer.closest("form")!);
+    await waitFor(() => expect(mocks.sendMessage).toHaveBeenCalledTimes(2));
+    expect(mocks.sendMessage.mock.calls[1]?.[0]).toEqual(originalAttempt);
+    await waitFor(() => expect(composer).toHaveValue(""));
   });
 });
