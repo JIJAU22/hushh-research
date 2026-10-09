@@ -428,7 +428,7 @@ describe("DirectMessagesPage", () => {
     expect(screen.getAllByRole("article")).toHaveLength(3);
   });
 
-  it("reveals bubble timestamps only after a left swipe", async () => {
+  it("renders bubble timestamps beside delivery status without a gesture", async () => {
     const message = {
       id: "message-time",
       conversationId: "conversation-1",
@@ -453,15 +453,8 @@ describe("DirectMessagesPage", () => {
       `time[datetime="${message.createdAt}"]`,
     );
     expect(timestamp).toBeInTheDocument();
-    const messageList = screen.getByTestId("direct-message-list");
-    expect(messageList).not.toHaveAttribute("data-show-message-times");
-    fireEvent.touchStart(article, {
-      changedTouches: [{ clientX: 220, clientY: 100 }],
-    });
-    fireEvent.touchEnd(article, {
-      changedTouches: [{ clientX: 140, clientY: 104 }],
-    });
-    expect(messageList).toHaveAttribute("data-show-message-times", "true");
+    expect(timestamp).toBeVisible();
+    expect(timestamp?.parentElement?.parentElement).toContainElement(screen.getByLabelText("Sent"));
   });
 
   it("exposes message reactions and replies after a bubble is tapped", async () => {
