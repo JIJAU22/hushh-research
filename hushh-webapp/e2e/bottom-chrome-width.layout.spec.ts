@@ -318,6 +318,12 @@ test("Messages inbox hides its idle launcher while the search keyboard is open",
     document.documentElement.style.setProperty("--kb-height", "280px");
   });
   await expect(agentSlot).toBeHidden();
+  // Live voice and command surfaces publish engagement on their own shell.
+  // Their cancellation controls remain accessible during inbox search.
+  await agentSlot.locator("[data-agent-bar-shell]").evaluate(node => node.setAttribute("data-command-active", "true"));
+  await expect(agentSlot).toBeVisible();
+  await agentSlot.locator("[data-agent-bar-shell]").evaluate(node => node.removeAttribute("data-command-active"));
+  await expect(agentSlot).toBeHidden();
   await page.evaluate(() => document.documentElement.classList.remove("kb-open"));
   await expect(agentSlot).toBeVisible();
   expect(errors).toEqual([]);

@@ -6121,7 +6121,7 @@ html.kb-open [data-agent-dock-chat] [data-bottom-shell-navigation-slot] {
 }
 /* Inbox search has no message composer. Its idle launcher follows the same
  * keyboard hiding rule as other search pages, while active commands stay usable. */
-html.kb-open [data-messages-dock]:not([data-command-active="true"]):not(:has([data-agent-dock-composer]:not([hidden]))) [data-bottom-shell-agent-slot] {
+html.kb-open [data-messages-dock]:not([data-command-active="true"]):not(:has([data-command-active="true"])):not(:has([data-agent-dock-composer]:not([hidden]))) [data-bottom-shell-agent-slot] {
   visibility: hidden;
   pointer-events: none;
 }
