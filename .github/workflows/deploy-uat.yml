@@ -54,6 +54,7 @@ env:
 concurrency:
   group: deploy-uat
   cancel-in-progress: false
+  queue: max
 
 jobs:
   select-target:
@@ -2847,6 +2848,11 @@ jobs:
             echo "- Frontend Cloud Build: \`${frontend_build_seconds}s\`"
             echo "- Non-build gates and verification: \`${non_build_seconds}s\`"
             echo ""
+            echo "### Revision Maintenance"
+            echo ""
+            echo "Old revisions are retired separately after a successful release; request drainage does not delay this deployment."
+            echo "[View Capacity Maintenance](${{ github.server_url }}/${{ github.repository }}/actions/workflows/capacity-maintenance.yml)"
+            echo ""
             echo "### Auto Scope Evidence"
             echo ""
             echo "- Backend changed files: \`${{ steps.scope.outputs.backend_changed_files || 'none' }}\`"
@@ -2905,7 +2911,6 @@ jobs:
             --last-known-good-revision "$FRONTEND_CURRENT" --apply --healthy --tags-only
           bash scripts/ci/cloudrun-retention.sh consent-protocol-drive-worker "$GCP_REGION" 2 \
             --apply --healthy --tags-only
-          python3 scripts/ci/runtime-capacity-budget.py --environment uat
 
       - name: Fail workflow when UAT release did not end healthy
         if: always()
