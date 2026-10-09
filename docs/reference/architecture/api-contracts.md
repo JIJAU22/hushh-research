@@ -485,9 +485,12 @@ server-held position (`hussh:receipt_cursor`, filters and offset only, thirty
 minutes, void after a new save). A missing, malformed, empty or older-than-seven-day
 index answers `Your receipt memory is not ready yet. Sync and save your receipts
 in Mail.` with the generated `route.profile_receipts` action, and is never
-reported as an empty mailbox. The owner saves or updates the index only with an
-explicit tap on Mail > Receipts (writer `gmail_receipt_memory_save_button`);
-nothing saves it automatically.
+reported as an empty mailbox. The index is written only through writer
+`gmail_receipt_memory_save_button`: once after each sync the owner starts on
+Mail > Receipts (the product default, set by `RECEIPT_MEMORY_AUTO_SAVE_DEFAULT`),
+or when the owner taps Save or Update private memory. Opening the page, a
+partly loaded list or a failed sync never writes, and a failed save is not
+retried on its own.
 
 **Queued messages (Claude-Code-style queueing).** While One works on a typed
 turn, the composer stays usable. A message sent then is offered to the running
@@ -1045,7 +1048,11 @@ Create, reschedule, and cancel are always two-step: a short-lived proposal is
 reviewed by the client and then executed once. Plans are deleted after execution
 or failure and become unusable after ten minutes; a subsequent Calendar mutation
 purges expired plans. Event data is not persisted as PKM or a Calendar cache in
-this first release.
+this first release. After the owner confirms a successful Calendar create, the
+unlocked client may write a safe task presentation snapshot to the encrypted
+`one_todos` PKM domain. The Calendar event remains authoritative; the To-do
+record only retains its private completion or dismissal state and never stores
+attendees, description, location, or the provider's HTML event link.
 
 The shared Google credential boundary verifies provider subject before refresh
 reuse, rejects account replacement while connected, and requires fresh credentials
@@ -2262,6 +2269,16 @@ incrementally (`include_granted_scopes=true`) on the web; read-only connections 
 asked for it. `gmail.modify` is a Google restricted scope and needs Google's
 restricted-scope verification before production use. Native Google sign-in does not yet
 request it.
+
+### Owner-confirmed Gmail To-do follow-ups
+
+An owner may explicitly ask One to prepare Gmail follow-ups for the encrypted
+`one_todos` domain. `propose_gmail_todo` resolves bounded Gmail metadata under
+the existing typed-chat read admission, then shows the exact selected emails in
+an owner confirmation card. Confirmation writes only an opaque proposal item
+identifier and the owner-visible follow-up title to the encrypted list; Gmail
+message identifiers, bodies, and received timestamps are never treated as a
+task due date or saved in the To-do record.
 
 ### Owner Drive searches
 

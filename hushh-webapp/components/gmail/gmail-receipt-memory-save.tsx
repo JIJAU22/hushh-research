@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { SurfaceInset } from "@/components/app-ui/surfaces";
 import { useAuth } from "@/hooks/use-auth";
@@ -12,34 +12,53 @@ import { useVault } from "@/lib/vault/vault-context";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
+/** Product default for saving after a finished sync; an owner setting can override it later. */
+export const RECEIPT_MEMORY_AUTO_SAVE_DEFAULT = true;
+
 /**
- * The owner's own control for saving the receipts above into private memory.
+ * Keeps the owner's private memory of their receipts current.
  *
- * It never saves on its own: no mount effect, no timer, and no reaction to a
- * finished sync. The tap is the confirmation, and it goes through the existing
- * governed writer (`gmail_receipt_memory_save_button`). After a new sync the
- * list changes, the control returns to its starting state, and saving again
- * updates the memory.
+ * After a sync finishes, the finished list is saved once through the existing
+ * governed writer (`gmail_receipt_memory_save_button`), so Chat with One can
+ * answer from it. The owner started that sync, the default is on, and the
+ * button below stays as the manual save and the way to update after a failure.
+ *
+ * Nothing here writes on mount, on a timer, or on a partly loaded list: only a
+ * new `syncCompletion` that `savedCompletionRef` has not yet covered. The ref is
+ * owned by the page, so a control that mounts late or remounts on a tab change
+ * saves a finished sync once and never again.
  */
 export function GmailReceiptMemorySave({
   receipts,
   accountKey,
+  syncCompletion = 0,
+  savedCompletionRef,
+  autoSave = RECEIPT_MEMORY_AUTO_SAVE_DEFAULT,
 }: {
   receipts: readonly ReceiptListItem[];
   accountKey: string | null | undefined;
+  syncCompletion?: number;
+  savedCompletionRef?: MutableRefObject<number>;
+  autoSave?: boolean;
 }) {
   const { user } = useAuth();
   const { vaultKey, vaultOwnerToken, isVaultUnlocked } = useVault();
   const [state, setState] = useState<SaveState>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const savingRef = useRef(false);
+  const receiptsRef = useRef(receipts);
+  receiptsRef.current = receipts;
 
   // A different list is a different memory to save; keep an in-flight save as it is.
+  const listSignature = useMemo(
+    () => receipts.map((receipt) => String(receipt.source_id ?? receipt.id)).join("|"),
+    [receipts],
+  );
   useEffect(() => {
     if (savingRef.current) return;
     setState("idle");
     setMessage(null);
-  }, [receipts]);
+  }, [listSignature]);
 
   const save = useCallback(async () => {
     if (savingRef.current || !user?.uid) return;
@@ -50,13 +69,13 @@ export function GmailReceiptMemorySave({
     }
     savingRef.current = true;
     setState("saving");
-    setMessage(null);
+    setMessage("Saving your receipts to private memory…");
     try {
       await saveReceiptCanonicalIndexToMemory({
         userId: user.uid,
         vaultKey,
         vaultOwnerToken,
-        receipts,
+        receipts: receiptsRef.current,
         accountKey,
       });
       setState("saved");
@@ -72,7 +91,16 @@ export function GmailReceiptMemorySave({
     } finally {
       savingRef.current = false;
     }
-  }, [accountKey, isVaultUnlocked, receipts, user?.uid, vaultKey, vaultOwnerToken]);
+  }, [accountKey, isVaultUnlocked, user?.uid, vaultKey, vaultOwnerToken]);
+
+  // One save per finished sync. The completion is marked handled before the
+  // write, so a failure never loops; the owner retries with the button.
+  useEffect(() => {
+    if (!savedCompletionRef || syncCompletion <= savedCompletionRef.current) return;
+    savedCompletionRef.current = syncCompletion;
+    if (!autoSave || receiptsRef.current.length === 0) return;
+    void save();
+  }, [autoSave, save, savedCompletionRef, syncCompletion]);
 
   const saving = state === "saving";
   return (
