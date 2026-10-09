@@ -42,18 +42,18 @@ class DriveSharingProjectionStore(DriveRevocationStore):
         legacy = (
             connection.execute(
                 text("""SELECT
-              count(*) FILTER (WHERE grant.state IN ('queued','dispatching','unknown')
-                OR grant.state='succeeded' AND (removal.operation_id IS NULL
+              count(*) FILTER (WHERE grant_operation.state IN ('queued','dispatching','unknown')
+                OR grant_operation.state='succeeded' AND (removal.operation_id IS NULL
                   OR removal.state IN ('queued','dispatching','unknown'))) AS pending,
-              count(*) FILTER (WHERE grant.state IN ('preexisting','present_unattributed')
+              count(*) FILTER (WHERE grant_operation.state IN ('preexisting','present_unattributed')
                 OR removal.state IN ('needs_review','not_dispatched','rejected')) AS attention
-              FROM drive_share_permission_operations grant
+              FROM drive_share_permission_operations grant_operation
               LEFT JOIN LATERAL (SELECT operation_id,state
                 FROM drive_share_permission_operations removal
-                WHERE removal.parent_operation_id=grant.operation_id
+                WHERE removal.parent_operation_id=grant_operation.operation_id
                   AND removal.kind='revoke'
                 ORDER BY created_at DESC,operation_id DESC LIMIT 1) removal ON TRUE
-              WHERE grant.request_id=:request AND grant.kind='grant'"""),
+              WHERE grant_operation.request_id=:request AND grant_operation.kind='grant'"""),
                 {"request": request_id},
             )
             .mappings()
