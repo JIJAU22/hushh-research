@@ -328,7 +328,7 @@ export async function previewAgentPkmMemory(params: {
   vaultOwnerToken: string;
   ingestionId?: string;
   chunkIndex?: number;
-  memoryProfile?: "general" | "kyc_identity_v1";
+  memoryProfile?: "general" | "kyc_identity_v1" | "business_directory_v1";
   /** Existing details the merge agent may extend or correct (explicit saves). */
   reconciliationCandidates?: readonly PkmReconciliationCandidate[];
   signal?: AbortSignal;

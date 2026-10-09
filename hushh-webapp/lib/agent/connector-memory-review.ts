@@ -4,6 +4,7 @@ import { isUnresolvedSourceBlock, prepareNaturalLanguagePkm } from "@/lib/pkm/pk
 import { loadPkmAgentLabContext } from "@/lib/profile/pkm-agent-lab-capture";
 import { isDegradedPreviewCard } from "@/lib/profile/pkm-agent-lab-preview";
 import type { BusinessMemoryOrigin } from "@/lib/pkm/business-memory-origin";
+import { validBusinessProfilePreview } from "@/lib/agent/business-profile-contract";
 
 export type ConnectorMemorySource = "first_connect_insights" | "drive_read_review" | "business_profile_review";
 type MemorySession = {
@@ -36,6 +37,7 @@ export async function prepareConnectorMemoryReview(input: MemorySession & {
     currentManifests: Object.values(context.manifests || {}).filter(Boolean),
     vaultOwnerToken: input.vaultOwnerToken,
     source: input.source,
+    memoryProfile: input.source === "business_profile_review" ? "business_directory_v1" : "general",
     allowEmpty: true,
     findDuplicate: candidate => AgentPkmContextStore.findLocalDuplicate({ userId: input.userId, candidate }),
     beforeEffect: input.assertCurrent,
@@ -47,6 +49,8 @@ export async function prepareConnectorMemoryReview(input: MemorySession & {
     !isReservedPkmCard(card) && !isDegradedPreviewCard(card),
   );
   const coverage = prepared.sourceCoverage || [];
+  if (input.source === "business_profile_review" && cards.length && !validBusinessProfilePreview(cards, input.message))
+    return { cards: [], alreadySaved: false, incomplete: true };
   // Only explicit exact-duplicate evidence can claim this is already saved.
   const alreadySaved = cards.length === 0 && coverage.length > 0 && coverage.every(block =>
     !block.preparationIssue && block.disposition === "intentionally_ignored" &&

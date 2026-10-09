@@ -13,6 +13,7 @@ vi.mock("@/lib/services/personal-knowledge-model-service", () => ({ PersonalKnow
 vi.mock("@/lib/pkm/pkm-save-job", () => ({ withPkmSaveJobLock: async (_id: string, task: () => unknown) => task() }));
 import { assertBusinessReviewFresh, attachBusinessOrigin, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview } from "@/lib/agent/business-profile-review";
 import { businessReviewFields, businessReviewItems, selectBusinessReviewFields } from "@/lib/agent/business-profile-fields";
+import { validBusinessProfilePreview } from "@/lib/agent/business-profile-contract";
 
 export const candidate: BusinessCandidate = { businessUid: "urn:hushh:business:uat:hushh.ai:v1", synthetic: true,
   sourceIdentity: { source: "uat_fixture", sourceKey: "hushh.ai:v1" }, matchEvidence: [{ kind: "verified_email_domain", domain: "hushh.ai" }],
@@ -35,6 +36,18 @@ const args = (cards = [card()]) => ({ job: createBusinessReviewJob("owner", cand
   isCurrent: () => true, sharingImpactAcknowledged: false, assertListingFresh: vi.fn(async () => undefined) });
 
 describe("business profile reviewed-memory boundary", () => {
+  it("keeps policy out of source facts and rejects personal destinations, sibling facts and invented metadata", () => {
+    const message = businessDraftMessage(candidate, "Example business", "https://example.test");
+    const details = JSON.parse(message);
+    expect(details).toEqual({ name: "Example business", website: "https://example.test/" });
+    const proposal = { ...card(), candidate_payload: { businesses: { entities: { mem_one: details } } } };
+    expect(validBusinessProfilePreview([proposal], message)).toBe(true);
+    expect(validBusinessProfilePreview([{ ...proposal, target_domain: "identity" }], message)).toBe(false);
+    expect(validBusinessProfilePreview([{ ...proposal, candidate_payload: { ...proposal.candidate_payload, personal_fact: "example" } }], message)).toBe(false);
+    expect(validBusinessProfilePreview([{ ...proposal, candidate_payload: { businesses: { entities: { mem_one: { ...details, summary: "A disclaimer" } } } } }], message)).toBe(false);
+    expect(validBusinessProfilePreview([proposal, proposal], message)).toBe(false);
+    expect(validBusinessProfilePreview([{ ...proposal, merge_decision: { merge_mode: "extend_entity", target_entity_path: "profile.entities.mem_one" } }], message)).toBe(false);
+  });
   it("groups exact readable repetitions while preserving every raw consent reference", () => {
     const repeated = { ...card(), candidate_payload: { businesses: { entities: { mem_one: {
       kind: "profile_fact", summary: "state: TX", observations: ["state: TX"], status: "active",
@@ -167,7 +180,7 @@ describe("business profile reviewed-memory boundary", () => {
   });
   it("edits change reviewed content but never source identity; website credentials and unsafe schemes are rejected", () => {
     expect(businessDraftMessage(candidate, "Edited test business", "https://example.test")).toContain("Edited test business");
-    expect(businessDraftMessage(candidate, "Edited test business", "https://example.test")).toContain("keep its fields together");
+    expect(businessDraftMessage(candidate, "Edited test business", "https://example.test")).not.toContain("untrusted source details");
     expect(businessDraftMessage(candidate, "Edited test business", "http://example.test")).toContain("http://example.test/");
     for (const website of ["javascript:alert(1)", "https://user:pass@example.test", "http://user:pass@example.test"])
       expect(() => businessDraftMessage(candidate, "Test", website)).toThrow();

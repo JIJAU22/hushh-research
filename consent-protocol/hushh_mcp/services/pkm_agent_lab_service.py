@@ -33,6 +33,7 @@ from hushh_mcp.runtime_providers import (
     build_managed_runtime_client,
 )
 from hushh_mcp.runtime_providers.gemini_config import resolve_fleet_model_name
+from hushh_mcp.services.business_directory_profile import valid_business_preview
 from hushh_mcp.services.domain_contracts import (
     CANONICAL_DOMAIN_REGISTRY,
     DYNAMIC_DOMAIN_CONTRACT_VERSION,
@@ -2026,13 +2027,18 @@ class PKMAgentLabService:
         *,
         message: str,
         strict_small_model: bool,
+        memory_profile: str = "general",
     ) -> str:
         # The manifest owns semantic instructions in both managed ADK and
         # direct-client paths. The prompt carries the worked examples and the
         # owner's material serialized as input, nothing else.
         return self._agent_request(
             self.memory_segmentation_manifest,
-            {"message": message, "strict_small_model": strict_small_model},
+            {
+                "message": message,
+                "strict_small_model": strict_small_model,
+                "memory_profile": memory_profile,
+            },
         )
 
     @staticmethod
@@ -3938,6 +3944,7 @@ class PKMAgentLabService:
         parsed_structure: dict[str, Any] | None,
         fallback_target_domain: str,
         simulated_state: dict[str, Any] | None,
+        memory_profile: str = "general",
     ) -> dict[str, Any]:
         secret_kind = cls._contains_sensitive_secret(message)
         if secret_kind:
@@ -3987,7 +3994,11 @@ class PKMAgentLabService:
         target_scope = cls._entity_scope_from_path(
             str(merge_decision.get("target_entity_path") or "")
         )
-        if merge_mode in {"correct_entity", "delete_entity"} and target_scope != "changes":
+        if (
+            memory_profile != "business_directory_v1"
+            and merge_mode in {"correct_entity", "delete_entity"}
+            and target_scope != "changes"
+        ):
             aligned_payload = cls._fallback_payload_from_intent(
                 message=message,
                 intent_frame=intent_frame,
@@ -4130,7 +4141,10 @@ class PKMAgentLabService:
             # fact in financial.agent_memory; the hint only holds auto-save.
             validation_hints.append("financial_domain_requires_confirmation")
 
-        if merge_mode not in {"correct_entity", "delete_entity"}:
+        if memory_profile != "business_directory_v1" and merge_mode not in {
+            "correct_entity",
+            "delete_entity",
+        }:
             current_root_scope = next(
                 (
                     cls._normalize_path(str(key))
@@ -5141,12 +5155,14 @@ class PKMAgentLabService:
         simulated_state: dict[str, Any] | None,
         strict_small_model: bool,
         context_quotes: list[str] | None = None,
+        memory_profile: str = "general",
     ) -> str:
         return self._agent_request(
             self.memory_intent_manifest,
             {
                 "message": message,
                 "section_context": self._section_context(context_quotes),
+                "memory_profile": memory_profile,
                 "current_domains": current_domains,
                 "domain_choices": self._compact_registry_choices(registry_choices)
                 if strict_small_model
@@ -5174,12 +5190,14 @@ class PKMAgentLabService:
         intent_frame: dict[str, Any],
         simulated_state: dict[str, Any] | None,
         strict_small_model: bool,
+        memory_profile: str = "general",
     ) -> str:
         return self._agent_request(
             self.memory_merge_manifest,
             {
                 "message": message,
                 "intent_frame": intent_frame,
+                "memory_profile": memory_profile,
                 "current_domains": current_domains,
                 "existing_entities": self._existing_entities(
                     simulated_state, compact=strict_small_model
@@ -5198,12 +5216,14 @@ class PKMAgentLabService:
         simulated_state: dict[str, Any] | None,
         strict_small_model: bool,
         context_quotes: list[str] | None = None,
+        memory_profile: str = "general",
     ) -> str:
         return self._agent_request(
             self.structure_manifest,
             {
                 "message": message,
                 "section_context": self._section_context(context_quotes),
+                "memory_profile": memory_profile,
                 "intent_frame": intent_frame,
                 "merge_decision": merge_decision,
                 "current_domains": current_domains,
@@ -5252,6 +5272,7 @@ class PKMAgentLabService:
         deadline: float | None = None,
         execution_trace: list[dict[str, Any]] | None = None,
         contract_runner=None,
+        memory_profile: str = "general",
     ) -> dict[str, Any]:
         run_contract = contract_runner or self._run_agent_contract
         normalized_domains = [
@@ -5290,6 +5311,7 @@ class PKMAgentLabService:
                 simulated_state=simulated_state,
                 strict_small_model=strict_small_model,
                 context_quotes=context_quotes,
+                memory_profile=memory_profile,
             ),
             response_schema=_INTENT_FRAME_SCHEMA,
             model_override=model_override,
@@ -5324,6 +5346,7 @@ class PKMAgentLabService:
                     intent_frame=intent_frame,
                     simulated_state=simulated_state,
                     strict_small_model=strict_small_model,
+                    memory_profile=memory_profile,
                 ),
                 response_schema=_MERGE_DECISION_SCHEMA,
                 model_override=model_override,
@@ -5369,6 +5392,7 @@ class PKMAgentLabService:
                     simulated_state=simulated_state,
                     strict_small_model=strict_small_model,
                     context_quotes=context_quotes,
+                    memory_profile=memory_profile,
                 ),
                 response_schema=_STRUCTURE_PREVIEW_SCHEMA,
                 model_override=model_override,
@@ -5385,7 +5409,17 @@ class PKMAgentLabService:
             parsed_structure=structure_raw,
             fallback_target_domain=fallback_target_domain,
             simulated_state=simulated_state,
+            memory_profile=memory_profile,
         )
+        business_contract_failed = memory_profile == "business_directory_v1" and (
+            not valid_business_preview(message, structure_raw or {}, merge_decision)
+            or not valid_business_preview(message, normalized_preview, merge_decision)
+        )
+        if business_contract_failed:
+            # Explicit schema rejection. No rerouting, filtering or substitute
+            # payload: retain the proposal for diagnostics but prohibit saving.
+            normalized_preview["write_mode"] = "do_not_save"
+            normalized_preview["validation_hints"].append("business_profile_contract_invalid")
         agent_manifest = self.structure_manifest
         manifest = self._build_manifest_from_payload(
             user_id=user_id,
@@ -5401,7 +5435,14 @@ class PKMAgentLabService:
             errors.append("memory_merge_agent_fallback")
         if structure_used_fallback:
             errors.append("pkm_structure_agent_fallback")
-        used_fallback = intent_used_fallback or merge_used_fallback or structure_used_fallback
+        if business_contract_failed:
+            errors.append("business_profile_contract_invalid")
+        used_fallback = (
+            intent_used_fallback
+            or merge_used_fallback
+            or structure_used_fallback
+            or business_contract_failed
+        )
         drift_flags = self._drift_flags_from_preview(
             validation_hints=normalized_preview["validation_hints"],
             fallback_used=used_fallback,
@@ -5489,6 +5530,7 @@ class PKMAgentLabService:
         )
         for relative_path in (
             "services/pkm_agent_lab_service.py",
+            "services/business_directory_profile.py",
             "services/pkm_preview_continuation.py",
             "services/domain_contracts.py",
             "hushh_adk/single_turn.py",
@@ -5561,6 +5603,7 @@ class PKMAgentLabService:
                 prompt=self._build_memory_segmentation_prompt(
                     message=message,
                     strict_small_model=strict_small_model,
+                    memory_profile=memory_profile,
                 ),
                 response_schema=_SEGMENTATION_SCHEMA,
                 model_override=model_override,
@@ -5655,6 +5698,7 @@ class PKMAgentLabService:
                     deadline=preview_deadline,
                     execution_trace=segment_trace if multiple else execution_trace,
                     contract_runner=segment_continuation.run,
+                    memory_profile=memory_profile,
                 )
                 if multiple:
                     execution_trace.extend(
