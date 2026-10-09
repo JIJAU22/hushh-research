@@ -952,7 +952,6 @@ describe("supported connector catalog", () => {
     const input = screen.getByRole("textbox", { name: "Profile link" });
     fireEvent.change(input, { target: { value: `https://www.${id}.com/example` } });
     expect(input).toHaveValue(`https://www.${id}.com/example`);
-    expect(screen.getByText(/does not connect or sync/)).toBeInTheDocument();
     expect(state.startOAuthConnect).not.toHaveBeenCalled();
   });
 

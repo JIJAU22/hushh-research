@@ -2051,7 +2051,7 @@ function OwnerConnectorsPanel({
       id,
       name: id === "instagram" ? "Instagram" : "LinkedIn",
       connected: false,
-      detail: "Add your public profile link",
+      detail: "Not connected",
       onOpen: () => showConnector(id),
       action: {
         label: `Connect ${id === "instagram" ? "Instagram" : "LinkedIn"}`,
@@ -2296,7 +2296,7 @@ function OwnerConnectorsPanel({
               <SettingsGroup>
                 <div data-social-profile-form className="min-w-0 space-y-4 p-4">
                   <p id={`social-profile-note-${activeConnector}`} className="text-sm text-muted-foreground">
-                    Your profile should be a public figure profile and visible to everyone.
+                    Your profile should be a public figure profile.
                   </p>
                   <div className="min-w-0 space-y-2">
                     <label htmlFor={`social-profile-link-${activeConnector}`} className="text-sm font-medium">
@@ -2311,13 +2311,10 @@ function OwnerConnectorsPanel({
                       autoComplete="off"
                       className="min-h-11 w-full min-w-0"
                       placeholder={activeConnector === "instagram" ? "https://www.instagram.com/username/" : "https://www.linkedin.com/in/username/"}
-                      aria-describedby={`social-profile-note-${activeConnector} social-profile-draft-${activeConnector}`}
+                      aria-describedby={`social-profile-note-${activeConnector}`}
                       value={socialProfileLinks[activeConnector]}
                       onChange={(event) => setSocialProfileLinks((current) => ({ ...current, [activeConnector]: event.target.value }))}
                     />
-                    <p id={`social-profile-draft-${activeConnector}`} className="text-xs text-muted-foreground">
-                      This link is a draft for this session. Adding it does not connect or sync your account.
-                    </p>
                   </div>
                 </div>
               </SettingsGroup>
