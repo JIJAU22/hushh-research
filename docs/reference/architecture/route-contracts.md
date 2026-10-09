@@ -348,17 +348,19 @@ Search consumes the authored voice action gateway and generated route index. Do 
 
 Every PR runs **UI Contracts**, independently of changed-path filtering. Both **Preflight Gate** and **CI Status Gate** require combined Back/Search success and reject skips. The read-only gate checks route coverage, source revisions, all generated gateway mirrors and route-index freshness. UI revisions include pages, layouts, templates and their transitive local modules and authored JSON, normalized across Windows/Linux line endings. Generated contracts are excluded from their own source digest. Follow the [contributor scaffold](./ui-contract-contributor-guide.md) before editing.
 
-After reviewing changed screen actions/context, run `cd hushh-webapp && npm run build:search-contracts` and commit the authored contracts and generated mirrors in the same PR. Run `npm run verify:search-contracts` locally; CI never repairs stale files. The global source revision deliberately refreshes all surface contracts for shared UI changes. A fingerprint proves freshness, not semantic correctness: authors remain responsible for describing new interactions in web contracts, while Search derives its catalog automatically. New route coverage and generated reachability validation remain mandatory.
+After reviewing changed screen actions/context, run `cd hushh-webapp && npm run build:search-contracts` and commit authored edits, review receipts and changed generated mirrors in the same PR. Run `npm run verify:search-contracts` locally; CI never repairs stale files. Global source freshness is recorded in immutable content-addressed receipts under `hushh-webapp/contracts/ui-review`, not copied into every surface or runtime gateway. Independent source reviews add distinct files instead of conflicting shared stamps; combined sources still require their own exact review receipt. Back uses the same receipt boundary while retaining authored route-case hashing. A fingerprint proves freshness, not semantic correctness: authors remain responsible for describing new interactions in web contracts, while Search derives its catalog automatically. New route coverage and generated reachability validation remain mandatory.
 
 The gate also validates literal `data-voice-control-id` values against authored action `control_ids`. New controls require action coverage before regeneration succeeds. Existing 28 uncovered controls are explicitly listed as legacy coverage debt in the global command-bar contract. Dynamic or unannotated interactions still require author review; the checker cannot infer their meaning. Suggestion subview priorities live in authored `search.subview_action_boost` metadata rather than a Search source-code map.
 
 ### Messages workspace layout
 
 The `/one/messages` workspace uses the standard shared header and persistent
-bottom navigation, with no route-specific footer styling. Its white two-pane
-message area sits below the shared header, and its composer remains in normal
-flow inside the conversation. The shell reserves space for the footer on both panes;
-active global commands and voice controls remain available and measured. On
+bottom navigation, with no route-specific footer styling. Its light two-pane
+message area sits below the shared header. The message composer projects into
+the existing centered Agent Dock above navigation; both panes reserve the full
+dock height, while keyboard lift reserves only navigation and outer insets.
+Every bubble shows its timestamp beside the existing delivery status. Active
+global commands and voice controls remain available and measured. On
 mobile, a selected conversation replaces the inbox and Back to chats restores
 it. Inbox filtering matches contact names and message previews; an empty inbox
 links to the existing Connect entry point. Browser selection restoration uses

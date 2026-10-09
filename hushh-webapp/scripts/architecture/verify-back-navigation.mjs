@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ts, createUiSourceIndex } from './ui-source-index.mjs';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { syncReviewReceipt } from './ui-review-receipts.mjs';
 
 // Existing specialised owners only. New calls, files or aliases fail the ratchet.
 const reviewedHistoryOwners = new Map([
@@ -108,13 +109,20 @@ export async function verifyBackNavigation(root, stamp = false, index = createUi
   validateHistoryBypasses(sources);
   const revision = backSourceRevision(sources, entries);
   const rootContract = byRoute.get('/')?.backVerification;
-  if (!rootContract) throw new Error('The application root must own the reviewed Back source revision');
+  if (!rootContract) throw new Error('The application root must own Back verification');
   if (stamp) {
-    rootContract.sourceRevision = revision;
-    await fs.writeFile(contractPath, JSON.stringify(entries, null, 2) + '\n');
-  } else if (rootContract.sourceRevision !== revision) {
-    throw new Error('Back source changed: review parent/query/nested-state cases, then run npm run build:back-contracts and commit the owning route contracts.');
+    let migrated = false;
+    for (const entry of entries) {
+      if (Object.hasOwn(entry.backVerification || {}, 'sourceRevision')) {
+        delete entry.backVerification.sourceRevision;
+        migrated = true;
+      }
+    }
+    if (migrated) await fs.writeFile(contractPath, JSON.stringify(entries, null, 2) + '\n');
+  } else if (entries.some(entry => Object.hasOwn(entry.backVerification || {}, 'sourceRevision'))) {
+    throw new Error('Back source review is stale: migrate legacy source stamps with npm run build:ui-contracts.');
   }
+  await syncReviewReceipt(root, 'back', revision, { route_count: entries.length, source_module_count: sources.size }, !stamp);
   console.log(`Back contracts cover ${entries.length} routes, ${cases.length} Location scenarios; new history bypasses rejected.`);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await verifyBackNavigation(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'), process.argv.includes('--stamp-reviewed-source'));

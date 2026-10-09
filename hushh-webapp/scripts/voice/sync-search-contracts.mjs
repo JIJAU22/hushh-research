@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ts, createUiSourceIndex } from '../architecture/ui-source-index.mjs';
+import { syncReviewReceipt } from '../architecture/ui-review-receipts.mjs';
 
 const extensions = ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.json'];
 export const normalizeSource = (text) => text.replace(/\r\n?/g, '\n');
@@ -89,7 +90,7 @@ export async function syncSearchContracts(root, check = false, index = createUiS
       if (!coveredRoutes.has(route || '/')) throw new Error(`New page ${page} needs a web route/search contract.`);
     }
   }
-  // Include the entire route UI import graph. Shared changes invalidate every owning contract.
+  // Include the entire route UI import graph. Shared changes require a new review receipt.
   // Hashes detect drift; they never claim to infer the meaning of a new interaction.
   const sources = await collectSources(root, uiEntries.map(file => path.relative(root, file)), index);
   validateControlCoverage(sources, await Promise.all(contracts.map(async file => JSON.parse(await fs.readFile(file, 'utf8')))));
@@ -97,8 +98,10 @@ export async function syncSearchContracts(root, check = false, index = createUiS
   let stale = 0;
   for (const file of contracts) {
     const raw = JSON.parse(await fs.readFile(file, 'utf8'));
-    const expected = { ...raw.search, source_revision: revision, source_module_count: sources.size };
-    if (JSON.stringify(raw.search) === JSON.stringify(expected)) continue;
+    const expected = { ...raw.search };
+    delete expected.source_revision;
+    delete expected.source_module_count;
+    if (!Object.hasOwn(raw.search || {}, 'source_revision') && !Object.hasOwn(raw.search || {}, 'source_module_count')) continue;
     stale++;
     if (!check) {
       raw.search = expected;
@@ -108,7 +111,8 @@ export async function syncSearchContracts(root, check = false, index = createUiS
       await fs.writeFile(file, withoutSearch.trimEnd().replace(/\s*\}$/,  ',\n  "search": ' + metadata + '\n}') + '\n');
     }
   }
-  if (check && stale) throw new Error(`${stale} search web contracts are stale after UI changes. Review actions/context, run npm run build:search-contracts and commit contracts and generated mirrors in this PR.`);
+  if (check && stale) throw new Error(`${stale} search contracts contain stale legacy source stamps; run npm run build:ui-contracts to migrate them.`);
+  await syncReviewReceipt(root, 'search', revision, { source_module_count: sources.size }, check);
   console.log(`Search contracts: ${contracts.length} contracts cover ${pageEntries.length} pages and ${sources.size} source modules${check ? ' (checked)' : ' (refreshed)'}.`);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

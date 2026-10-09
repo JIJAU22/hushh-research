@@ -123,9 +123,25 @@ This is repository contract verification, not deployed or physical-device proof.
 | Generated file conflicts after another PR lands | Merge main, reconcile authored fields, regenerate Back before Search, then verify |
 | Validator/test failure | Fix the behavior or owning declaration; do not skip tests or stamp blindly |
 
-`app-route-layout.contract.json` contains authored fields as well as a generated
-Back source stamp. Never resolve it wholesale as a generated file. Keep generated
-gateway/capability/topology copies consistent across their deployment contexts.
+Freshness evidence lives in immutable, content-addressed JSON receipts under
+`hushh-webapp/contracts/ui-review/{back,search}/<source-revision>.json`, not in
+authored route/action contracts or runtime gateway metadata. Back still hashes
+the full UI source set and authored route cases; Search still hashes the complete
+route import graph. Validation requires the exact receipt for the current sources,
+checks its contents, and never creates or repairs it. Existing history-bypass,
+route coverage, action/control coverage and behavior checks remain mandatory.
+
+Independent branches add different receipt files, so source-only reviews no longer
+rewrite a shared stamp across every contract and generated mirror. Preserve both
+branches' receipts during merges. A combined source revision requires a fresh
+review/build receipt even when each parent passed. Historical receipts do not
+authorize different sources. Real overlapping authored edits can still conflict;
+reconcile those semantically. Do not use a Git merge driver to silently choose a
+side, auto-stamp during verification, or treat receipts as proof of action meaning.
+
+`app-route-layout.contract.json` and local action contracts are authored authority;
+never resolve them wholesale as generated files. Keep generated gateway,
+capability and topology copies consistent across their deployment contexts.
 
 Canonical architecture: [route contracts](./route-contracts.md).
 Agent owner: [frontend architecture skill](../../../.codex/skills/frontend-architecture/SKILL.md).

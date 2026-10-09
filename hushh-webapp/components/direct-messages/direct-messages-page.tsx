@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
-  TouchEvent as ReactTouchEvent,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
 
+import { AgentDockPortal } from "@/components/agent/agent-dock";
 import { AppPageShell } from "@/components/app-ui/app-page-shell";
 import { navigateDirectMessage } from "@/lib/direct-messages/navigate-direct-message";
 import { OneChatBubble } from "@/components/agent/chat-message-styles";
@@ -255,10 +255,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const editingInputRef = useRef<HTMLTextAreaElement | null>(null);
   const messageLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const timestampRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const messageTouchStart = useRef<{ x: number; y: number } | null>(null);
   const acknowledgedReadConversations = useRef(new Set<string>());
-  const [showMessageTimes, setShowMessageTimes] = useState(false);
   const [messageSearchOpen, setMessageSearchOpen] = useState(false);
   const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const activeConversationId = thread.conversation?.id ?? null;
@@ -275,18 +272,12 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
   useEffect(() => {
     return () => {
       if (messageLongPressTimer.current) clearTimeout(messageLongPressTimer.current);
-      if (timestampRevealTimer.current) clearTimeout(timestampRevealTimer.current);
     };
   }, []);
 
   useEffect(() => {
-    setShowMessageTimes(false);
     setMessageSearchOpen(false);
     setMessageSearchQuery("");
-    if (timestampRevealTimer.current) {
-      clearTimeout(timestampRevealTimer.current);
-      timestampRevealTimer.current = null;
-    }
   }, [activeConversationId]);
 
   const editingMessageId = editingMessage?.id;
@@ -771,30 +762,6 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
     }, 450);
   };
 
-  const revealMessageTimes = () => {
-    setShowMessageTimes(true);
-    if (timestampRevealTimer.current) clearTimeout(timestampRevealTimer.current);
-    timestampRevealTimer.current = setTimeout(() => {
-      setShowMessageTimes(false);
-      timestampRevealTimer.current = null;
-    }, 2_500);
-  };
-
-  const handleMessageTouchStart = (event: ReactTouchEvent<HTMLElement>) => {
-    const touch = event.changedTouches[0];
-    if (touch) messageTouchStart.current = { x: touch.clientX, y: touch.clientY };
-  };
-
-  const handleMessageTouchEnd = (event: ReactTouchEvent<HTMLElement>) => {
-    const start = messageTouchStart.current;
-    const touch = event.changedTouches[0];
-    messageTouchStart.current = null;
-    if (!start || !touch) return;
-    const deltaX = start.x - touch.clientX;
-    const deltaY = Math.abs(start.y - touch.clientY);
-    if (deltaX > 48 && deltaX > deltaY * 1.25) revealMessageTimes();
-  };
-
   const saveEdit = () => {
     if (!user || !editingMessage || !editingContent.trim()) return;
     const message = editingMessage;
@@ -900,7 +867,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
           <header className={styles.inboxHeader}>
             <div>
               <h1>Chats</h1>
-
+              <p>{inboxItems.length} {inboxItems.length === 1 ? "conversation" : "conversations"}</p>
             </div>
             <button
               type="button"
@@ -1007,7 +974,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
           ) : null}
           {hasRouteSelection ? (
             <>
-              <header className={styles.threadHeader}>
+              <header className={styles.threadHeader} data-search-open={messageSearchOpen || undefined}>
                 <div className={styles.threadHeaderContent}>
                   <button
                     type="button"
@@ -1092,7 +1059,6 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                 className={styles.messageList}
                 ref={messageListRef}
                 data-testid="direct-message-list"
-                data-show-message-times={showMessageTimes ? "true" : undefined}
                 aria-label={`${selectedLabel} message feed`}
               >
                 {loadingThread && messages.length === 0 ? (
@@ -1166,13 +1132,19 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                         onPointerUp={clearMessageLongPress}
                         onPointerCancel={clearMessageLongPress}
                         onPointerLeave={clearMessageLongPress}
-                        onTouchStart={handleMessageTouchStart}
-                        onTouchEnd={handleMessageTouchEnd}
                         onClick={(event) => {
                           if ((event.target as HTMLElement).closest("button, textarea")) return;
                           setActiveMessageActions(message.id);
                         }}
                       >
+                        {!message.senderIsViewer ? (
+                          <ConnectionPersonAvatar
+                            label={selectedLabel}
+                            photoUrl={thread.peerPhotoUrl}
+                            size="list"
+                            className={styles.messagePeerAvatar}
+                          />
+                        ) : null}
                         <div
                           className={cn(
                             styles.messageCluster,
@@ -1376,6 +1348,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                 </div>
               ) : null}
                 {thread.canSend ? (
+                  <AgentDockPortal enabled visible>
                   <form
                     className={styles.composer}
                     onSubmit={(event) => void sendDraft(event)}
@@ -1406,7 +1379,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                         setComposerError(null);
                         setDraft(event.target.value);
                       }}
-                      placeholder="Type a message"
+                      placeholder={`Message ${selectedLabel}`}
                       maxLength={DIRECT_MESSAGE_MAX_LENGTH}
                       disabled={sending}
                       rows={1}
@@ -1467,6 +1440,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                       </p>
                     ) : null}
                   </form>
+                  </AgentDockPortal>
                 ) : null}
             </>
           ) : null}
