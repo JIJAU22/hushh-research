@@ -13,7 +13,9 @@
       "routes": ["/one/calendar", "/one"],
       "screens": ["one_calendar", "one_agents"],
       "hidden_navigable": true,
-      "navigation_prerequisites": []
+      "navigation_prerequisites": [
+        "Open /one/calendar only when the owner asks to see the Calendar page."
+      ]
     }
   },
   "actions": [
