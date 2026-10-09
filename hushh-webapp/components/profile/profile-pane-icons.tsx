@@ -21,7 +21,7 @@ function PaneIcon({
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      className={["profile-pane-icon", className].filter(Boolean).join(" ")}
+      className={["profile-pane-icon text-[color:var(--ios-account-label)] [&_.profile-pane-icon-accent]:stroke-[var(--ios-account-accent)] [&_.profile-pane-icon-accent-fill]:fill-[var(--ios-account-accent)]", className].filter(Boolean).join(" ")}
       {...props}
     >
       {children}
@@ -125,4 +125,40 @@ export function ProfilePaneSignOutIcon(props: ProfilePaneIconProps) {
       <path className="profile-pane-icon-accent" d="M13 8l4 4-4 4M8 12h9" />
     </PaneIcon>
   );
+}
+
+export function ProfilePaneWalletIcon(props: ProfilePaneIconProps) {
+  return <PaneIcon {...props}><path d="M20 7H5a2 2 0 0 1 0-4h13v4M3 5v14a2 2 0 0 0 2 2h15V7" /><path className="profile-pane-icon-accent" d="M20 11h-5v6h5M17 14h.01" /></PaneIcon>;
+}
+
+export function ProfilePanePreviewIcon(props: ProfilePaneIconProps) {
+  return <PaneIcon {...props}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle className="profile-pane-icon-accent" cx="12" cy="12" r="3" /></PaneIcon>;
+}
+
+export function ProfilePaneEditIcon(props: ProfilePaneIconProps) {
+  return <PaneIcon {...props}><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7" /><path className="profile-pane-icon-accent" d="m16 3 5 5-10 10-5 1 1-5L17 4M14 6l5 5" /></PaneIcon>;
+}
+
+export function ProfilePanePauseIcon(props: ProfilePaneIconProps) {
+  return <PaneIcon {...props}><circle cx="12" cy="12" r="9" /><path className="profile-pane-icon-accent" d="M9 8v8M15 8v8" /></PaneIcon>;
+}
+
+export function ProfilePaneResumeIcon(props: ProfilePaneIconProps) {
+  return <PaneIcon {...props}><circle cx="12" cy="12" r="9" /><path className="profile-pane-icon-accent" d="m10 8 6 4-6 4Z" /></PaneIcon>;
+}
+
+export function ProfilePaneRotateIcon(props: ProfilePaneIconProps) {
+  return <PaneIcon {...props}><path d="M4 9a8 8 0 0 1 13-3l3 3M20 15a8 8 0 0 1-13 3l-3-3" /><path className="profile-pane-icon-accent" d="M20 3v6h-6M4 21v-6h6" /></PaneIcon>;
+}
+
+export function ProfilePaneDeleteIcon(props: ProfilePaneIconProps) {
+  return <PaneIcon {...props} stroke="var(--app-destructive)"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></PaneIcon>;
+}
+
+export function ProfilePaneScanIcon(props: ProfilePaneIconProps) {
+  return <PaneIcon {...props}><path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5" /><path className="profile-pane-icon-accent" d="M7 7h4v4H7zM15 7h2v4h-2M7 15h4v2H7M15 15h2v2h-2" /></PaneIcon>;
+}
+
+export function ProfilePaneHistoryIcon(props: ProfilePaneIconProps) {
+  return <PaneIcon {...props}><circle cx="12" cy="12" r="9" /><path className="profile-pane-icon-accent" d="M12 6v6l4 2" /></PaneIcon>;
 }
