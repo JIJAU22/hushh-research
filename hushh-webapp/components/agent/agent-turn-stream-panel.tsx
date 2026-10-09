@@ -58,6 +58,7 @@ const GMAIL_TOOLS: ReadonlySet<string> = new Set([
   "open_gmail_email_draft",
   "open_gmail_information_request_reply",
   "propose_gmail_mailbox_change",
+  "propose_gmail_todo",
 ]);
 const DRIVE_TOOLS: ReadonlySet<string> = new Set([
   "ask_documents_agent",
