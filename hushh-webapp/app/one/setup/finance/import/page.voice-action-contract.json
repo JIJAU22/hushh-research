@@ -8,7 +8,7 @@
     { "action_id": "setup.skip_finance", "label": "Skip Finance setup", "meaning": "Returns to the setup hub without recording Finance as complete.", "aliases": ["skip finance setup", "skip finance"], "search_keywords": ["skip", "finance"], "reachability": { "routes": ["/one/setup/finance", "/one/setup/finance/import"], "screens": ["one_setup_finance", "one_setup_finance_import"], "hidden_navigable": false, "navigation_prerequisites": [] }, "guard_ids": ["auth_signed_in"], "risk_level": "low", "execution_policy": "allow_direct", "execution_target": { "status": "wired", "path": "local_handler", "target": "setup.skip_finance" }, "control_ids": ["one-setup-finance-terminal"], "state_exposure": ["active setup capability"] }
   ],
   "search": {
-    "source_revision": "6b4b8a984a9033b08ee229cf9e3807dd272f1250d54a282fb30a997a2fe84d57",
+    "source_revision": "5ae0536754251474bc81a12f452aee4cdeb5ab3c6cb62d3dff3c0dd46c3b5ff2",
     "source_module_count": 1517
   }
 }
