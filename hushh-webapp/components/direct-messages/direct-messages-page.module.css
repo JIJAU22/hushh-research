@@ -561,8 +561,6 @@ article[data-message-role="user"] .messageActions {
   left: auto;
 }
 
-.messageFeedItem:hover .messageActions,
-.messageFeedItem:focus-within .messageActions,
 article[data-actions-visible="true"] .messageActions {
   opacity: 1;
   pointer-events: auto;
@@ -1169,7 +1167,7 @@ article[data-message-role="user"] .messageActionError {
 .composer { flex-shrink: 0; }
 .composerInput { min-height: 44px; max-height: max(44px, min(8rem, calc((100dvh - var(--kb-height, 0px) - var(--app-top-content-offset, 6rem)) * .25))); }
 .messageActions, article[data-message-role="user"] .messageActions { position: static; width: fit-content; max-width: 100%; margin-top: .25rem; transform: none; display: none; }
-.messageFeedItem:hover .messageActions, .messageFeedItem:focus-within .messageActions, article[data-actions-visible="true"] .messageActions { display: flex; }
+article[data-actions-visible="true"] .messageActions { display: flex; }
 .replyPreview { min-width: 0; overflow-wrap: anywhere; }
 .threadHeader { flex-shrink: 0; }
 
@@ -1330,3 +1328,15 @@ article[data-message-role="user"] .messageActions {
   transform: translateY(-70%);
 }
 .voiceButton, .sendButton { min-width: 45px; min-height: 45px; height: 45px; }
+
+/* One active row owns the controls; keep a compact visual within its touch target. */
+.messageActionButton,
+.messageActionButton[data-compact="true"] {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  border: 0;
+  background: radial-gradient(circle, var(--one-chat-raised) 14px, transparent 15px);
+  box-shadow: none;
+}
+.reactionChip::after { inset: -9px -8px; }

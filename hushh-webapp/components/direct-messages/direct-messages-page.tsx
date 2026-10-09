@@ -1311,6 +1311,14 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                         data-actions-visible={
                           activeMessageActions === message.id ? "true" : undefined
                         }
+                        onPointerEnter={(event) => {
+                          if (event.pointerType === "mouse" && !openMessageMenu) {
+                            setActiveMessageActions(message.id);
+                          }
+                        }}
+                        onFocusCapture={() => {
+                          if (!openMessageMenu) setActiveMessageActions(message.id);
+                        }}
                         onPointerDown={(event) => handleMessagePointerDown(event, message)}
                         onPointerUp={clearMessageLongPress}
                         onPointerCancel={clearMessageLongPress}
@@ -1394,7 +1402,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                                   />
                                 ) : null}
                                 <DropdownMenu
-                                  modal
+                                  modal={false}
                                   open={openMessageMenu === message.id}
                                   onOpenChange={(open) => {
                                     setOpenMessageMenu(open ? message.id : null);

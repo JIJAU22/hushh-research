@@ -292,7 +292,6 @@ function AppShellFrame({ children }: ProvidersProps) {
       }),
     [
       routeLayout.pageTopLocalOffset,
-      routeLayout.route,
       routeLayoutMode,
       topShellMetrics.shellVisible,
     ],

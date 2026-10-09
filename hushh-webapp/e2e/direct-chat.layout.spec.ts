@@ -159,6 +159,11 @@ test("hover actions do not shift messages or the centered composer", async ({ pa
   const before = await bubble.boundingBox();
   await bubble.hover();
   await expect(bubble.getByRole("button", { name: "Message options" })).toBeVisible();
+  const other = page.locator('[data-message-role="user"]').first();
+  await other.hover();
+  await expect(page.locator('article[data-actions-visible="true"]')).toHaveCount(1);
+  await expect(other).toHaveAttribute("data-actions-visible", "true");
+  await bubble.hover();
   const after = await bubble.boundingBox();
   expect(Math.abs(after!.height - before!.height)).toBeLessThanOrEqual(1);
   expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
