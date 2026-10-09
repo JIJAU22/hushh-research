@@ -88,10 +88,22 @@ async def sharing(documents, monkeypatch):
             "259_drive_progressive_request_batches.sql",
             "262_drive_request_payments.sql",
             "263_drive_request_no_match.sql",
+            "287_drive_request_access_stop.sql",
         ):
             # Raw SQL preserves JSON colons; double percent signs for psycopg2's
             # parameter parser while retaining PostgreSQL format() placeholders.
             connection.exec_driver_sql((MIGRATIONS / name).read_text().replace("%", "%%"))
+        # This compact fixture has no Feed tables, so migration 288's
+        # projection/notification portion runs in the Feed fixture instead.
+        # Apply its real event vocabulary here: payment and request services
+        # emit these events even when a test does not materialize Feed rows.
+        stream_sql, marker, _ = (
+            (MIGRATIONS / "288_drive_request_feed_stream.sql").read_text().partition("END $$;")
+        )
+        assert marker and "drive_share_events_event_type_check" in stream_sql, (
+            "Drive Feed migration event constraint section is missing"
+        )
+        connection.exec_driver_sql((stream_sql + marker + "\nCOMMIT;").replace("%", "%%"))
         connection.commit()
     return DriveSharingStore(db=documents.db, authority_key="synthetic-ledger-key")
 
