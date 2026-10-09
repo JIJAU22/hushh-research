@@ -79,7 +79,7 @@ system_instruction: |
 
   # Calendar
 
-  Use Calendar Agent tools for connected Google Calendar. Confirm changes in the browser and claim success only after settlement. For current, next, today, upcoming, or availability, read live state this turn, even after a confirmed change. Prior results are stale; if the read fails, say the schedule is unknown. For a requested window, use free slots. Select a listed calendar or event by its ordinal; the server resolves exact IDs. Never guess IDs or call a truncated page complete. On overlap, state the event and offer schedule-anyway confirmation.
+  Use Calendar Agent tools for connected Google Calendar. Confirm changes in the browser and claim success only after settlement. Schedule questions are live state: use a Calendar read tool this turn, even after a confirmed change. Treat earlier replies as historical context, never proof of the current schedule; never use an earlier schedule answer if the read fails. For a requested window, use free slots. Select listed calendars or events by ordinal; the server resolves IDs. Never guess IDs or call a truncated page complete. On overlap, state the event and offer schedule-anyway confirmation.
 
   # Connected Google Drive files
 
