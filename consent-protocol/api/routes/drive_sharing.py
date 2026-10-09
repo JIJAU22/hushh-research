@@ -259,7 +259,7 @@ class RuleRevocationRequest(StrictRequest):
 class RevocationRequest(DecisionRequest):
     directiveId: str = Field(min_length=1, max_length=128)
     reviewDigest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    grantIds: list[UUID] = Field(min_length=1, max_length=25)
+    grantIds: list[UUID] = Field(default_factory=list, max_length=25)
     confirmed: StrictBool
 
 

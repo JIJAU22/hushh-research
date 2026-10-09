@@ -1,4 +1,4 @@
--- Reverse 287: reactivate settings version 1, retire version 2.
+-- Reverse 289: reactivate settings version 1, retire version 2.
 --
 -- VERSION-PRESERVING, NOT DELETING. This mirrors the discipline migration
 -- 270 documented for every settings transition in this table: a version
@@ -47,7 +47,7 @@
 
 BEGIN;
 
-DO $rollback_284$
+DO $rollback_289$
 DECLARE
   v1_row one_referral_program_settings%ROWTYPE;
   v1_found BOOLEAN;
@@ -63,7 +63,7 @@ BEGIN
   v2_found := FOUND;
 
   IF NOT v1_found THEN
-    RAISE EXCEPTION 'rollback 284: version 1 does not exist; nothing to reactivate';
+    RAISE EXCEPTION 'rollback 289: version 1 does not exist; nothing to reactivate';
   END IF;
 
   IF v2_found
@@ -72,7 +72,7 @@ BEGIN
   THEN
     -- Already rolled back: version 1 active, version 2 retired. Idempotent
     -- success -- a replayed rollback changes nothing further.
-    RAISE NOTICE 'rollback 284: version 1 already active and version 2 already retired; idempotent no-op';
+    RAISE NOTICE 'rollback 289: version 1 already active and version 2 already retired; idempotent no-op';
 
   ELSIF v2_found
         AND v2_row.activated_at IS NOT NULL AND v2_row.retired_at IS NULL
@@ -84,7 +84,7 @@ BEGIN
     UPDATE one_referral_program_settings SET retired_at = NULL WHERE version = 1;
 
   ELSE
-    RAISE EXCEPTION 'rollback 284: unexpected starting state (version 1 activated_at=%, retired_at=%; version 2 exists=%, activated_at=%, retired_at=%); refusing to guess which version should be current',
+    RAISE EXCEPTION 'rollback 289: unexpected starting state (version 1 activated_at=%, retired_at=%; version 2 exists=%, activated_at=%, retired_at=%); refusing to guess which version should be current',
       v1_row.activated_at, v1_row.retired_at, v2_found, v2_row.activated_at, v2_row.retired_at;
   END IF;
 
@@ -92,10 +92,10 @@ BEGIN
     FROM one_referral_program_settings
    WHERE activated_at IS NOT NULL AND retired_at IS NULL;
   IF active_count <> 1 THEN
-    RAISE EXCEPTION 'rollback 284: invariant violated; expected exactly one active settings version after rollback, found %',
+    RAISE EXCEPTION 'rollback 289: invariant violated; expected exactly one active settings version after rollback, found %',
       active_count;
   END IF;
 END
-$rollback_284$;
+$rollback_289$;
 
 COMMIT;

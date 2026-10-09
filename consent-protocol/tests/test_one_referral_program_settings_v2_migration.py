@@ -1,4 +1,4 @@
-"""Release contract for migration 287 -- referral gamification settings v2.
+"""Release contract for migration 289 -- referral gamification settings v2.
 
 v1 (migration 270) shipped with placeholder milestones and an unset weekly
 schedule by design. This pins that v2 actually supplies the real values --
@@ -28,8 +28,8 @@ MIGRATIONS_DIR = ROOT / "db" / "migrations"
 MANIFEST_PATH = ROOT / "db" / "release_migration_manifest.json"
 CONTRACTS_DIR = ROOT / "db" / "contracts"
 
-MIGRATION = "287_one_referral_program_settings_v2.sql"
-ROLLBACK = "287_one_referral_program_settings_v2.rollback.sql"
+MIGRATION = "289_one_referral_program_settings_v2.sql"
+ROLLBACK = "289_one_referral_program_settings_v2.rollback.sql"
 PRIOR = "274_one_referral_weekly_awards.sql"
 
 EXPECTED_MILESTONES = (
@@ -184,7 +184,7 @@ def test_migration_checks_every_configuration_field_for_an_existing_v2() -> None
     statements = _statements(_migration())
     mismatch_guard = statements[
         statements.index("IF v2_row.qualification_policy_version") : statements.index(
-            "RAISE EXCEPTION 'migration 287: version 2 exists and is active, but"
+            "RAISE EXCEPTION 'migration 289: version 2 exists and is active, but"
         )
     ]
     for column in (
@@ -215,7 +215,7 @@ def test_migration_mismatch_guard_covers_the_previously_omitted_fields() -> None
     statements = _statements(_migration())
     mismatch_guard = statements[
         statements.index("IF v2_row.qualification_policy_version") : statements.index(
-            "RAISE EXCEPTION 'migration 287: version 2 exists and is active, but"
+            "RAISE EXCEPTION 'migration 289: version 2 exists and is active, but"
         )
     ]
     assert "v2_row.flash_windows IS DISTINCT FROM expected_flash_windows" in mismatch_guard

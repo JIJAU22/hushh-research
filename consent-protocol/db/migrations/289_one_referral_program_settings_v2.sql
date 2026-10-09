@@ -1,8 +1,10 @@
--- Migration 287: Hushh One referral gamification settings v2.
+-- Migration 289: Hushh One referral gamification settings v2.
 -- Publication reconciliation: this policy was previously activated in UAT
 -- in replay mode under the unpublished filename
 -- 284_one_referral_program_settings_v2.sql. Replay creates no ledger entry.
--- Upstream subsequently assigned 284 to direct-message reactions. This file
+-- Upstream subsequently assigned 284 to direct-message reactions and 287/288
+-- to Drive changes. The unpublished 287 reconciliation moved to 289; no
+-- migration or ledger write accompanied either source rename. This file
 -- retains the original policy transition and exact-match v2 no-op guard;
 -- it must not rewrite historical settings or fabricate a prior ledger row.
 --
@@ -71,7 +73,7 @@
 
 BEGIN;
 
-DO $migration_287$
+DO $migration_289$
 DECLARE
   v1_row one_referral_program_settings%ROWTYPE;
   v2_row one_referral_program_settings%ROWTYPE;
@@ -102,7 +104,7 @@ BEGIN
     -- the active row and its configuration matches exactly -- never because
     -- a row with this version number merely exists.
     IF v2_row.activated_at IS NULL OR v2_row.retired_at IS NOT NULL THEN
-      RAISE EXCEPTION 'migration 287: version 2 exists but is not the active settings version (activated_at=%, retired_at=%); refusing to guess intent; version 1 left untouched',
+      RAISE EXCEPTION 'migration 289: version 2 exists but is not the active settings version (activated_at=%, retired_at=%); refusing to guess intent; version 1 left untouched',
         v2_row.activated_at, v2_row.retired_at;
     END IF;
     IF v2_row.qualification_policy_version IS DISTINCT FROM 1
@@ -116,20 +118,20 @@ BEGIN
        OR v2_row.fulfillment_config IS DISTINCT FROM expected_fulfillment_config
        OR v2_row.feature_active IS DISTINCT FROM FALSE
     THEN
-      RAISE EXCEPTION 'migration 287: version 2 exists and is active, but its configuration does not match this migration''s intended values; refusing to silently diverge; version 1 left untouched';
+      RAISE EXCEPTION 'migration 289: version 2 exists and is active, but its configuration does not match this migration''s intended values; refusing to silently diverge; version 1 left untouched';
     END IF;
 
-    RAISE NOTICE 'migration 287: version 2 already active with matching configuration; idempotent no-op';
+    RAISE NOTICE 'migration 289: version 2 already active with matching configuration; idempotent no-op';
   ELSE
     -- Version 2 does not exist yet. Confirm version 1 is the expected,
     -- single starting point before changing anything.
     SELECT * INTO v1_row FROM one_referral_program_settings WHERE version = 1;
 
     IF NOT FOUND THEN
-      RAISE EXCEPTION 'migration 287: version 1 does not exist; this migration was not written to run against this starting state';
+      RAISE EXCEPTION 'migration 289: version 1 does not exist; this migration was not written to run against this starting state';
     END IF;
     IF v1_row.activated_at IS NULL OR v1_row.retired_at IS NOT NULL THEN
-      RAISE EXCEPTION 'migration 287: version 1 is not the current active settings version (activated_at=%, retired_at=%) and version 2 does not exist; unexpected starting state, refusing to proceed',
+      RAISE EXCEPTION 'migration 289: version 1 is not the current active settings version (activated_at=%, retired_at=%) and version 2 does not exist; unexpected starting state, refusing to proceed',
         v1_row.activated_at, v1_row.retired_at;
     END IF;
 
@@ -157,10 +159,10 @@ BEGIN
     FROM one_referral_program_settings
    WHERE activated_at IS NOT NULL AND retired_at IS NULL;
   IF active_count <> 1 THEN
-    RAISE EXCEPTION 'migration 287: invariant violated; expected exactly one active settings version after this migration, found %',
+    RAISE EXCEPTION 'migration 289: invariant violated; expected exactly one active settings version after this migration, found %',
       active_count;
   END IF;
 END
-$migration_287$;
+$migration_289$;
 
 COMMIT;

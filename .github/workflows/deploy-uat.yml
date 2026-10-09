@@ -54,6 +54,7 @@ env:
 concurrency:
   group: deploy-uat
   cancel-in-progress: false
+  queue: max
 
 jobs:
   select-target:
@@ -2847,6 +2848,11 @@ jobs:
             echo "- Frontend Cloud Build: \`${frontend_build_seconds}s\`"
             echo "- Non-build gates and verification: \`${non_build_seconds}s\`"
             echo ""
+            echo "### Revision Maintenance"
+            echo ""
+            echo "Old revisions are retired separately after a successful release; request drainage does not delay this deployment."
+            echo "[View Capacity Maintenance](${{ github.server_url }}/${{ github.repository }}/actions/workflows/capacity-maintenance.yml)"
+            echo ""
             echo "### Auto Scope Evidence"
             echo ""
             echo "- Backend changed files: \`${{ steps.scope.outputs.backend_changed_files || 'none' }}\`"
@@ -2882,7 +2888,7 @@ jobs:
           fi
           bash scripts/ci/tag-last-known-good.sh
 
-      - name: Retire old UAT revisions after a healthy release
+      - name: Retire old UAT revision tags after a healthy release
         if: always()
         shell: bash
         env:
@@ -2894,18 +2900,17 @@ jobs:
           set -euo pipefail
           status="$(python3 -c "import json; from pathlib import Path; print(json.loads(Path('/tmp/uat-release-status.json').read_text(encoding='utf-8'))['status'])")"
           if [ "$status" != healthy ]; then
-            echo "Skipping revision cleanup for release status $status"
+            echo "Skipping revision tag retirement for release status $status"
             exit 0
           fi
           bash scripts/ci/cloudrun-retention.sh "$BACKEND_SERVICE" "$GCP_REGION" "$BACKEND_REVISION_RETENTION" \
             "$BACKEND_CURRENT" --rollback-revision "$BACKEND_ROLLBACK" \
-            --last-known-good-revision "$BACKEND_CURRENT" --apply --healthy
+            --last-known-good-revision "$BACKEND_CURRENT" --apply --healthy --tags-only
           bash scripts/ci/cloudrun-retention.sh "$FRONTEND_SERVICE" "$GCP_REGION" "$FRONTEND_REVISION_RETENTION" \
             "$FRONTEND_CURRENT" --rollback-revision "$FRONTEND_ROLLBACK" \
-            --last-known-good-revision "$FRONTEND_CURRENT" --apply --healthy
+            --last-known-good-revision "$FRONTEND_CURRENT" --apply --healthy --tags-only
           bash scripts/ci/cloudrun-retention.sh consent-protocol-drive-worker "$GCP_REGION" 2 \
-            --apply --healthy
-          python3 scripts/ci/runtime-capacity-budget.py --environment uat
+            --apply --healthy --tags-only
 
       - name: Fail workflow when UAT release did not end healthy
         if: always()
