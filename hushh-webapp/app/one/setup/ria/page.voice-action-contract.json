@@ -8,7 +8,7 @@
     { "action_id": "setup.skip_ria", "label": "Skip RIA setup", "meaning": "Returns to the setup hub without recording RIA as complete.", "aliases": ["skip ria setup"], "search_keywords": ["skip", "ria"], "reachability": { "routes": ["/one/setup/ria"], "screens": ["one_setup_ria"], "hidden_navigable": false, "navigation_prerequisites": [] }, "guard_ids": ["auth_signed_in"], "risk_level": "low", "execution_policy": "allow_direct", "execution_target": { "status": "wired", "path": "local_handler", "target": "setup.skip_ria" }, "control_ids": ["one-setup-ria-terminal"], "state_exposure": ["active setup capability"] }
   ],
   "search": {
-    "source_revision": "778efa0c1b3f50bace82183e221873d5406eecee1ccc8f79ea3bf5e4e8dae9cb",
-    "source_module_count": 1513
+    "source_revision": "9a6161a4c83e979ab0f234542dbfece7f680b37e11d40331e99b25a9263c036e",
+    "source_module_count": 1517
   }
 }
