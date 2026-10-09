@@ -173,7 +173,6 @@ export function WalletSharing() {
       <p>You choose who can access your Wallet information.</p>
       <figure className={styles.heroCard}>
         <WalletDemoCardFace summary={WALLET_DEMO_CARDS[0]!} profile={demoProfile} />
-        <figcaption>Illustrative card · Your saved details stay private</figcaption>
       </figure>
     </section>
     {!current ? <p role="status" className="text-sm text-muted-foreground">Loading shared access…</p> : current.error ? <div role="alert" className="space-y-3 rounded-2xl border border-border p-5"><p className="text-sm">Couldn&apos;t load shared access.</p><Button variant="secondary" size="compact" onClick={() => setRevision(value => value + 1)}>Try again</Button></div> : renderGroup("Shared with", current.grants, true)}

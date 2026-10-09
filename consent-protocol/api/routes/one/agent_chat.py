@@ -1418,6 +1418,7 @@ _ACTIVITY_TOOLS = frozenset(
         "open_gmail_email_draft",
         "open_gmail_information_request_reply",
         "propose_gmail_mailbox_change",
+        "propose_gmail_todo",
         "propose_drive_share",
         "propose_drive_bulk_share",
         "propose_drive_file_share",

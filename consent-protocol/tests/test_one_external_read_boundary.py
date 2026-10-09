@@ -300,6 +300,22 @@ async def test_actual_one_runner_allows_only_reviewable_draft_after_read():
         await runner.close()
 
 
+def test_gmail_todo_read_starts_the_same_external_content_barrier():
+    """A Gmail subject can be shown in the card, never drive a second tool call."""
+
+    gmail_todo = FunctionTool(agent_tree.propose_gmail_todo)
+    blocked_action = FunctionTool(agent_tree.propose_gmail_mailbox_change)
+    context = SimpleNamespace(
+        invocation_id="turn", state={STATE_EXECUTION_SURFACE: "typed_chat"}, user_id="owner"
+    )
+
+    assert before_external_read_tool(gmail_todo, {}, context) is None
+    assert context.state[STATE_EXTERNAL_READ] == "turn"
+    blocked = before_external_read_tool(blocked_action, {}, context)
+    assert blocked is not None
+    assert blocked["reason"] == "connector_read_complete"
+
+
 def test_draft_cannot_run_in_parallel_with_read_or_by_name_spoofing():
     draft = FunctionTool(agent_tree.open_gmail_email_draft)
     context = SimpleNamespace(
