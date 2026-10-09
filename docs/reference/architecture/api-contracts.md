@@ -200,6 +200,50 @@ from attempting its legacy issuance before returning the incompatible response.
 | DELETE | `/api/notifications/unregister`                       | Unregister FCM tokens (logout)                                                                                                                                  |
 | POST   | `/api/kai/consent/grant`                              | Grant consent for Kai scopes                                                                                                                                    |
 
+### Chat push device registration
+
+`POST /api/notifications/register` uses Firebase authentication and verifies the
+body's `user_id` against the authenticated account. Its body is
+`{user_id, token, platform, device_id?, preview_key_id?, preview_public_key?}`.
+Installation and preview identifiers are UUIDs. The preview public key is a
+canonical base64url raw uncompressed P-256 point (87 characters); its key ID
+and public key must be supplied together. It opens notification previews only
+and grants no vault or chat-history access. A stable installation can rotate
+its FCM token; a token or installation belongs to one account at a time.
+Multiple installations on the same platform remain registered independently.
+`DELETE /api/notifications/unregister` accepts `{user_id, device_id?, platform?}`;
+`device_id` removes only this account's installation. Legacy platform/all-account
+removal is retained for older clients. New clients always pass their installation.
+
+Circle chat state includes `notificationDevices` for current other members
+(`userId`, `keyId`, `publicKey`, bounded to 500 installations). The optional
+`notificationPreviews` message field maps preview key UUIDs to sealed envelopes,
+with at most 500 entries, 2600 characters per envelope and a 9 MiB total request
+limit including encrypted photo content. Normal Circle message access continues
+to require current membership and VAULT_OWNER authorization. Sender clients seal
+only a short message preview for each installation; the server separately seals
+canonical sender/Circle identity, preventing sender-supplied identity spoofing.
+New keys or old clients without a preview receive a generic alert.
+
+Migration `290_chat_push_delivery.sql` adds the transactional direct-message
+outbox, per-installation provider-acceptance ledger and preview metadata. Apply
+it before running the new workers. `PushTokensService` owns the additive
+`user_push_installations` registry and maintains the `user_push_tokens` legacy
+projection with its original `UNIQUE (user_id, platform)` conflict target. Serving
+older handlers and an unmodified backend rollback can still register tokens.
+A database reconciliation trigger revokes the former account's registration
+when an older handler transfers a token; a unique legacy token fence rejects
+unseen concurrent claims. Device transfers retire the old token's projection,
+including when the token changes. New readers prefer installation rows and
+deduplicate legacy projections; device unregister and stale-token cleanup remain
+owner-scoped and restore a surviving device's legacy projection. Full-account
+tombstones also erase both registries beneath older erasure handlers. SQL
+rollback removes the new outbox/ledger and Circle
+preview column while retaining the compatible registry and ownership bridge.
+Existing account-deletion write guards and erasure paths cover both registries. See
+[Feed notification model](../one/feed-notification-model.md#device-system-chat-notifications)
+for rendering, privacy, retries and native release verification.
+
 ### One Person Request History
 
 Chat records an inline scope-discovery send through
@@ -1113,19 +1157,22 @@ connection ended.
 | POST | `/api/one/messages/route-token` | Mint with exactly one of `{conversationId, personRef}`, or restore with `{token}`. Firebase authenticated, participant checked on both mint and restore, and private/no-store. Returns `{token, kind, ref}`; business identifiers remain in memory and API bodies. |
 | GET | `/api/one/messages/conversations` | Participant-only inbox with latest decrypted message projection, timestamp, unread count, peer-safe profile projection, and `canSend`. |
 | GET | `/api/one/messages/with/person/{personRef}` | Open the viewer's existing conversation with an opaque public person reference, or return a no-conversation draft state. Internal `/with/{userId}` compatibility remains Firebase-authenticated and is never exposed as a profile route. |
-| POST | `/api/one/messages` | Send `{recipientPersonRef|recipientUserId, content, replyToMessageId?}`. A reply must reference a message in the same participant conversation. Creates the canonical pair conversation on first message and returns the conversation plus sender/receiver-safe message projection. Empty text, self-send, unconnected pair, and a block fail closed. |
+| POST | `/api/one/messages` | Send `{recipientPersonRef|recipientUserId, content, replyToMessageId?, clientMessageId?}`. Optional UUID makes a retry return the original message without another Feed/push event. A reused ID with different normalized text, reply target, conversation or sender returns the same generic 409. Every replay rechecks the active connection and block gate. Creates the canonical pair conversation on first message; empty text, self-send, unconnected pair, and a block fail closed. | A reply must reference a message in the same participant conversation.
 | GET | `/api/one/messages/conversations/{conversationId}/messages?before=&limit=` | Participant-only chronological history page; `before` is an opaque message id and `limit` is bounded. |
 | PATCH | `/api/one/messages/conversations/{conversationId}/messages/{messageId}` | Edit the caller's non-deleted sent message using `{content}`. The envelope is re-encrypted with its original message identity, and the response is the participant-safe updated projection. |
 | DELETE | `/api/one/messages/conversations/{conversationId}/messages/{messageId}?scope=me\|everyone` | `scope=me` hides the message only for the caller. `scope=everyone` is sender-only and replaces content with the durable deleted-message marker for both participants. |
 | PUT | `/api/one/messages/conversations/{conversationId}/messages/{messageId}/reaction` | Set the caller's one durable emoji reaction using `{emoji}`. The response aggregates emoji counts without exposing participant identities. |
-| POST | `/api/one/messages/conversations/{conversationId}/read` | Mark the viewer's received unread messages as read. This remains available for preserved history after a connection ends. |
+| POST | `/api/one/messages/conversations/{conversationId}/read?throughMessageId=` | Mark the viewer's received unread messages through the supplied message's `(created_at,id)` boundary. The optional UUID must belong to this participant-scoped conversation; a foreign boundary returns 404 without updates. Returns `readCount`, `readAt` and, when bounded, `readThroughCreatedAt`. Omitting the boundary preserves the legacy whole-conversation behavior. Reading preserved history remains available after a connection ends. |
 | GET | `/api/one/messages/events` and `/stream` | Authenticated metadata-only realtime subscription. The event is a doorbell; clients re-read the inbox/history instead of trusting an event payload. |
 | POST / DELETE | `/api/one/messages/blocks` | Create/remove the caller's directed block using `{blockedPersonRef|blockedUserId}`. Blocking does not revoke the canonical connection or delete history, but either direction disables future sends. |
 
 Persisted body text is AES-256-GCM ciphertext under the server-managed
 direct-message envelope key. API responses decrypt only inside the authenticated
-service boundary and expose `senderIsViewer`, never a peer's raw user id. Push
-and realtime payloads contain no message content. Stable `403` failures are
+service boundary and expose `senderIsViewer`, never a peer's raw user id.
+Realtime doorbells contain no message content. System pushes may include a
+bounded preview sealed to an independent installation key, as described in
+the chat push device registration contract above; plaintext is never sent to
+the push provider. Stable `403` failures are
 `DIRECT_MESSAGE_CONNECTION_REQUIRED`, `DIRECT_MESSAGE_BLOCKED`, and
 `DIRECT_MESSAGE_SENDER_FORBIDDEN`; malformed/self/empty requests are `422`.
 
@@ -1147,7 +1194,8 @@ envelope, sender id, or preview. During the authenticated recipient's Feed
 read, the service verifies the recipient relationship again, decrypts the
 source in memory, and returns a whitespace-normalized preview capped at 256
 characters. The source message's delete path removes that derived Feed row,
-and push/SSE payloads remain metadata-only.
+and SSE payloads remain metadata-only. System push previews use the separate
+installation-key envelope; neither previews nor preview keys are stored in Feed.
 
 ### One Location Agent
 
@@ -2635,9 +2683,17 @@ The new chat wire uses camelCase directly on all surfaces. Clients encrypt a
 fresh AES-256-GCM content key per message, wrap it to every recipient using the
 existing vault-synced P-256 recipient keys, and authenticate Circle, client
 message ID, sender, recipient and payload kind as additional data. Text, image
-bytes, filename and MIME metadata remain encrypted; Feed and pushes carry only
-Circle identifiers and generic activity. This reuses the existing authenticated
+bytes, filename and MIME metadata remain encrypted. Feed carries Circle identifiers
+and generic activity. System pushes may carry a sender-sealed bounded snippet
+and server-sealed canonical identity, both encrypted to independent installation
+preview keys. Missing keys retain a generic alert. This reuses the existing authenticated
 key directory; it does not introduce key verification or a ratcheting protocol.
+
+Native push token teardown uses `HushhNotifications.deletePushToken()`, which
+resolves after the Firebase SDK completes deletion on iOS and Android. Native
+token retrieval waits for an already-started deletion so a rapid account switch
+cannot register an installation token that logout later invalidates. Preview key
+removal remains immediate and independent of network completion.
 
 Images are passive JPEG/PNG/WebP files up to 5 MiB and messages contain at most
 4,000 characters. Both API layers bound chat requests to 7,250,000 bytes.
