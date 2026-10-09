@@ -50,6 +50,15 @@ READ_TOOLS = {
     "ask_documents_agent": "google_drive_chat_reads",
     "read_selected_drive_search_result": "google_drive_chat_reads",
     "inspect_selected_drive_files": "google_drive_chat_reads",
+    # Calendar event fields are provider-authored text. A Calendar read ends
+    # this invocation's action authority just like a Mail or Drive read, and
+    # its arguments/results must be removed from durable ADK history.
+    "calendar_summary": None,
+    "calendar_calendars": None,
+    "calendar_events": None,
+    "calendar_event_detail": None,
+    "calendar_availability": None,
+    "calendar_free_slots": None,
     # Per-provider admission and owner authority are checked inside the tool.
     # Establish the content barrier before dispatch, regardless of provider.
     "read_workspace_tool": None,
