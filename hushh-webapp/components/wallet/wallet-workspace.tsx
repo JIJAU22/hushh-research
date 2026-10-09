@@ -494,32 +494,6 @@ export function WalletWorkspace() {
     setSearchOpen(false);
   };
 
-  const revealCard = async (cardId: string) => {
-    const context = vaultContext();
-    if (!context) {
-      dispatch({ type: "vault_unavailable" });
-      return;
-    }
-    dispatch({ type: "focus", cardId });
-    setBusyCardId(cardId);
-    try {
-      const full = await WalletService.getCard({ ...context, cardId });
-      if (full && activeOwnerIdRef.current === context.userId && vaultContextRef.current()?.vaultKey === context.vaultKey) {
-        dispatch({
-          type: "revealed",
-          cardId,
-          summary: full.summary,
-          secrets: full.secrets,
-          vaultUnlocked: vaultContextRef.current() !== null,
-        });
-      }
-    } catch {
-      morphyToast.error("This card could not be opened.");
-    } finally {
-      setBusyCardId(null);
-    }
-  };
-
   const removeCard = async (cardId: string) => {
     const context = vaultContext();
     if (!context) return;
