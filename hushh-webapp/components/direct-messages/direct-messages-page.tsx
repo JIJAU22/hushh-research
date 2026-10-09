@@ -1,5 +1,7 @@
 "use client";
 
+import { replaceMessageHistory } from "@/lib/direct-messages/message-history";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -37,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/lib/morphy-ux/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   ArrowLeft,
   Check,
@@ -750,6 +753,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
   };
 
   const backToConnections = () => {
+    replaceMessageHistory(null);
     router.replace(ROUTES.ONE_MESSAGES, { scroll: false });
   };
 
@@ -942,6 +946,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
           messageId: message.id,
           message: "Couldn’t update this message. Try again.",
         });
+        morphyToast.error("Couldn’t update this message. Try again.");
       }
     })();
   };
@@ -1034,9 +1039,11 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
       >
         <aside className={styles.inbox} aria-label="Conversations">
           <header className={styles.inboxHeader}>
-            <div>
-              <h1>Chats</h1>
-              <p>{inboxItems.length} {inboxItems.length === 1 ? "conversation" : "conversations"}</p>
+            <div className={styles.inboxHeading}>
+              <Link href={ROUTES.HOME} className={styles.refreshButton} aria-label="Back to Home">
+                <ArrowLeft className="h-5 w-5" aria-hidden="true" />
+              </Link>
+              <h1>Chat</h1>
             </div>
             <button
               type="button"
@@ -1215,8 +1222,8 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                       type="button"
                       className={styles.headerAction}
                       aria-label="Start voice call"
-                      title="Open voice chat"
-                      onClick={openOneVoiceChat}
+                      title="Calls are not available yet"
+                      onClick={() => morphyToast.info("Calls are not available yet.")}
                     >
                       <PhoneCall className="h-4 w-4" aria-hidden="true" />
                     </button>
@@ -1337,49 +1344,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                                   !message.senderIsViewer && styles.peerMessageBubble,
                                 )}
                               >
-                                {editingMessage?.id === message.id ? (
-                                  <div className={styles.messageEditForm}>
-                                    <label className="sr-only" htmlFor={`edit-message-${message.id}`}>
-                                      Edit message
-                                    </label>
-                                    <textarea
-                                      id={`edit-message-${message.id}`}
-                                      ref={editingInputRef}
-                                      value={editingContent}
-                                      maxLength={DIRECT_MESSAGE_MAX_LENGTH}
-                                      className={styles.messageEditInput}
-                                      onChange={(event) => {
-                                        editDraftGeneration.current += 1;
-                                        setEditingContent(event.target.value);
-                                      }}
-                                      onKeyDown={(event) => {
-                                        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !window.matchMedia("(pointer: coarse)").matches) {
-                                          event.preventDefault();
-                                          saveEdit();
-                                        }
-                                      }}
-                                    />
-                                    <div className={styles.messageEditActions}>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          editDraftGeneration.current += 1;
-                                          setEditingMessage(null);
-                                          setEditingContent("");
-                                        }}
-                                      >
-                                        Cancel
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={!editingContent.trim()}
-                                        onClick={saveEdit}
-                                      >
-                                        Save
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : message.deletedForEveryoneAt ? (
+                                {message.deletedForEveryoneAt ? (
                                   <p className={styles.deletedMessage}>This message was deleted.</p>
                                 ) : (
                                   <>
@@ -1394,7 +1359,6 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                                     </p>
                                   </>
                                 )}
-                                {editingMessage?.id !== message.id ? (
                                   <div className={styles.messageBubbleMeta}>
                                     {message.editedAt ? <span>Edited</span> : null}
                                     <span className={styles.messageTimestamp}>
@@ -1419,7 +1383,6 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                                       </span>
                                     ) : null}
                                   </div>
-                                ) : null}
                               </OneChatBubble>
                               <div className={styles.messageActions} aria-label="Message actions">
                                 {!message.deletedForEveryoneAt ? (
@@ -1431,7 +1394,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                                   />
                                 ) : null}
                                 <DropdownMenu
-                                  modal={false}
+                                  modal
                                   open={openMessageMenu === message.id}
                                   onOpenChange={(open) => {
                                     setOpenMessageMenu(open ? message.id : null);
@@ -1523,11 +1486,6 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                 <div ref={bottomRef} className={styles.bottomMarker} />
               </div>
 
-              {!thread.canSend && messages.length > 0 ? (
-                <div className={styles.readOnlyNotice} role="status">
-                  {thread.disconnectedNotice || "You are no longer connected."}
-                </div>
-              ) : null}
                 {!atBottom && messages.length > 0 ? <button type="button" className={styles.latestControl} onClick={() => {
                   atBottomRef.current = true; setAtBottom(true); if (messageListRef.current) messageListRef.current.scrollTop = messageListRef.current.scrollHeight; setReadRevision((value) => value + 1);
                 }}>Go to latest messages</button> : null}
@@ -1539,6 +1497,11 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                     data-direct-message-inbox-composer={!hasRouteSelection || undefined}
                     onSubmit={(event) => void sendDraft(event)}
                   >
+                    {hasRouteSelection && !thread.canSend && messages.length > 0 ? (
+                      <div className={styles.readOnlyNotice} role="status">
+                        {thread.disconnectedNotice || "You are no longer connected."}
+                      </div>
+                    ) : null}
                     {replyingTo ? (
                       <div className={styles.composerReplyPreview}>
                         <div>
@@ -1630,6 +1593,30 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                     ) : null}
                   </form>
                   </AgentDockPortal>
+              <Dialog modal open={Boolean(editingMessage)} onOpenChange={(open) => {
+                if (!open) { editDraftGeneration.current += 1; setEditingMessage(null); setEditingContent(""); }
+              }}>
+                <DialogContent className={styles.editDialog} srDescription="Update the text of your message.">
+                  <DialogHeader><DialogTitle>Edit message</DialogTitle></DialogHeader>
+                  <label className="sr-only" htmlFor="message-edit-text">Edit message</label>
+                  <div className={styles.expandedMessageEditor}>
+                  <textarea id="message-edit-text" ref={editingInputRef}
+                    value={editingContent} maxLength={DIRECT_MESSAGE_MAX_LENGTH}
+                    className={styles.messageEditInput}
+                    onChange={(event) => { editDraftGeneration.current += 1; setEditingContent(event.target.value); }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !window.matchMedia("(pointer: coarse)").matches) {
+                        event.preventDefault();
+                        saveEdit();
+                      }
+                    }} />
+                  <div className={styles.messageEditActions}>
+                    <Button onClick={() => { editDraftGeneration.current += 1; setEditingMessage(null); setEditingContent(""); }}>Cancel</Button>
+                    <Button variant="blue-gradient" disabled={!editingContent.trim()} onClick={saveEdit}>Save</Button>
+                  </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
               <AlertDialog
                 open={Boolean(deleteRequest)}
                 onOpenChange={(open) => {
