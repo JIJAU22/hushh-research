@@ -334,8 +334,11 @@ async def test_background_off_requires_one_setup_event_and_resumes_on_enable(req
     assert review["trustedAuto"] is True
     assert review["preparationError"] == "background_preparation_required"
     assert rows(sharing, "drive_share_permission_operations") == []
-    assert [event["event_type"] for event in rows(sharing, "drive_share_events")] == [
-        "document_share_request"
+    assert sorted(
+        (event["event_type"], event["user_id"]) for event in rows(sharing, "drive_share_events")
+    ) == [
+        ("document_share_request", "owner"),
+        ("document_share_request_sent", "recipient"),
     ]
     # The setup event is unique, and no automatic work retries in a tight loop.
     assert (await auto.start_pending())["deferred"] == 0
