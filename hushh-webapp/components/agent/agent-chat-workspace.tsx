@@ -8404,6 +8404,17 @@ export function AgentChatWorkspace({ className }: AgentChatWorkspaceProps) {
       setMessagesBelow(0);
       return;
     }
+    const overlay = isCanonicalChatRoute ? agentDockFrame : composerStackRef.current;
+    const end = messagesEndRef.current;
+    if (end) {
+      const endTargetTop = transcriptRevealScrollTop(
+        measureTranscriptReveal(transcript, end, overlay),
+      );
+      if (endTargetTop <= transcript.scrollTop + 4) {
+        setMessagesBelow(0);
+        return;
+      }
+    }
     const distanceFromBottom =
       transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop;
     if (distanceFromBottom <= 96) {
@@ -8412,7 +8423,6 @@ export function AgentChatWorkspace({ className }: AgentChatWorkspaceProps) {
     }
     // The composer floats over the transcript, so "in view" ends at its top.
     const transcriptRect = transcript.getBoundingClientRect();
-    const overlay = isCanonicalChatRoute ? agentDockFrame : composerStackRef.current;
     const overlayRect = overlay?.getBoundingClientRect();
     const visibleBottom = Math.max(transcriptRect.top, Math.min(transcriptRect.bottom,
       overlayRect && overlayRect.height > 0 ? overlayRect.top : transcriptRect.bottom));
