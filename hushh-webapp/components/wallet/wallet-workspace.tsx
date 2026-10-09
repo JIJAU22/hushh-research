@@ -256,7 +256,7 @@ export function WalletWorkspace() {
     cardholderNames: Record<string, string>;
   } | null>(null);
   const ownedSnapshot = vaultKey && cardSnapshot?.ownerId === renderedOwnerId ? cardSnapshot : null;
-  const cards = ownedSnapshot?.cards ?? [];
+  const cards = useMemo(() => ownedSnapshot?.cards ?? [], [ownedSnapshot]);
   const cardholderNames = ownedSnapshot?.cardholderNames ?? {};
   const [busyCardId, setBusyCardId] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<WalletCardSummary | null>(null);
