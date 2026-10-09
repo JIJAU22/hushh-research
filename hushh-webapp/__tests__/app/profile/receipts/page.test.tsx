@@ -114,6 +114,7 @@ vi.mock("@/lib/services/gmail-receipts-service", async (importOriginal) => {
     GmailReceiptsService: mocks.gmailReceiptsService,
     GmailReceiptRequestError: actual.GmailReceiptRequestError,
     isRetryableReceiptScanPageError: actual.isRetryableReceiptScanPageError,
+    isReceiptConnectionLostError: actual.isReceiptConnectionLostError,
     isReceiptScanInProgressError: (error: unknown) =>
       Boolean(
         error &&
@@ -1163,6 +1164,36 @@ describe("ProfileReceiptsPage", () => {
       3,
       expect.objectContaining({ page: 2 }),
     );
+  });
+
+  it("asks to reconnect Mail instead of offering Try again when Mail rejected the saved login", async () => {
+    // UAT 2026-10-09: Google answered invalid_grant, so every later scan was
+    // refused. "Try again" could never succeed and was offered forever.
+    const view = makeGmailView();
+    view.refreshStatus.mockResolvedValue(view.status);
+    mocks.useGmailConnectorStatus.mockReturnValue(view);
+    vi.mocked(GmailReceiptsService.scanReceipts).mockRejectedValue(
+      new GmailReceiptRequestError(
+        "Reconnect Gmail before loading receipts.",
+        401,
+        "GMAIL_REAUTH_REQUIRED",
+      ),
+    );
+
+    render(<ProfileReceiptsPage initialWorkspace="receipts" />);
+    await startReceiptSync();
+
+    expect(
+      await screen.findByText(
+        "Mail needs to be reconnected before it can sync your receipts.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reconnect Mail" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(screen.queryByText("Couldn’t finish scanning your receipts.")).toBeNull();
+    // Read once, never retried; the real connection state is re-read.
+    expect(GmailReceiptsService.scanReceipts).toHaveBeenCalledTimes(1);
+    expect(view.refreshStatus).toHaveBeenCalledWith({ force: true });
   });
 
   it("stops an empty scan at the fifty-page receipt bound", async () => {
