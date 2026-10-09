@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { collectSources, sourceRevision, syncSearchContracts, validateControlCoverage } from './sync-search-contracts.mjs';
+import { runUiChecks } from '../architecture/verify-ui-contracts.mjs';
 
 test('source drift includes imported components and dynamic imports, independent of line endings', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'search-contract-'));
@@ -50,4 +51,17 @@ test('new search controls need semantic action coverage even after regeneration'
   const sources = new Map([['app/page.tsx', '<button data-voice-control-id="new_search_action" />']]);
   assert.throws(() => validateControlCoverage(sources, [{actions:[]}]), /new_search_action/);
   assert.doesNotThrow(() => validateControlCoverage(sources, [{actions:[{control_ids:['new_search_action']}]}]));
+});
+
+test('combined UI check runs both owners and fails when either owner fails', async () => {
+  for (const failed of ['Back', 'Search']) {
+    const ran = [];
+    const checks = ['Back', 'Search'].map(name => [name, async () => {
+      ran.push(name);
+      if (name === failed) throw new Error(`${name} drift`);
+    }]);
+    assert.equal(await runUiChecks(checks), false);
+    assert.deepEqual(ran, ['Back', 'Search']);
+  }
+  assert.equal(await runUiChecks([['Back', async () => {}], ['Search', async () => {}]]), true);
 });

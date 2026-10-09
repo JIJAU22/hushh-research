@@ -10,4 +10,9 @@ if [ ! -f "$DELEGATE" ]; then
   exit 1
 fi
 
+# This is read-only and checks every route, so docs-only pushes cannot bypass it.
+if [ -d "$REPO_ROOT/hushh-webapp" ]; then
+  node "$REPO_ROOT/hushh-webapp/scripts/architecture/verify-ui-contracts.mjs" || exit 1
+fi
+
 exec sh "$DELEGATE" "$@"

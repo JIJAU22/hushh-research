@@ -116,7 +116,12 @@
     "android:cold:audit": "HUSHH_ALLOW_DESTRUCTIVE_NATIVE_AUDIT=true npm run android:test",
     "build:search-contracts": "node ./scripts/voice/sync-search-contracts.mjs && npm run build:voice-gateway && node ./scripts/architecture/generate-surface-map.mjs && npm run build:route-orchestration-index && npm run build:capability-graph && npm run build:runtime-topology",
     "verify:search-contracts": "node ./scripts/voice/sync-search-contracts.mjs --check && npm run verify:surface-map && npm run verify:voice-gateway && node --test ./scripts/voice/search-contracts.test.mjs",
-    "build:runtime-topology": "node ./scripts/architecture/generate-runtime-topology.mjs"
+    "build:runtime-topology": "node ./scripts/architecture/generate-runtime-topology.mjs",
+    "ui:doctor": "node ./scripts/architecture/verify-ui-contracts.mjs",
+    "verify:ui-contracts": "node ./scripts/architecture/verify-ui-contracts.mjs",
+    "build:ui-contracts": "npm run build:back-contracts && npm run build:search-contracts",
+    "test:ui-contract-validators": "node --test ./scripts/architecture/back-navigation.test.mjs ./scripts/voice/search-contracts.test.mjs",
+    "test:ui-contracts": "npm run test:ui-contract-validators && npm run test:back-hierarchy"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",

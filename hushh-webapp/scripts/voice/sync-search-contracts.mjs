@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { ts, createUiSourceIndex } from '../architecture/ui-source-index.mjs';
 
 const extensions = ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.json'];
 export const normalizeSource = (text) => text.replace(/\r\n?/g, '\n');
@@ -13,7 +13,7 @@ export function sourceRevision(sources) {
   }
   return hash.digest('hex');
 }
-export async function collectSources(root, entries) {
+export async function collectSources(root, entries, index = createUiSourceIndex(root)) {
   const sources = new Map();
   async function resolveModule(from, specifier) {
     const base = specifier.startsWith('@/') ? path.join(root, specifier.slice(2))
@@ -23,17 +23,17 @@ export async function collectSources(root, entries) {
       if (!extensions.includes(path.extname(candidate))) continue;
       const relative = path.relative(root, candidate).split(path.sep).join('/');
       if (relative.startsWith('contracts/') || relative.startsWith('lib/generated/') || relative.endsWith('.generated.json') || relative.endsWith('.voice-action-contract.json')) continue;
-      try { if ((await fs.stat(candidate)).isFile()) return candidate; } catch { /* try next extension */ }
+      if (index.has(candidate)) return candidate;
     }
     return null;
   }
   async function visit(file) {
     const relative = path.relative(root, file).split(path.sep).join('/');
     if (sources.has(relative)) return;
-    const text = await fs.readFile(file, 'utf8');
+    const text = index.read(file);
     sources.set(relative, text);
     if (file.endsWith('.json')) return;
-    const ast = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const ast = index.parse(file, text);
     const imports = [];
     function walk(node) {
       if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) imports.push(node.moduleSpecifier.text);
@@ -52,7 +52,7 @@ export async function collectSources(root, entries) {
 export function collectSearchControlIds(sources) {
   const ids = new Set();
   for (const [file, text] of sources) {
-    if (file.endsWith('.json')) continue;
+    if (file.endsWith('.json') || !text.includes('data-voice-control-id')) continue;
     const ast = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     function walk(node) {
       if (ts.isJsxAttribute(node) && node.name.getText(ast) === 'data-voice-control-id') {
@@ -72,33 +72,26 @@ export function validateControlCoverage(sources, contracts) {
   const missing = [...collectSearchControlIds(sources)].filter(id => !declared.has(id) && !exemptions.has(id));
   if (missing.length) throw new Error(`Search controls need authored actions/control_ids before regeneration: ${missing.sort().join(', ')}`);
 }
-async function findFiles(dir, predicate) {
-  const result = [];
-  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
-    if (['node_modules', '.next', '.git'].includes(entry.name)) continue;
-    const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) result.push(...await findFiles(file, predicate));
-    else if (predicate(file)) result.push(file);
-  }
-  return result.sort();
-}
-export async function syncSearchContracts(root, check = false) {
+export async function syncSearchContracts(root, check = false, index = createUiSourceIndex(root)) {
   const layout = JSON.parse(await fs.readFile(path.join(root, 'lib/navigation/app-route-layout.contract.json'), 'utf8'));
-  const contracts = await findFiles(root, file => file.endsWith('.voice-action-contract.json'));
-  const pages = await findFiles(path.join(root, 'app'), file => file.endsWith('/page.tsx') || file.endsWith('\\page.tsx'));
-  const uiEntries = await findFiles(path.join(root, 'app'), file => /[\\/](page|layout|template|loading|error|global-error|not-found|default)\.[jt]sx?$/.test(file));
+  const contracts = index.files.filter(file => file.endsWith('.voice-action-contract.json'));
+  const appFiles = index.files.filter(file => file.startsWith(path.join(root, 'app') + path.sep));
+  const pages = appFiles.filter(file => /[\\/]page\.tsx$/.test(file));
+  const uiEntries = appFiles.filter(file => /[\\/](page|layout|template|loading|error|global-error|not-found|default)\.[jt]sx?$/.test(file));
   const pageEntries = pages.map(file => path.relative(root, file).split(path.sep).join('/'));
+  const coveredFiles = new Set(layout.map(entry => entry.shellVerification?.file));
+  const coveredRoutes = new Set(layout.map(entry => entry.route.split('?')[0]));
   // Every physical page must already be represented in the authoritative route layout.
   for (const page of pageEntries) {
-    if (!layout.some(entry => entry.shellVerification?.file === page)) {
+    if (!coveredFiles.has(page)) {
       // Some shells verify a component instead; match the physical Next route.
       const route = '/' + page.slice(4, -9).split('/').filter(segment => !segment.startsWith('(')).join('/');
-      if (!layout.some(entry => entry.route.split('?')[0] === (route || '/'))) throw new Error(`New page ${page} needs a web route/search contract.`);
+      if (!coveredRoutes.has(route || '/')) throw new Error(`New page ${page} needs a web route/search contract.`);
     }
   }
   // Include the entire route UI import graph. Shared changes invalidate every owning contract.
   // Hashes detect drift; they never claim to infer the meaning of a new interaction.
-  const sources = await collectSources(root, uiEntries.map(file => path.relative(root, file)));
+  const sources = await collectSources(root, uiEntries.map(file => path.relative(root, file)), index);
   validateControlCoverage(sources, await Promise.all(contracts.map(async file => JSON.parse(await fs.readFile(file, 'utf8')))));
   const revision = sourceRevision(sources);
   let stale = 0;
