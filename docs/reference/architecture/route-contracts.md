@@ -356,10 +356,12 @@ The gate also validates literal `data-voice-control-id` values against authored 
 ### Messages workspace layout
 
 The `/one/messages` workspace uses the standard shared header and persistent
-bottom navigation, with no route-specific footer styling. Its white two-pane
-message area sits below the shared header, and its composer remains in normal
-flow inside the conversation. The shell reserves space for the footer on both panes;
-active global commands and voice controls remain available and measured. On
+bottom navigation, with no route-specific footer styling. Its light two-pane
+message area sits below the shared header. The message composer projects into
+the existing centered Agent Dock above navigation; both panes reserve the full
+dock height, while keyboard lift reserves only navigation and outer insets.
+Every bubble shows its timestamp beside the existing delivery status. Active
+global commands and voice controls remain available and measured. On
 mobile, a selected conversation replaces the inbox and Back to chats restores
 it. Inbox filtering matches contact names and message previews; an empty inbox
 links to the existing Connect entry point. Browser selection restoration uses

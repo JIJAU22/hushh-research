@@ -6119,11 +6119,17 @@ html.kb-open [data-agent-dock-chat] [data-bottom-shell-navigation-slot] {
   visibility: hidden;
   pointer-events: none;
 }
+/* Inbox search has no message composer. Its idle launcher follows the same
+ * keyboard hiding rule as other search pages, while active commands stay usable. */
+html.kb-open [data-messages-dock]:not([data-command-active="true"]):not(:has([data-command-active="true"])):not(:has([data-agent-dock-composer]:not([hidden]))) [data-bottom-shell-agent-slot] {
+  visibility: hidden;
+  pointer-events: none;
+}
 html.kb-open [data-agent-dock-chat] [data-bottom-shell-motion-stack] {
   transform: none !important;
 }
 html:not(.kb-resizes) [data-agent-dock-chat] [data-bottom-shell-agent-slot] {
-  translate: 0 calc(max(0px, var(--kb-height, 0px) - var(--app-bottom-shell-height, 0px) + 0.5rem) * -1);
+  translate: 0 calc(max(0px, var(--kb-height, 0px) - var(--app-bottom-shell-keyboard-reservation, var(--app-bottom-shell-height, 0px)) + 0.5rem) * -1);
   transition: translate var(--kb-motion-duration) var(--kb-motion-curve);
 }
 html.kb-open.kb-resizes [data-agent-dock-chat] {
