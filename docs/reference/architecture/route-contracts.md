@@ -356,9 +356,12 @@ The gate also validates literal `data-voice-control-id` values against authored 
 
 ### Messages workspace layout
 
-The `/one/messages` workspace uses the standard shared header and persistent
-bottom navigation, with no route-specific footer styling. Its light two-pane
-message area sits below the shared header. The message composer projects into
+The `/one/messages` workspace hides the shared top profile header and retains
+persistent bottom navigation with no route-specific footer styling. The inbox
+provides a Home link; its Chat title matches the conversation contact title.
+Outgoing bubbles use royal blue, and editing uses a compact dialog with a
+separate inner message field. The phone control reports that calls are not
+available yet; the composer mic retains the private-agent voice entry. The message composer projects into
 the existing centered Agent Dock above navigation; both panes reserve the full
 dock height, while keyboard lift reserves only navigation and outer insets.
 Every bubble shows its timestamp beside the existing delivery status. The inbox
@@ -370,4 +373,8 @@ mobile, a selected conversation replaces the inbox and Back to chats restores
 it. Inbox filtering matches contact names and message previews; an empty inbox
 links to the existing Connect entry point. Browser selection restoration uses
 the authenticated encrypted-token contract described in
-[API Contracts](./api-contracts.md).
+[API Contracts](./api-contracts.md). After validation, the token is kept in
+owner-scoped browser history state and the address becomes `/one/messages`.
+Refresh and history navigation revalidate the token; invalid selections return
+to the inbox. The disconnected notice sits directly above the input in the
+shared composer column.
