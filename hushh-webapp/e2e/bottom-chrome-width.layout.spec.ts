@@ -212,7 +212,8 @@ test("shared dock retains material and input identity with aligned edges and key
     await input.fill(Array.from({ length: 30 }, (_, i) => `Line ${i + 1}: ${"wrappedtext".repeat(8)}`).join("\n"));
     const multiline = await measureInput();
     expect(multiline.within).toBe(true);
-    expect(multiline.height).toBeLessThanOrEqual(160);
+    // CSS transforms can introduce subpixel floating-point noise (160.00006px).
+    expect(Math.round(multiline.height)).toBeLessThanOrEqual(160);
     expect(multiline.contentHeight).toBeGreaterThan(multiline.height);
     expect(multiline.radius).toBe("0px");
     const sendFrame = await page.getByRole("button", { name: "Send message" }).boundingBox();
@@ -221,6 +222,11 @@ test("shared dock retains material and input identity with aligned edges and key
     expect(sendFrame!.width).toBeGreaterThanOrEqual(44);
     await input.fill("");
     expect((await measureInput()).height).toBeLessThanOrEqual(48);
+    // The multiline input shrinks with a transition. Compare settled route
+    // frames rather than capturing an intermediate height during that shrink.
+    await expect.poll(() => dock.evaluate(node =>
+      node.getAnimations({ subtree: true }).filter(animation => animation.playState === "running").length,
+    )).toBe(0);
     const emptyTextFrame = await dock.boundingBox();
     const material = () => dock.evaluate(node => {
       const style = getComputedStyle(node);
@@ -275,6 +281,29 @@ test("shared dock retains material and input identity with aligned edges and key
     expect(errors).toEqual([]);
     await currentInput?.dispose();
     await retainedBar?.dispose();
+  }
+});
+
+test("Messages dock remains above the keyboard when the transcript reserves the full shell", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  for (const width of [320, 393, 768]) {
+    await open(page, width, false, { name: "Messages dock", html: { composer: "true", reserveFullDock: "true" } }, errors);
+    await expect(page.getByRole("textbox", { name: "Message One" })).toBeVisible();
+    await page.evaluate(() => {
+      document.documentElement.classList.add("native-keyboard-inset", "kb-open");
+      document.documentElement.style.setProperty("--kb-height", "280px");
+    });
+    await expect(page.locator("[data-bottom-shell-navigation-slot]")).toBeHidden();
+    await expect.poll(async () => {
+      const frame = await page.locator("[data-agent-dock-surface]").boundingBox();
+      return frame ? Math.round(844 - 280 - frame.y - frame.height) : -1;
+    }).toBeGreaterThanOrEqual(7);
+    await expect.poll(async () => {
+      const frame = await page.locator("[data-agent-dock-surface]").boundingBox();
+      return frame ? Math.round(844 - 280 - frame.y - frame.height) : -1;
+    }).toBeLessThanOrEqual(9);
+    expect(errors).toEqual([]);
   }
 });
 
