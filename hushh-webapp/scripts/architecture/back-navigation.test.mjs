@@ -22,7 +22,7 @@ test('Back fingerprints cover shared UI drift while ignoring their own stamp and
 });
 
 test('fast history prefilter cannot hide escaped Back methods or aliases', () => {
-  for (const source of [String.raw`router.b\u0061ck()`, String.raw`history['\u0062ack']()`, 'const {go: step} = history; step(-1)']) {
+  for (const source of [String.raw`router.b\u0061ck()`, String.raw`history['\u0062ack']()`, String.raw`history['\x62ack']()`, String.raw`history['\x67o'](-1)`, 'const {go: step} = history; step(-1)']) {
     assert.throws(() => validateHistoryBypasses(new Map([['app/new/page.tsx', source]])), /hierarchy bypass/);
   }
 });

@@ -75,4 +75,5 @@ Non-owned surfaces:
 cd hushh-webapp && npm run verify:docs
 cd hushh-webapp && npm run typecheck
 cd hushh-webapp && npm run verify:routes
+cd hushh-webapp && npm run ui:doctor
 ```

@@ -15,7 +15,7 @@ const reviewedHistoryOwners = new Map([
 
 export function historyBypasses(source, file = 'screen.tsx') {
   // A call/alias needs one of these tokens. Escaped identifiers still use AST.
-  if (!/\b(?:back|go)\b|\\u/.test(source)) return [];
+  if (!/\b(?:back|go)\b|\\[ux]/.test(source)) return [];
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
   const calls = [];
   const owners = new Set(['router', 'history', 'window.history', 'globalThis.history']);
