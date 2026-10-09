@@ -4647,12 +4647,7 @@ function ProfilePageContent({
                 voiceActionId="route.profile_referrals_panel"
                 voiceLabel={PROFILE_LABELS.referrals}
                 voicePurpose="Opens your referral link and referral status."
-                onClick={() =>
-                  updateProfileView(
-                    { panel: "referrals", detail: null },
-                    "push",
-                  )
-                }
+                onClick={() => router.push(ROUTES.ONE_REFERRALS)}
               />
               <SettingsRow
                 icon={isPanePresentation ? ProfilePaneHelpIcon : SupportProfileIcon}

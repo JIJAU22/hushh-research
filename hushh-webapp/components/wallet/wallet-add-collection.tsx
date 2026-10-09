@@ -104,7 +104,12 @@ export function WalletAddCollection({ cards, selectedCardId, onSelect, onAdd, on
       const scrollOffset = ancestors.reduce((total, element) => total + Math.max(0, element.scrollTop), 0);
       const viewportBottom = window.visualViewport ? window.visualViewport.offsetTop + window.visualViewport.height : window.innerHeight;
       const visibleBottom = Math.min(viewportBottom, chrome?.getBoundingClientRect().top ?? viewportBottom);
-      const deckTop = stack.getBoundingClientRect().top + scrollOffset;
+      // The entrance animation translates the collection without changing its
+      // layout. Exclude that transient offset so remounting a tab cannot resize
+      // the deck and leave a different native scroll range behind.
+      const transform = getComputedStyle(collection).transform;
+      const entranceOffset = transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m42;
+      const deckTop = stack.getBoundingClientRect().top + scrollOffset - entranceOffset;
       const room = Math.max(0, visibleBottom - deckTop);
       const detailsHeight = showDetailsLink ? 52 : 0;
       const visibleEdges = Math.min(2, cards.length - 1);

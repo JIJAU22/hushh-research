@@ -15,6 +15,7 @@ from hushh_mcp.services.email_chat_service import EmailChatService
 from hushh_mcp.services.email_delegated_read import (
     MailAnalysisAnswer,
     MailReadAnswer,
+    MailReadPlan,
     run_delegated_mail_read,
 )
 from hushh_mcp.services.gmail_metadata_reader import GmailMetadataError
@@ -921,3 +922,249 @@ async def test_no_summaries_is_a_normal_read():
     assert result["structured"]["status"] == "ok"
     assert result["coverage"]["summarized"] == 0
     assert all("gist" not in item for item in result["items"])
+
+
+# --- Receipts: answered from the saved receipt memory, never from the inbox ---
+
+
+def _receipt_memory(generated_at="2026-09-25T09:00:00Z"):
+    return {
+        "schema": "receipt_canonical_index.v1",
+        "generated_at": generated_at,
+        "total_transactions": 2,
+        "truncated": False,
+        "transactions": [
+            {
+                "ref": "txn_" + "a" * 16,
+                "merchant": "Supabase",
+                "amount": 124.01,
+                "currency": "USD",
+                "category": "Cloud & Infra",
+                "status": "overdue",
+                "transaction_date": "2026-09-04",
+                "identifiers": [{"kind": "invoice", "value": "ZSUQHV-00028"}],
+                "detail": None,
+            },
+            {
+                "ref": "txn_" + "b" * 16,
+                "merchant": "Anthropic",
+                "amount": 20,
+                "currency": "USD",
+                "category": None,
+                "status": "paid",
+                "transaction_date": "2026-08-18",
+                "identifiers": [],
+                "detail": "Claude Pro subscription",
+            },
+        ],
+    }
+
+
+def _never_a_reader(**_):
+    raise AssertionError("a receipts answer must never construct a Gmail reader")
+
+
+async def _receipts_turn(plan, memory, *, message="show my receipts", **kwargs):
+    prompts: dict[str, str] = {}
+
+    async def gene(**gene_kwargs):
+        prompts[gene_kwargs["gene_id"]] = gene_kwargs["prompt"]
+        if gene_kwargs["gene_id"] == "agent_email_read_planner":
+            return plan
+        raise AssertionError("only the planner may run for a receipts answer")
+
+    result = await run_delegated_mail_read(
+        gmail=object(),
+        user_id="owner",
+        consent_token="synthetic",  # noqa: S106 - synthetic test authority
+        conversation_id="original-one-thread",
+        message=message,
+        require_access=AsyncMock(),
+        timezone="America/Los_Angeles",
+        receipt_memory=memory,
+        receipt_reads=kwargs.pop("receipt_reads", True),
+        gene_runner=gene,
+        reader_factory=_never_a_reader,
+        clock=lambda: _NOW,
+        **kwargs,
+    )
+    return result, prompts
+
+
+async def test_a_receipt_question_is_answered_from_receipt_memory_not_the_inbox():
+    plan = {
+        "operation": "read_receipts",
+        "receipt_since": "2026-07-26",
+        "receipt_window_label": "from the last 2 months",
+    }
+    result, prompts = await _receipts_turn(plan, _receipt_memory())
+    assert list(prompts) == ["agent_email_read_planner"]  # no interpreter, no analyzer
+    assert result["response"] == (
+        "Found 2 receipts from the last 2 months:\n\n"
+        "- **Supabase** — $124.01 · Overdue · Sep 4  \n"
+        "  Invoice ZSUQHV-00028.\n\n"
+        "- **Anthropic** — $20.00 · Paid · Aug 18  \n"
+        "  Claude Pro subscription."
+    )
+    structured = result["structured"]
+    assert structured["status"] == "ok" and structured["connector"] == "mail"
+    assert structured["sources"] == [] and structured["metadata_only"] is True
+    assert result["coverage"]["source"] == "receipt_memory"
+    assert result["receipt_cursor"] == {"action": "clear", "value": None}
+    assert "directive" not in result
+    # The planner sees the person's words and the clock, never the saved receipts.
+    assert "Supabase" not in prompts["agent_email_read_planner"]
+    assert "124.01" not in prompts["agent_email_read_planner"]
+
+
+async def test_overdue_bills_filter_uses_the_planned_status_only():
+    plan = {"operation": "read_receipts", "receipt_statuses": ["overdue"]}
+    result, _ = await _receipts_turn(plan, _receipt_memory(), message="show overdue bills")
+    assert result["response"].startswith("Found 1 overdue receipt:")
+    assert "Supabase" in result["response"] and "Anthropic" not in result["response"]
+
+
+@pytest.mark.parametrize(
+    ("plan", "operation"),
+    [
+        ({"operation": "search_inbox", "query": "receipt", "limit": 5}, "search_inbox"),
+        ({"operation": "list_recent", "limit": 3}, "list_recent"),
+        ({"operation": "list_needs_reply"}, "list_needs_reply"),
+    ],
+)
+async def test_ordinary_mail_requests_still_read_the_inbox_even_with_receipt_memory(
+    plan, operation
+):
+    """ "Find emails mentioning receipts" and every other non-receipt read are
+    untouched by the saved receipt memory riding on the same turn."""
+    reader = _Reader()
+
+    async def gene(**kwargs):
+        if kwargs["gene_id"] == "agent_email_read_planner":
+            return plan
+        return {"answer": "One message.", "source_refs": ["mail:1"]}
+
+    result = await _run(
+        reader,
+        gene,
+        receipt_memory=_receipt_memory(),
+        receipt_reads=True,
+    )
+    assert [call[0] for call in reader.calls] == [operation]
+    assert result["structured"]["status"] == "ok"
+    assert "Supabase" not in result["response"]
+    assert "receipt_cursor" not in result and "directive" not in result
+
+
+@pytest.mark.parametrize("memory", [None, _receipt_memory("2026-09-01T09:00:00Z"), {"schema": "x"}])
+async def test_missing_or_stale_memory_is_not_ready_and_proposes_open_receipts(memory):
+    result, _ = await _receipts_turn({"operation": "read_receipts"}, memory)
+    assert result["response"] == (
+        "Your receipt memory is not ready yet. Sync and save your receipts in Mail."
+    )
+    assert result["structured"]["status"] == "input_required"
+    assert result["coverage"] is None
+    assert result["directive"] == {
+        "type": "receipts_open_proposal",
+        "actionId": "route.profile_receipts",
+        "slots": {},
+    }
+    assert "inbox" not in result["response"].lower()
+
+
+async def test_a_surface_without_the_device_memory_refuses_instead_of_searching_the_inbox():
+    result, prompts = await _receipts_turn(
+        {"operation": "read_receipts"}, _receipt_memory(), receipt_reads=False
+    )
+    assert result["structured"]["status"] == "invalid_argument"
+    assert "Supabase" not in result["response"]
+    assert list(prompts) == ["agent_email_read_planner"]
+
+
+async def test_receipt_fields_on_another_operation_or_a_malformed_plan_are_refused():
+    mixed, _ = await _receipts_turn(
+        {"operation": "search_inbox", "query": "x", "receipt_statuses": ["paid"]},
+        _receipt_memory(),
+    )
+    assert mixed["structured"]["status"] == "invalid_argument"
+    assert mixed["response"].startswith("Please ask for")
+    bad_date, _ = await _receipts_turn(
+        {"operation": "read_receipts", "receipt_since": "last month"}, _receipt_memory()
+    )
+    assert bad_date["structured"]["status"] == "invalid_argument"
+    assert bad_date["response"].startswith("I couldn't turn that into a receipts request")
+    with_categories, _ = await _receipts_turn(
+        {"operation": "read_receipts", "categories": ["meetings"]}, _receipt_memory()
+    )
+    assert with_categories["structured"]["status"] == "invalid_argument"
+
+
+async def test_show_more_continues_from_the_stored_cursor():
+    memory = _receipt_memory()
+    memory["transactions"] = [
+        {
+            **memory["transactions"][0],
+            "ref": f"txn_{n:016x}",
+            "merchant": f"Shop {n}",
+            "transaction_date": f"2026-09-{n:02d}",
+            "identifiers": [],
+        }
+        for n in range(1, 13)
+    ]
+    memory["total_transactions"] = 12
+    first, _ = await _receipts_turn({"operation": "read_receipts"}, memory)
+    assert first["receipt_cursor"]["action"] == "set"
+    more, _ = await _receipts_turn(
+        {"operation": "read_receipts", "receipt_more": True},
+        memory,
+        message="show more",
+        receipt_cursor=first["receipt_cursor"]["value"],
+    )
+    assert more["response"].startswith("Showing 11–12 of 12 receipts:")
+    assert more["receipt_cursor"] == {"action": "clear", "value": None}
+
+
+async def test_delegated_entrypoint_enables_receipt_reads_only_for_typed_chat(monkeypatch):
+    execute = AsyncMock(return_value={"conversationId": "same-thread"})
+    monkeypatch.setattr("hushh_mcp.services.email_delegated_read.run_delegated_mail_read", execute)
+    service = EmailChatService(
+        chat_store=AsyncMock(), gmail_service=object(), model_call=AsyncMock(), ready=lambda: True
+    )
+    await service.handle_delegated_turn(
+        user_id="owner",
+        consent_token="synthetic",  # noqa: S106 - synthetic test authority
+        conversation_id="same-thread",
+        message="show my receipts",
+        require_access=AsyncMock(),
+        receipt_memory={"schema": "receipt_canonical_index.v1"},
+        receipt_cursor="cursor",
+    )
+    kwargs = execute.await_args.kwargs
+    assert kwargs["receipt_reads"] is True
+    assert kwargs["receipt_memory"] == {"schema": "receipt_canonical_index.v1"}
+    assert kwargs["receipt_cursor"] == "cursor"
+    # One Live Voice calls the read directly and never passes the flag.
+    import inspect
+
+    assert inspect.signature(run_delegated_mail_read).parameters["receipt_reads"].default is False
+
+
+def test_planner_is_manifest_owned_routes_receipts_to_memory_and_keeps_inbox_search():
+    agent = build_single_turn_agent(
+        load_email_gene("agent_email_read_planner"),
+        output_schema=MailReadPlan,
+        model="gemini-3.7-flash",
+    )
+    assert agent.tools == []
+    assert agent.output_schema is MailReadPlan
+    instruction = " ".join(agent.instruction.split())
+    # Routing meaning is authored in the manifest, not in host-side phrase tables.
+    assert "read_receipts" in instruction
+    assert "never plan search_inbox, list_recent or read_message for them" in instruction
+    assert "mention receipts or invoices" in instruction
+    assert "stays search_inbox" in instruction
+    # The planner schema stays flat for the structured-output API: no nested objects.
+    schema = MailReadPlan.model_json_schema()["properties"]
+    for name in ("receipt_statuses", "receipt_identifier_kinds"):
+        assert schema[name]["type"] == "array"
+        assert "$ref" in schema[name]["items"] or schema[name]["items"].get("type") == "string"

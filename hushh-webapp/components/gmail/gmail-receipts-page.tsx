@@ -14,6 +14,7 @@ import {
 import { PageHeader, SectionHeader } from "@/components/app-ui/page-sections";
 import GmailInformationRequestsSection from "@/components/gmail/gmail-information-requests-section";
 import { GmailRecentReceipts } from "@/components/gmail/gmail-recent-receipts";
+import { GmailReceiptMemorySave } from "@/components/gmail/gmail-receipt-memory-save";
 import { GmailVerificationOnboarding } from "@/components/gmail/gmail-verification-onboarding";
 import { GmailReceiptOnboardingHero } from "@/components/gmail/gmail-receipt-onboarding-hero";
 import {
@@ -2366,6 +2367,16 @@ export default function GmailReceiptsPage({
                   : "Check older Mail"}
               </Button>
             </div>
+          ) : null}
+
+          {/* The owner's own control; it saves nothing until it is tapped. */}
+          {hasSealedReceiptAccess && visibleReceipts.length > 0 && !loadingReceipts ? (
+            <GmailReceiptMemorySave
+              accountKey={
+                gmail.status?.google_sub || gmail.status?.google_email || null
+              }
+              receipts={visibleReceipts}
+            />
           ) : null}
         </section>
       ) : null}

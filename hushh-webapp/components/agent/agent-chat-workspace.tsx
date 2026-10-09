@@ -259,6 +259,7 @@ import {
   getPkmAutoSaveCards,
   loadAgentPkmContext,
   peekAgentPkmContext,
+  peekReceiptMemoryIndex,
   warmAgentPkmContext,
   type AgentPkmContext,
 } from "@/lib/agent/agent-pkm-memory";
@@ -6266,6 +6267,9 @@ export function AgentChatWorkspace({ className }: AgentChatWorkspaceProps) {
         ].filter(Boolean).join("\n\n") || undefined,
         // Settings style choices ride beside the packet, never inside it.
         communicationPreferences: agentPkmContext.communicationPreferences,
+        // The saved receipt index rides beside the packet too: typed data the
+        // Email receipts read consumes for this turn, never text One reads.
+        receiptMemory: peekReceiptMemoryIndex({ userId }),
         personSelectionHandle: options.personSelectionHandle,
         gmailInformationRequestWorkflowId: options.gmailInformationRequestWorkflowId,
         driveSearchSelection: options.driveSearchSelection,

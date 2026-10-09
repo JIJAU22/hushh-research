@@ -12,6 +12,7 @@ vi.mock("@/lib/agent/connector-memory-review", () => ({ saveConnectorMemoryRevie
 vi.mock("@/lib/services/personal-knowledge-model-service", () => ({ PersonalKnowledgeModelService: { lookupMutationCommits: mocks.lookup } }));
 vi.mock("@/lib/pkm/pkm-save-job", () => ({ withPkmSaveJobLock: async (_id: string, task: () => unknown) => task() }));
 import { assertBusinessReviewFresh, attachBusinessOrigin, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview } from "@/lib/agent/business-profile-review";
+import { businessReviewFields, selectBusinessReviewFields } from "@/lib/agent/business-profile-fields";
 
 export const candidate: BusinessCandidate = { businessUid: "urn:hushh:business:uat:hushh.ai:v1", synthetic: true,
   sourceIdentity: { source: "uat_fixture", sourceKey: "hushh.ai:v1" }, matchEvidence: [{ kind: "verified_email_domain", domain: "hushh.ai" }],
@@ -34,6 +35,27 @@ const args = (cards = [card()]) => ({ job: createBusinessReviewJob("owner", cand
   isCurrent: () => true, sharingImpactAcknowledged: false, assertListingFresh: vi.fn(async () => undefined) });
 
 describe("business profile reviewed-memory boundary", () => {
+  it("freezes approved nested fields without excluded payloads or summaries and replays them exactly", async () => {
+    const original = { ...card(), source_text: "Secret phone +15555550100", context_quotes: ["+15555550100"],
+      structure_decision: { target_domain: "professional", explanation: "The phone is +15555550100", summary_projection: { phone: "+15555550100" } },
+      candidate_payload: { businesses: { entities: { mem_one: { name: "Approved", entity_id: "mem_one", updated_at: "writer metadata", contact: { phone: "+15555550100", website: "https://approved.test" } } },
+        unreviewed: "+15555550100" } } };
+    const fields = businessReviewFields(original);
+    const projected = selectBusinessReviewFields(original, fields.filter(field => field.path.at(-1) !== "phone").map(field => field.id))!;
+    expect(projected.candidate_payload).toEqual({ businesses: { entities: { mem_one: { name: "Approved", contact: { website: "https://approved.test" } } } } });
+    expect(JSON.stringify(projected)).not.toContain("+15555550100");
+    expect(projected.merge_decision).toEqual(original.merge_decision);
+    expect(original.candidate_payload.businesses.unreviewed).toBe("+15555550100");
+    expect(selectBusinessReviewFields(original, [])).toBeNull();
+    expect(() => selectBusinessReviewFields(original, ["unknown"])).toThrow();
+    const input = args([projected]);
+    mocks.save.mockRejectedValueOnce(new Error("lost response"));
+    await expect(saveBusinessReview(input)).rejects.toThrow();
+    const frozen = structuredClone(checkpoint!.job!);
+    expect(await saveBusinessReview({ ...input, job: frozen })).toEqual({ saved: 1, remaining: 0 });
+    expect(mocks.save.mock.calls[1]![0].cards).toEqual(frozen.cards);
+    expect(JSON.stringify(frozen.cards)).not.toContain("+15555550100");
+  });
   it("recovers existing receipts during an outage but blocks unacknowledged stale writes", async () => {
     const assertListingFresh = vi.fn(async () => { throw new Error("Listing unavailable"); });
     const input = { ...args(), assertListingFresh };

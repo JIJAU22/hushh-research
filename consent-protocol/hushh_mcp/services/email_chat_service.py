@@ -230,8 +230,15 @@ class EmailChatService:
         message: str,
         require_access: Callable[[], Awaitable[None]],
         timezone: str = "UTC",
+        receipt_memory: object | None = None,
+        receipt_cursor: str | None = None,
     ) -> dict[str, Any]:
-        """Read Mail for One without creating or writing a second conversation."""
+        """Read Mail for One without creating or writing a second conversation.
+
+        ``receipt_memory`` is the owner's saved receipt index, sent by their device
+        for this one turn; ``receipt_cursor`` is where the last receipts list stopped.
+        Typed chat is the only caller, so it is the only surface that reads receipts.
+        """
         from hushh_mcp.services.email_delegated_read import run_delegated_mail_read
 
         return await run_delegated_mail_read(
@@ -242,6 +249,9 @@ class EmailChatService:
             message=message,
             require_access=require_access,
             timezone=timezone,
+            receipt_memory=receipt_memory,
+            receipt_cursor=receipt_cursor,
+            receipt_reads=True,
         )
 
     async def _run_adk_tool_loop(

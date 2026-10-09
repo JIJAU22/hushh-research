@@ -585,6 +585,7 @@ jobs:
             --advisors-api-base-url "${{ vars.ADVISORS_API_BASE_URL || 'https://brokercheck.35.253.255.106.sslip.io' }}" \
             --insurance-agents-api-base-url "${{ vars.INSURANCE_AGENTS_API_BASE_URL || 'https://insurance-agents.34.61.69.175.sslip.io' }}" \
             --one-places-directory-enabled "${{ vars.ONE_PLACES_DIRECTORY_ENABLED_UAT || 'true' }}" \
+            --one-business-directory-enabled "${{ vars.ONE_BUSINESS_DIRECTORY_ENABLED_UAT || 'false' }}" \
             --one-voice-mail-reply-enabled "${{ vars.ONE_VOICE_MAIL_REPLY_ENABLED_UAT || 'true' }}" \
             --one-voice-mail-schedule-send-enabled "${{ vars.ONE_VOICE_MAIL_SCHEDULE_SEND_ENABLED_UAT || 'true' }}" \
             --one-voice-mail-drafts-enabled "${{ vars.ONE_VOICE_MAIL_DRAFTS_ENABLED_UAT || 'true' }}" \

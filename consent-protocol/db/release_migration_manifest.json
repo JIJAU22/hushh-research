@@ -259,7 +259,8 @@
     "285_one_wallet_card_auto_provision.sql",
     "286_one_referral_link_open_notify.sql",
     "287_drive_request_access_stop.sql",
-    "288_drive_request_feed_stream.sql"
+    "288_drive_request_feed_stream.sql",
+    "289_one_referral_program_settings_v2.sql"
   ],
   "environment_overlays": {
     "uat": [
@@ -538,6 +539,7 @@
     "282_direct_message_actions.sql": "rollback/282_direct_message_actions.rollback.sql",
     "283_gmail_send_grant_generation.sql": "rollback/283_gmail_send_grant_generation.rollback.sql",
     "284_direct_message_multiple_reactions.sql": "rollback/284_direct_message_multiple_reactions.rollback.sql",
+    "289_one_referral_program_settings_v2.sql": "rollback/289_one_referral_program_settings_v2.rollback.sql",
     "285_one_wallet_card_auto_provision.sql": "rollback/285_one_wallet_card_auto_provision.rollback.sql",
     "286_one_referral_link_open_notify.sql": "rollback/286_one_referral_link_open_notify.rollback.sql",
     "287_drive_request_access_stop.sql": "rollback/287_drive_request_access_stop.rollback.sql",
