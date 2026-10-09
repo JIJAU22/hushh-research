@@ -11,6 +11,7 @@ export function validBusinessProfilePreview(cards: AgentPkmPreviewCard[], messag
       Object.entries(supplied).some(([key, value]) => ["__proto__", "prototype", "constructor"].includes(key) || typeof value !== "string" || !value.trim())) return false;
     const domain = resolveCardTargetDomain(card);
     if (!domain || ["identity", "location", "health", "social", "financial"].includes(domain) ||
+      (card.target_domain && card.target_domain !== domain) ||
       card.write_mode !== "confirm_first" || card.target_entity_scope !== "businesses") return false;
     const entity = businessMemoryEntity(card);
     const path = entity.path.join(".");

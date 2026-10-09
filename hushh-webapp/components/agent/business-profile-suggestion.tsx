@@ -31,6 +31,7 @@ type Review = {
   candidate: BusinessCandidate; name: string; website: string; message: string;
   cards: AgentPkmPreviewCard[]; selected: string[]; job?: BusinessReviewJob;
   fields?: BusinessFieldSelection;
+  error?: string;
   phase: "offer" | "preparing" | "review" | "saving";
 };
 
@@ -109,6 +110,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
   const [saved, setSaved] = useState(false);
   const [recoveryError, setRecoveryError] = useState(false);
   const [recoveryAttempt, setRecoveryAttempt] = useState(0);
+  const [operation, setOperation] = useState<"refresh" | "later" | "not_me" | null>(null);
   const review = state?.context === context ? state.review : null;
   const reviewVisible = Boolean(review);
   const { onCandidateVisible } = props;
@@ -123,7 +125,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
 
   useEffect(() => {
     const abort = new AbortController(); controller.current = abort; busy.current = false;
-    setState(null); setRecoveryError(false); setAcknowledging(false); setOpen(false); setEditing(false); setSaved(false);
+    setState(null); setRecoveryError(false); setAcknowledging(false); setOpen(false); setEditing(false); setSaved(false); setOperation(null);
     const guard = createAgentPkmCaptureGuard({ userId: context.ownerId || "", signal: abort.signal, isEnabled: eligible });
     if (guard.isCurrent()) void (async () => {
       try {
@@ -165,6 +167,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     const guard = session();
     if (!guard.isCurrent()) return;
     busy.current = true;
+    setOperation("refresh");
     try {
       const result = await BusinessSuggestionService.get(context.vaultOwnerToken!, controller.current?.signal);
       await guard.assertCurrent();
@@ -174,14 +177,14 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
         message: "", cards: [], selected: [], phase: "offer" });
       setEditing(false);
     } catch { if (guard.isCurrent()) morphyToast.error("The listing could not be refreshed. Your review is unchanged."); }
-    finally { if (guard.isCurrent()) busy.current = false; }
+    finally { if (guard.isCurrent()) { busy.current = false; setOperation(null); } }
   };
   const prepare = async () => {
     if (!review || busy.current || review.job) return;
     const guard = session();
     if (!guard.isCurrent()) return;
     busy.current = true;
-    update({ ...review, phase: "preparing" });
+    update({ ...review, error: undefined, phase: "preparing" });
     let stage: "lookup" | "details" | "preview" | "coverage" | "origin" = "lookup";
     try {
       await freshCandidate(guard);
@@ -194,7 +197,8 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
       const result = syntheticCards.length
         ? { cards: syntheticCards, incomplete: false, alreadySaved: false }
         : await prepareConnectorMemoryReview({ ...guard, userId: context.ownerId!,
-          vaultKey: context.vaultKey!, vaultOwnerToken: context.vaultOwnerToken!, message, source: "business_profile_review" });
+          vaultKey: context.vaultKey!, vaultOwnerToken: context.vaultOwnerToken!, message, source: "business_profile_review",
+          businessUid: review.candidate.businessUid });
       await guard.assertCurrent();
       stage = "coverage";
       if (result.alreadySaved && !result.incomplete && !result.cards.length) {
@@ -209,7 +213,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
       // Ensure source identity can follow the actual semantic entity before offering Save.
       stage = "origin";
       result.cards.forEach(card => attachBusinessOrigin(card, review.candidate));
-      update({ ...review, message, cards: result.cards, selected: result.cards.map(card => card.card_id),
+      update({ ...review, error: undefined, message, cards: result.cards, selected: result.cards.map(card => card.card_id),
         fields: initialBusinessFieldSelection(result.cards), phase: "review" });
     } catch (error) {
       if (guard.isCurrent()) {
@@ -219,7 +223,12 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
             : error.message === "The proposed destination changed. Review the details again." ? "entity-destination" : "source-identity"
           : "unavailable";
         console.warn(`[BusinessReview] Preparation failed at ${stage}: ${originReason}`);
-        update({ ...review, phase: "offer" });
+        const failure = error instanceof Error && error.name === "PkmBackendContractMismatch"
+          ? "Review is unavailable until the backend update finishes."
+          : stage === "lookup" ? "Listing changed. Edit details, then refresh."
+          : stage === "details" ? "Check the name and website."
+          : "Details couldn’t be prepared. Try again.";
+        update({ ...review, error: failure, phase: "offer" });
         morphyToast.error(stage === "lookup" ? "Listing changed or unavailable. Edit details, then refresh."
           : stage === "details" ? "Check the name and website in Edit details."
           : "Couldn’t prepare details. Try Review details again.");
@@ -296,6 +305,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     if (!review || busy.current) return;
     const guard = session(); if (!guard.isCurrent()) return;
     busy.current = true;
+    setOperation(decision);
     try {
       await guard.assertCurrent();
       const result = await decideBusinessReview({ ownerId: context.ownerId!, vaultKey: context.vaultKey!, decision, businessUid: review.candidate.businessUid,
@@ -303,7 +313,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
       if (result === null) throw new Error("A review is already being saved.");
       await guard.assertCurrent(); setState(null); setOpen(false);
     } catch { if (guard.isCurrent()) morphyToast.error("Your choice could not be saved. Try again."); }
-    finally { if (guard.isCurrent()) busy.current = false; }
+    finally { if (guard.isCurrent()) { busy.current = false; setOperation(null); } }
   };
 
   if (recoveryError && eligible()) return <div role="status" className="space-y-2">
@@ -311,7 +321,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     <Button variant="muted" size="standard" onClick={() => setRecoveryAttempt(value => value + 1)}>Retry saved review</Button>
   </div>;
   if (saved || !review || !eligible()) return null;
-  const pending = review.phase === "preparing" || review.phase === "saving";
+  const pending = review.phase === "preparing" || review.phase === "saving" || operation !== null;
   const introduction = "Is this your business?";
   const draft = review.candidate.draft;
   const overview = {
@@ -382,7 +392,8 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
         <HelperText>Only selected details are saved privately. This does not verify ownership.</HelperText>
         {review.job && <HelperText>Resuming your approved selection.</HelperText>}
         {editing && !review.job && <Button variant="link" size="standard" disabled={pending} onClick={() => void refresh()}>Refresh listing</Button>}
-        {pending && <p role="status" className="text-sm">{review.phase === "preparing" ? "Preparing details for review…" : "Saving approved details…"}</p>}
+        {review.error && <p role="alert" className="text-sm">{review.error}</p>}
+        {pending && <p role="status" className="text-sm">{operation === "refresh" ? "Refreshing listing…" : operation ? "Saving your choice…" : review.phase === "preparing" ? "Preparing details for review…" : "Saving approved details…"}</p>}
         {(review.phase === "review" || review.phase === "saving") && <AgentPkmReviewPanel
           cards={review.cards} selectedCardIds={new Set(chosen.map(card => card.card_id))} saving={pending} compact showDismissAction={false} className="[&_button]:min-h-11"
           saveLabel={`Save ${fieldCount} ${fieldCount === 1 ? "detail" : "details"}`}

@@ -35,6 +35,42 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); publishValidatedAuthSessionOwner(null); });
 describe("post-onboarding business suggestion", () => {
+  it("shows pending deferral and refresh, prevents duplicate clicks, and restores controls after failure", async () => {
+    const choice = deferred<boolean>();
+    mocks.decide.mockReturnValueOnce(choice.promise);
+    render(<BusinessProfileSuggestion {...props} />);
+    const later = await screen.findByRole("button", { name: "Later", exact: true });
+    fireEvent.click(later);
+    expect(later).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Review details", exact: true })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Saving your choice");
+    fireEvent.click(later);
+    await waitFor(() => expect(mocks.decide).toHaveBeenCalledTimes(1));
+    await act(async () => choice.resolve(false));
+    cleanup();
+    mocks.load.mockResolvedValue(null);
+    render(<BusinessProfileSuggestion {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details", exact: true }));
+    const refreshed = deferred<{ candidates: typeof candidate[] }>();
+    mocks.get.mockReturnValueOnce(refreshed.promise);
+    const refresh = screen.getByRole("button", { name: "Refresh listing", exact: true });
+    fireEvent.click(refresh);
+    expect(refresh).toBeDisabled();
+    expect(screen.getByLabelText("Business name")).toBeDisabled();
+    await act(async () => refreshed.resolve({ candidates: [] }));
+    await waitFor(() => expect(refresh).not.toBeDisabled());
+    expect(screen.getByLabelText("Business name")).not.toBeDisabled();
+  });
+  it("shows an actionable version mismatch instead of hiding a failed Review click", async () => {
+    mocks.syntheticPreview.mockReturnValue([]);
+    const failure = new Error("Synthetic mismatch"); failure.name = "PkmBackendContractMismatch";
+    mocks.prepare.mockRejectedValue(failure);
+    render(<BusinessProfileSuggestion {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("backend update finishes");
+    expect(screen.getByRole("button", { name: "Review details", exact: true })).not.toBeDisabled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
   it("reviews repeated facts once and deselects all backing fields without leaking record metadata", async () => {
     const repeated = ["a", "b"].map(id => ({ ...cards[0]!, card_id: id,
       candidate_payload: { businesses: { entities: { [id]: { kind: "profile_fact", summary: "state: TX", observations: ["state: TX"], status: "active" } } } } }));

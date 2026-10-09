@@ -426,9 +426,10 @@ export async function prepareNaturalLanguagePkm(params: {
       });
       await params.beforeEffect?.();
       return { sourceChunk, chunk, index, preview };
-    } catch {
+    } catch (error) {
       // A canceled session is not a failed source block and must not retry.
       await params.beforeEffect?.();
+      if (error instanceof Error && error.name === "PkmBackendContractMismatch") throw error;
       return {
         sourceChunk,
         chunk,

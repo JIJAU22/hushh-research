@@ -96,6 +96,8 @@ def _single_segment(message: str):
     [
         ("professional", "create_entity", True),
         ("professional", "correct_entity", True),
+        ("professional", "extend_entity", True),
+        ("example_company", "create_entity", True),
         ("identity", "create_entity", False),
     ],
 )
@@ -111,10 +113,19 @@ async def test_business_profile_runs_all_stages_and_rejects_personal_destination
     intent = {
         "save_class": "durable",
         "intent_class": "profile_fact",
-        "mutation_intent": "create" if mode == "create_entity" else "correct",
+        "mutation_intent": "create"
+        if mode == "create_entity"
+        else "correct"
+        if mode == "correct_entity"
+        else "extend",
         "requires_confirmation": True,
         "confirmation_reason": "Review listing",
-        "candidate_domain_choices": [{"domain_key": domain, "recommended": True}],
+        "candidate_domain_choices": [
+            {
+                "domain_key": "professional" if domain == "example_company" else domain,
+                "recommended": True,
+            }
+        ],
         "confidence": 0.99,
         "source_agent": "memory_intent_agent",
         "contract_version": 1,
@@ -150,23 +161,27 @@ async def test_business_profile_runs_all_stages_and_rejects_personal_destination
     }
     run = AsyncMock(side_effect=[_single_segment(message), intent, merge, structure])
     monkeypatch.setattr(service, "_run_agent_contract", run)
-    state = {
-        "memories": [
-            {
-                "domain": domain,
-                "entity_scope": "businesses",
-                "entity_id": "example",
-                "message": "Example business",
-                "active": True,
-            }
-        ]
-    }
+    state = (
+        None
+        if mode == "create_entity"
+        else {
+            "memories": [
+                {
+                    "domain": domain,
+                    "entity_scope": "businesses",
+                    "entity_id": "example",
+                    "message": json.dumps({"name": "Example business", "description": "x" * 220}),
+                    "active": True,
+                }
+            ]
+        }
+    )
     result = await service.generate_structure_preview(
         user_id=f"business-contract-{domain}-{mode}",
         message=message,
         memory_profile="business_directory_v1",
         simulated_state=state,
-        current_domains=[domain],
+        current_domains=[] if mode == "create_entity" else [domain],
     )
     assert run.await_count == 4
     assert all(
@@ -187,6 +202,18 @@ async def test_business_profile_runs_all_stages_and_rejects_personal_destination
             }
         )
         assert result["candidate_payload"] == structure["candidate_payload"]
+        assert result["structure_decision"]["target_domain"] == domain
+        if mode == "create_entity":
+            assert result["merge_decision"]["target_entity_path"] == ""
+        else:
+            assert (
+                len(
+                    _request(run.await_args_list[2].kwargs["prompt"])["existing_entities"][0][
+                        "summary"
+                    ]
+                )
+                > 200
+            )
     else:
         assert result["write_mode"] == "do_not_save"
         assert "business_profile_contract_invalid" in result["validation_hints"]

@@ -1945,7 +1945,9 @@ class PKMAgentLabService:
         return max(0.0, deadline - time.perf_counter())
 
     @classmethod
-    def _build_state_summary(cls, simulated_state: dict[str, Any] | None) -> dict[str, Any]:
+    def _build_state_summary(
+        cls, simulated_state: dict[str, Any] | None, *, memory_profile: str = "general"
+    ) -> dict[str, Any]:
         if not isinstance(simulated_state, dict):
             return {"domains": [], "recent_memories": []}
         recent_memories = []
@@ -1958,7 +1960,10 @@ class PKMAgentLabService:
                     "entity_id": cls._normalize_segment(str(memory.get("entity_id") or "")),
                     "entity_scope": cls._normalize_path(str(memory.get("entity_scope") or "")),
                     "intent_class": cls._normalize_segment(str(memory.get("intent_class") or "")),
-                    "message": cls._safe_excerpt(str(memory.get("message") or ""), limit=200),
+                    "message": cls._safe_excerpt(
+                        str(memory.get("message") or ""),
+                        limit=4000 if memory_profile == "business_directory_v1" else 200,
+                    ),
                     "active": bool(memory.get("active", True)),
                 }
             )
@@ -2078,7 +2083,11 @@ class PKMAgentLabService:
 
     @classmethod
     def _existing_entities(
-        cls, simulated_state: dict[str, Any] | None, *, compact: bool
+        cls,
+        simulated_state: dict[str, Any] | None,
+        *,
+        compact: bool,
+        memory_profile: str = "general",
     ) -> list[dict[str, Any]]:
         """The owner's saved entities sent as context, in the order given.
 
@@ -2088,8 +2097,8 @@ class PKMAgentLabService:
 
         summary = (
             cls._compact_state_summary(simulated_state)
-            if compact
-            else cls._build_state_summary(simulated_state)
+            if compact and memory_profile != "business_directory_v1"
+            else cls._build_state_summary(simulated_state, memory_profile=memory_profile)
         )
         entities = []
         for memory in summary.get("recent_memories") or []:
@@ -3239,6 +3248,7 @@ class PKMAgentLabService:
         current_domains: list[str],
         existing_entities: list[dict[str, Any]] | None = None,
         message: str = "",
+        memory_profile: str = "general",
     ) -> dict[str, Any]:
         decision = deepcopy(fallback)
         if isinstance(raw, dict):
@@ -3249,10 +3259,16 @@ class PKMAgentLabService:
             if target_domain and target_domain != _GENERAL_DOMAIN_KEY:
                 decision["target_domain"] = target_domain
             target_entity_id = cls._normalize_segment(str(raw.get("target_entity_id") or ""))
-            if target_entity_id:
+            if target_entity_id or (
+                memory_profile == "business_directory_v1"
+                and isinstance(raw.get("target_entity_id"), str)
+            ):
                 decision["target_entity_id"] = target_entity_id
             target_entity_path = cls._normalize_path(str(raw.get("target_entity_path") or ""))
-            if target_entity_path:
+            if target_entity_path or (
+                memory_profile == "business_directory_v1"
+                and isinstance(raw.get("target_entity_path"), str)
+            ):
                 decision["target_entity_path"] = target_entity_path
             decision["match_confidence"] = cls._clamp_confidence(
                 raw.get("match_confidence"),
@@ -4028,13 +4044,14 @@ class PKMAgentLabService:
             or recommended_domain
             or _DEFAULT_CONFIRMATION_DOMAINS[0]
         )
-        target_domain, candidate_payload, remapped = cls._remap_protocol_domain_name(
-            target_domain=target_domain,
-            payload=candidate_payload,
-            recommended_domain=recommended_domain,
-        )
-        if remapped:
-            validation_hints.append("protocol_domain_name_remapped")
+        if memory_profile != "business_directory_v1":
+            target_domain, candidate_payload, remapped = cls._remap_protocol_domain_name(
+                target_domain=target_domain,
+                payload=candidate_payload,
+                recommended_domain=recommended_domain,
+            )
+            if remapped:
+                validation_hints.append("protocol_domain_name_remapped")
         reserved_entry: ReservedEntry | None = None
         reserved_branch: str | None = None
         try:
@@ -4089,7 +4106,8 @@ class PKMAgentLabService:
             recommended_domain in registry_keys or recommended_domain in current_domains
         )
         if (
-            recommended_domain
+            memory_profile != "business_directory_v1"
+            and recommended_domain
             and recommended_supported
             and target_domain != recommended_domain
             and (
@@ -5168,7 +5186,7 @@ class PKMAgentLabService:
                 if strict_small_model
                 else registry_choices,
                 "existing_entities": self._existing_entities(
-                    simulated_state, compact=strict_small_model
+                    simulated_state, compact=strict_small_model, memory_profile=memory_profile
                 ),
             },
         )
@@ -5200,7 +5218,7 @@ class PKMAgentLabService:
                 "memory_profile": memory_profile,
                 "current_domains": current_domains,
                 "existing_entities": self._existing_entities(
-                    simulated_state, compact=strict_small_model
+                    simulated_state, compact=strict_small_model, memory_profile=memory_profile
                 ),
             },
         )
@@ -5231,7 +5249,7 @@ class PKMAgentLabService:
                 if strict_small_model
                 else registry_choices,
                 "existing_entities": self._existing_entities(
-                    simulated_state, compact=strict_small_model
+                    simulated_state, compact=strict_small_model, memory_profile=memory_profile
                 ),
                 # The structure instruction promises this table with every
                 # request; until now only the strict intent prompt carried it.
@@ -5359,8 +5377,11 @@ class PKMAgentLabService:
             fallback=merge_fallback,
             intent_frame=intent_frame,
             current_domains=normalized_domains,
-            existing_entities=self._existing_entities(simulated_state, compact=strict_small_model),
+            existing_entities=self._existing_entities(
+                simulated_state, compact=strict_small_model, memory_profile=memory_profile
+            ),
             message=message,
+            memory_profile=memory_profile,
         )
         merge_mode = str(merge_decision.get("merge_mode") or "")
         if merge_mode == "extend_entity":
