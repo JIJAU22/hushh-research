@@ -226,7 +226,12 @@ async def test_request_is_private_idempotent_and_does_not_share(sharing):
     first = await request(sharing, client)
     assert await request(sharing, client) == first
     assert len(rows(sharing, "drive_share_requests")) == 1
-    assert len(rows(sharing, "drive_share_events")) == 1
+    assert sorted(
+        (event["event_type"], event["user_id"]) for event in rows(sharing, "drive_share_events")
+    ) == [
+        ("document_share_request", "owner"),
+        ("document_share_request_sent", "recipient"),
+    ]
     assert rows(sharing, "drive_share_permission_operations") == []
     stored = rows(sharing, "drive_share_requests")[0]
     for private in ("Private six-month", "recipient@example.invalid", "1234567"):
@@ -274,7 +279,12 @@ async def test_concurrent_identical_request_retries_return_one_request(sharing):
     results = await asyncio.gather(*(request(sharing, client) for _ in range(4)))
     assert all(result == results[0] for result in results)
     assert len(rows(sharing, "drive_share_requests")) == 1
-    assert len(rows(sharing, "drive_share_events")) == 1
+    assert sorted(
+        (event["event_type"], event["user_id"]) for event in rows(sharing, "drive_share_events")
+    ) == [
+        ("document_share_request", "owner"),
+        ("document_share_request_sent", "recipient"),
+    ]
 
 
 @pytest.mark.asyncio

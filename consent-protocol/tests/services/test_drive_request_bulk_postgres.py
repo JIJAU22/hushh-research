@@ -435,7 +435,10 @@ async def test_empty_search_cannot_finalize_a_request_without_current_binding(
             {
                 "job": job_id,
                 "envelope": request_bulk._seal(
-                    checkpoint, "owner", job_id, "owner-search-checkpoint"
+                    checkpoint,
+                    user_id="owner",
+                    resource_id=job_id,
+                    purpose="owner-search-checkpoint",
                 ),
             },
         )
@@ -1163,7 +1166,7 @@ async def test_new_trusted_request_cannot_queue_or_claim_grants_until_paid(reque
               VALUES (:request,'owner','trusted-member','awaiting_payment')"""),
             {"request": request_id},
         )
-    assert request_id in {
+    assert str(request_id) in {
         row["request_id"]
         for row in await DriveRequestPaymentService(db=sharing.db).due_checkout_orders(limit=20)
     }
