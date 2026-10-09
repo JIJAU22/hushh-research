@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -22,6 +22,9 @@ const mocks = vi.hoisted(() => {
   };
 
   return {
+    commandActive: false,
+    commandPhase: "idle",
+    voiceActive: false,
     navigateSelection: vi.fn(),
     router: { push: vi.fn(), replace: vi.fn() },
     query: "person=person-1",
@@ -43,6 +46,14 @@ const mocks = vi.hoisted(() => {
     requestAgentConversationAfterRoute: vi.fn(),
   };
 });
+
+vi.mock("@/components/agent/location-command-provider", () => ({
+  useOptionalLocationCommand: () => ({ active: mocks.commandActive, view: { phase: mocks.commandPhase } }),
+}));
+
+vi.mock("@/components/one-voice/voice-session-provider", () => ({
+  useOptionalVoiceSession: () => ({ state: { phase: mocks.voiceActive ? "live" : "idle", error: null } }),
+}));
 
 vi.mock("@/lib/direct-messages/navigate-direct-message", () => ({
   navigateDirectMessage: (router: { push: (href: string) => void }, selection: unknown) => {
@@ -106,8 +117,8 @@ vi.mock("@/lib/services/direct-messages-service", () => ({
   },
 }));
 
-function renderConnectionThread() {
-  return render(
+function ConnectionThread() {
+  return (
     <AgentDockProvider>
       <AgentDockVoiceBoundary>
         <AgentBarSurface data-testid="shared-chat-dock">
@@ -115,8 +126,12 @@ function renderConnectionThread() {
         </AgentBarSurface>
       </AgentDockVoiceBoundary>
       <DirectMessagesPage />
-    </AgentDockProvider>,
+    </AgentDockProvider>
   );
+}
+
+function renderConnectionThread() {
+  return render(<ConnectionThread />);
 }
 
 function DirectMessagesPage() {
@@ -128,6 +143,9 @@ function DirectMessagesPage() {
 
 describe("DirectMessagesPage", () => {
   beforeEach(() => {
+    mocks.commandActive = false;
+    mocks.commandPhase = "idle";
+    mocks.voiceActive = false;
     mocks.router.push.mockReset();
     mocks.router.replace.mockReset();
     mocks.query = "person=person-1";
@@ -222,11 +240,51 @@ describe("DirectMessagesPage", () => {
     expect(await screen.findByRole("heading", { name: "Chats" })).toBeVisible();
     expect(screen.getByLabelText("Search conversations")).toBeVisible();
     expect(screen.getByText("Select a conversation to see the chat here.")).toBeVisible();
-    expect(screen.queryByRole("textbox", { name: /Message/ })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Message" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Talk to One" }));
+    expect(mocks.requestAgentConversationAfterRoute).toHaveBeenCalledWith(ROUTES.HOME);
+    expect(mocks.router.push).toHaveBeenCalledWith(ROUTES.HOME);
 
     fireEvent.click(screen.getByRole("button", { name: /Ankit Kumar Singh/ }));
     expect(mocks.navigateSelection).toHaveBeenCalledWith({ conversationId: "conversation-1" });
     expect(mocks.router.push).toHaveBeenCalledWith("/one/messages?token=dm1.fixture");
+  });
+
+  it.each(["voice", "command", "command-result"] as const)("keeps an active %s surface visible on the inbox", async (owner) => {
+    mocks.query = "";
+    mocks.voiceActive = owner === "voice";
+    mocks.commandActive = owner === "command";
+    mocks.commandPhase = owner === "command-result" ? "result" : owner === "command" ? "working" : "idle";
+    renderConnectionThread();
+
+    expect(await screen.findByRole("heading", { name: "Chats" })).toBeVisible();
+    expect(screen.getByText("Talk to One", { exact: true })).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
+    expect(mocks.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps the inbox disabled when a pending send finishes after leaving its chat", async () => {
+    let finishSend!: (value: unknown) => void;
+    mocks.sendMessage.mockImplementationOnce(() => new Promise((resolve) => { finishSend = resolve; }));
+    const view = renderConnectionThread();
+    const input = await screen.findByRole("textbox", { name: "Message Ankit Kumar Singh" });
+    await waitFor(() => expect(input).toBeEnabled());
+    fireEvent.change(input, { target: { value: "Hello Ankit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(mocks.sendMessage).toHaveBeenCalledTimes(1));
+    mocks.query = "";
+    view.rerender(<ConnectionThread />);
+    await act(async () => finishSend({
+      conversation: mocks.conversation,
+      message: { id: "late-message", conversationId: "conversation-1", senderIsViewer: true,
+        content: "Hello Ankit", createdAt: "2026-10-06T10:01:00.000Z", readAt: null },
+    }));
+    const inboxInput = screen.getByRole("textbox", { name: "Message" });
+    expect(inboxInput).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    fireEvent.submit(inboxInput.closest("form")!);
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1);
   });
 
   it("clears the active chat badge while its messages are visible", async () => {

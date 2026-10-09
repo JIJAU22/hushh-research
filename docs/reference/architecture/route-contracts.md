@@ -360,7 +360,10 @@ bottom navigation, with no route-specific footer styling. Its light two-pane
 message area sits below the shared header. The message composer projects into
 the existing centered Agent Dock above navigation; both panes reserve the full
 dock height, while keyboard lift reserves only navigation and outer insets.
-Every bubble shows its timestamp beside the existing delivery status. Active
+Every bubble shows its timestamp beside the existing delivery status. The inbox
+keeps the message-shaped dock visible, with typing and sending disabled until a
+writable conversation is selected. Its mic opens the existing private-agent
+voice entry; an engaged voice or command surface retains the inbox dock. Active
 global commands and voice controls remain available and measured. On
 mobile, a selected conversation replaces the inbox and Back to chats restores
 it. Inbox filtering matches contact names and message previews; an empty inbox
