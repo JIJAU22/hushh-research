@@ -29,7 +29,7 @@ export async function prepareConnectorMemoryReview(input: MemorySession & {
   // also work after a cold refresh. No new cache or plaintext storage.
   await AgentPkmContextStore.load({
     userId: input.userId, vaultKey: input.vaultKey, vaultOwnerToken: input.vaultOwnerToken,
-    forceRefresh: input.source === "business_profile_review",
+    ...(input.source === "business_profile_review" ? { forceRefresh: true } : {}),
   });
   await input.assertCurrent();
   const businessCandidates = input.source === "business_profile_review"
