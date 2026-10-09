@@ -1048,7 +1048,7 @@ article[data-message-role="user"] .messageActionError {
 
 /* The earlier Chats visual language uses the shared app tokens and chrome.
    Both pane headers share one track, while the transcript and composer keep
-   their own normal-flow space above the shared navigation. */
+   space above the retained shared composer and navigation. */
 .shell[data-app-shell-width] {
   max-width: var(--app-shell-expanded, 96rem);
   padding-inline: var(--page-inline-gutter-standard, 1rem);
@@ -1145,4 +1145,8 @@ article[data-message-role="user"] .messageActionError {
     min-width: 0;
     flex: 1;
   }
+}
+
+:global(html.kb-open:not(.kb-resizes)) .page:not([data-chat-open="true"]) {
+  height: calc(100dvh - var(--app-top-content-offset, 6rem) - var(--app-safe-area-top-effective, 0px) - max(var(--app-scroll-bottom-pad, 8rem), calc(var(--kb-height, 0px) + 1rem)));
 }

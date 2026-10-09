@@ -111,6 +111,7 @@ export const AppBottomShell = memo(function AppBottomShell({ model }: { model: B
         style={nativeBottomInset === null ? undefined : { paddingBottom: nativeBottomInset }}
         data-app-bottom-shell
         data-agent-dock-chat={model.agentBarHidden || undefined}
+        data-messages-dock={model.includeComposerHeight || undefined}
         data-command-active={command?.active || undefined}
         data-ui-role="bottom-shell"
         data-bottom-shell-navigation-hidden={

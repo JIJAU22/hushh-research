@@ -307,6 +307,22 @@ test("Messages dock remains above the keyboard when the transcript reserves the 
   }
 });
 
+test("Messages inbox hides its idle launcher while the search keyboard is open", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await open(page, 320, false, { name: "Messages inbox", html: { reserveFullDock: "true" } }, errors);
+  const agentSlot = page.locator("[data-bottom-shell-agent-slot]");
+  await expect(agentSlot).toBeVisible();
+  await page.evaluate(() => {
+    document.documentElement.classList.add("kb-open");
+    document.documentElement.style.setProperty("--kb-height", "280px");
+  });
+  await expect(agentSlot).toBeHidden();
+  await page.evaluate(() => document.documentElement.classList.remove("kb-open"));
+  await expect(agentSlot).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 type Edges = { left: number; right: number; width: number };
 type Measure = {
   voice: Edges;
