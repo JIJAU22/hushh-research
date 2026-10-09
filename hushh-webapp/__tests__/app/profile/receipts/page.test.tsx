@@ -999,7 +999,7 @@ describe("ProfileReceiptsPage", () => {
     expect(screen.queryByText(/one \/ mail/i)).toBeNull();
   });
 
-  it("keeps generic summary cards off the landing while preserving its preview pipeline", async () => {
+  it("keeps generic summary cards off the landing, preserves its preview pipeline and saves the finished sync once", async () => {
     vi.mocked(GmailReceiptsService.listReceipts).mockResolvedValue({
       items: [makeReceipt(1, "Myntra")],
       page: 1,
@@ -1018,7 +1018,20 @@ describe("ProfileReceiptsPage", () => {
         vi.mocked(GmailReceiptMemoryService.preview),
       ).toHaveBeenCalledOnce();
     });
-    expect(mocks.pkmWriteCoordinator.savePreparedDomain).not.toHaveBeenCalled();
+    // The owner started this sync, so its finished list is saved once to private
+    // memory (default on): through the governed writer, to one domain, nothing else.
+    await waitFor(() => {
+      expect(mocks.pkmWriteCoordinator.savePreparedDomain).toHaveBeenCalledOnce();
+    });
+    expect(mocks.pkmWriteCoordinator.savePreparedDomain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        domain: "shopping",
+        confirmation: expect.objectContaining({
+          confirmedByUser: true,
+          source: "gmail_receipt_memory_save_button",
+        }),
+      }),
+    );
   });
 
   it("holds sealed receipts behind vault unlock when the vault is locked", async () => {

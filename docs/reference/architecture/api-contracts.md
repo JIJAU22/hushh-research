@@ -441,9 +441,12 @@ server-held position (`hussh:receipt_cursor`, filters and offset only, thirty
 minutes, void after a new save). A missing, malformed, empty or older-than-seven-day
 index answers `Your receipt memory is not ready yet. Sync and save your receipts
 in Mail.` with the generated `route.profile_receipts` action, and is never
-reported as an empty mailbox. The owner saves or updates the index only with an
-explicit tap on Mail > Receipts (writer `gmail_receipt_memory_save_button`);
-nothing saves it automatically.
+reported as an empty mailbox. The index is written only through writer
+`gmail_receipt_memory_save_button`: once after each sync the owner starts on
+Mail > Receipts (the product default; an owner setting to ask first is planned),
+or when the owner taps Save or Update private memory. Opening the page, a
+partly loaded list or a failed sync never writes, and a failed save is not
+retried on its own.
 
 **Queued messages (Claude-Code-style queueing).** While One works on a typed
 turn, the composer stays usable. A message sent then is offered to the running

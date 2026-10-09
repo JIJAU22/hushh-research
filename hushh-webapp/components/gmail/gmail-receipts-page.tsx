@@ -358,6 +358,10 @@ export default function GmailReceiptsPage({
   // Mail rejected the saved login (expired or revoked). Another read cannot
   // succeed, so the page asks for a reconnect instead of offering Try again.
   const [receiptConnectionLost, setReceiptConnectionLost] = useState(false);
+  // Counts finished syncs. The memory save control saves each one once; the ref
+  // records which are already covered, across the control's own remounts.
+  const [receiptSyncCompletion, setReceiptSyncCompletion] = useState(0);
+  const receiptMemorySavedCompletionRef = useRef(0);
   const [receiptScanReachedLimit, setReceiptScanReachedLimit] = useState(false);
   const [receiptScanInProgress, setReceiptScanInProgress] = useState(false);
   const [receiptScanProgress, setReceiptScanProgress] = useState<{
@@ -619,9 +623,13 @@ export default function GmailReceiptsPage({
             previousItems,
           });
 
-          if (!shouldContinueScan) return true;
+          if (!shouldContinueScan) {
+            setReceiptSyncCompletion((count) => count + 1);
+            return true;
+          }
           requestedPage = nextLoadedPage + 1;
         }
+        setReceiptSyncCompletion((count) => count + 1);
         return true;
       } catch (error) {
         if (controller.signal.aborted || isReceiptScanAbort(error)) return null;
@@ -2448,6 +2456,9 @@ export default function GmailReceiptsPage({
                 gmail.status?.google_sub || gmail.status?.google_email || null
               }
               receipts={visibleReceipts}
+              syncCompletion={receiptSyncCompletion}
+              savedCompletionRef={receiptMemorySavedCompletionRef}
+              autoSave={journeyVariant !== "onboarding"}
             />
           ) : null}
         </section>
