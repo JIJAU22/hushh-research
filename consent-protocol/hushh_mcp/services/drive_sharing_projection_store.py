@@ -236,6 +236,11 @@ class DriveSharingProjectionStore(DriveRevocationStore):
             access_stop_status = (
                 self._access_stop_status(connection, request_id) if stop_requested else None
             )
+            can_stop_access = (
+                not recipient
+                and not stop_requested
+                and self._paid_frozen_batch(connection, user_id=user_id, request_id=request_id)
+            )
             payment = self._payment_metadata(connection, request_id) if recipient else {}
             private = self._open_request(request) if request.get("request_envelope") else None
             grants = (
@@ -358,6 +363,7 @@ class DriveSharingProjectionStore(DriveRevocationStore):
                     **self._summary(request, recipient=recipient),
                     **payment,
                     "accessStopStatus": access_stop_status,
+                    "canStopAccess": can_stop_access,
                     "files": [] if bulks else files,
                     **(
                         {

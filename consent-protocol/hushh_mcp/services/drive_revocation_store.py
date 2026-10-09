@@ -151,6 +151,29 @@ class DriveRevocationStore(DrivePermissionStore):
         }
 
     @staticmethod
+    def _paid_frozen_batch(connection, *, user_id, request_id):
+        """A paid request can be stopped before approval creates any effects."""
+        return connection.execute(
+            text("""SELECT EXISTS (
+              SELECT 1 FROM drive_share_requests r
+              JOIN drive_request_payment_orders o ON o.request_id=r.request_id
+              JOIN drive_bulk_shares b ON b.origin_request_id=r.request_id
+                AND b.user_id=r.user_id AND b.origin_request_revision=r.revision
+              JOIN drive_bulk_share_recipients recipient ON recipient.share_id=b.share_id
+                AND recipient.recipient_user_id=r.recipient_user_id
+              WHERE r.request_id=:request AND r.user_id=:user
+                AND r.status='pending' AND r.payment_required=TRUE
+                AND r.access_stop_requested_at IS NULL
+                AND r.expires_at>clock_timestamp()
+                AND o.status='paid' AND o.reconciliation_required=FALSE
+                AND b.progressive_batch=TRUE AND b.status='review_ready'
+                AND b.approved_at IS NULL AND b.expires_at>clock_timestamp()
+                AND b.file_count>0 AND b.recipient_count=1
+            )"""),
+            {"user": user_id, "request": request_id},
+        ).scalar_one()
+
+    @staticmethod
     def _revoke_authority(user_id, request_id, revision, generation, grants, bulk=None):
         terms = {
             "owner": user_id,
@@ -187,7 +210,11 @@ class DriveRevocationStore(DrivePermissionStore):
                 raise DriveSharingError("revocation_pending")
             grants = self._revocable(connection, user_id=user_id, request_id=request_id)
             bulk = self._bulk_counts(connection, user_id=user_id, request_id=request_id)
-            if not grants and not bulk["total"]:
+            if (
+                not grants
+                and not bulk["total"]
+                and not self._paid_frozen_batch(connection, user_id=user_id, request_id=request_id)
+            ):
                 raise DriveSharingError("no_revocable_permissions")
             revision = request["revocation_revision"] + 1
             connection.execute(
@@ -251,7 +278,11 @@ class DriveRevocationStore(DrivePermissionStore):
                 raise DriveSharingError("review_changed")
             grants = self._revocable(connection, user_id=user_id, request_id=request_id)
             bulk = self._bulk_counts(connection, user_id=user_id, request_id=request_id)
-            if not grants and not bulk["total"]:
+            if (
+                not grants
+                and not bulk["total"]
+                and not self._paid_frozen_batch(connection, user_id=user_id, request_id=request_id)
+            ):
                 raise DriveSharingError("no_revocable_permissions")
             authority = self._revoke_authority(
                 user_id, request_id, revision, generation, grants, bulk

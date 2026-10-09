@@ -1209,6 +1209,20 @@ describe("exact-file document review", () => {
       expect(state.deliveryFiles).not.toHaveBeenCalled();
     });
 
+    it("lets the owner stop a paid frozen request before any grant is queued", async () => {
+      state.status.mockResolvedValue(pending());
+      state.review.mockResolvedValue(partial());
+      state.delivery.mockResolvedValue({ status: "pending", files: [], canStopAccess: true });
+      state.prepareRevocation.mockResolvedValue({ revision: 4, directiveId: "d",
+        reviewDigest: "b".repeat(64), expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        affectedCount: 0, pendingCount: 0, files: [] });
+      render(<DocumentShareReview requestId={requestId} onChanged={vi.fn()} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Stop access" }));
+      expect(await screen.findByText("Stop this request before files are shared.")).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Stop access" }));
+      await waitFor(() => expect(state.revoke).toHaveBeenCalledOnce());
+    });
+
     it("accounts for the skipped file, keeps search coverage, and pages the owner's original links", async () => {
       state.providers = [{ providerId: "google.com", email: "a@gmail.test" }];
       state.status.mockResolvedValue({ ...initial(), status: "partial" });

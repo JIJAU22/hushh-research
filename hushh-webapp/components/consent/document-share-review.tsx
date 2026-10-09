@@ -1692,7 +1692,7 @@ function UnlockedDocumentReview({
                 />
               ))}
             </SettingsGroup>
-          ) : outgoingOpen ? null : (
+          ) : outgoingOpen || delivery.canStopAccess || delivery.accessStopStatus ? null : (
             <BodyText>Nothing was shared.</BodyText>
           )}
 
@@ -1743,6 +1743,23 @@ function UnlockedDocumentReview({
                     tone="destructive"
                     disabled={locked}
                     onClick={prepareRemoval}
+                  />
+                ) : null}
+                {delivery.canStopAccess ? (
+                  <SettingsRow
+                    title="Stop access"
+                    description="Prevent pending files from being shared."
+                    tone="destructive"
+                    disabled={locked}
+                    onClick={prepareRemoval}
+                  />
+                ) : delivery.accessStopStatus && delivery.files.length === 0 ? (
+                  <SettingsRow
+                    title={delivery.accessStopStatus === "pending"
+                      ? "Stopping access"
+                      : delivery.accessStopStatus === "removed"
+                        ? "Sharing stopped"
+                        : "Check remaining access"}
                   />
                 ) : null}
               </SettingsGroup>
@@ -1844,7 +1861,9 @@ function UnlockedDocumentReview({
             <BodyText>
               {removal.affectedCount
                 ? `Stop this request and check ${removal.affectedCount.toLocaleString()} file permissions.`
-                : "Stop this request and remove access your private agent created."}
+                : removal.pendingCount
+                  ? "Stop this request and check pending file permissions."
+                  : "Stop this request before files are shared."}
             </BodyText>
           )}
           {(removal.pendingCount ?? 0) > 0 ? (

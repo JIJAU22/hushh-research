@@ -119,6 +119,7 @@ function preparationError(value: unknown): SharingPreparationError | null {
 export type SharingDelivery = {
   status: string;
   accessStopStatus?: "pending" | "removed" | "needs_attention" | null;
+  canStopAccess?: boolean;
   files: SharingDeliveryFile[];
   fileCount?: number;
   sharedCount?: number;
@@ -129,6 +130,10 @@ export type SharingDelivery = {
 };
 function accessStopStatus(value: unknown): NonNullable<SharingDelivery["accessStopStatus"]> {
   if (value === "pending" || value === "removed" || value === "needs_attention") return value;
+  throw new DriveSharingError("invalid_response");
+}
+function canStopAccess(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
   throw new DriveSharingError("invalid_response");
 }
 export type SharingDeliveryFile = {
@@ -1237,6 +1242,9 @@ export class DriveSharingService {
       status: string(result.status, 80),
       ...(result.accessStopStatus == null ? {} : {
         accessStopStatus: accessStopStatus(result.accessStopStatus),
+      }),
+      ...(result.canStopAccess === undefined ? {} : {
+        canStopAccess: canStopAccess(result.canStopAccess),
       }),
       files: files(result.files, parseDeliveryFile),
       ...(result.bulkShareId == null ? {} : {

@@ -1210,6 +1210,82 @@ async def test_new_trusted_request_cannot_queue_or_claim_grants_until_paid(reque
     )
 
 
+@pytest.mark.asyncio
+async def test_owner_can_stop_paid_frozen_request_before_any_grant(request_bulk, sharing):
+    review = await _trusted_review(request_bulk, sharing)
+    with sharing.db.engine.begin() as connection:
+        request_id = str(
+            connection.execute(
+                text("SELECT origin_request_id FROM drive_bulk_shares WHERE share_id=:share"),
+                {"share": review["shareId"]},
+            ).scalar_one()
+        )
+        connection.execute(
+            text("""UPDATE drive_request_payment_orders
+              SET stripe_payment_intent_id='pi_paid_frozen_stop'
+              WHERE request_id=:request"""),
+            {"request": request_id},
+        )
+        assert (
+            connection.execute(
+                text("SELECT status FROM drive_share_requests WHERE request_id=:request"),
+                {"request": request_id},
+            ).scalar_one()
+            == "pending"
+        )
+        assert (
+            connection.execute(text("SELECT count(*) FROM drive_bulk_share_effects")).scalar_one()
+            == 0
+        )
+
+    store = DriveSuggestionStore(db=sharing.db, authority_key="synthetic-ledger-key")
+    before = await store.delivery_snapshot(user_id="owner", request_id=request_id)
+    assert before["result"]["canStopAccess"] is True
+    assert "bulkShareId" not in before["result"]
+
+    prepared = await store.prepare_revocation(user_id="owner", generation=1, request_id=request_id)
+    assert prepared["affectedCount"] == 0
+    stopped = await store.confirm_revocation(
+        user_id="owner",
+        generation=1,
+        request_id=request_id,
+        revision=prepared["revision"],
+        directive_id=prepared["directiveId"],
+        review_digest=prepared["reviewDigest"],
+        grant_ids=[],
+        confirmed=True,
+    )
+    assert stopped["revocationStatus"] == "pending"
+    after = await store.delivery_snapshot(user_id="owner", request_id=request_id)
+    assert after["result"]["canStopAccess"] is False
+    assert after["result"]["accessStopStatus"] == "removed"
+    with sharing.db.engine.begin() as connection:
+        assert (
+            connection.execute(
+                text(
+                    "SELECT access_stop_requested_at IS NOT NULL FROM drive_share_requests WHERE request_id=:request"
+                ),
+                {"request": request_id},
+            ).scalar_one()
+            is True
+        )
+        assert (
+            connection.execute(text("SELECT count(*) FROM drive_bulk_share_effects")).scalar_one()
+            == 0
+        )
+        refunds = _claim_refunds(DriveRequestPaymentService(db=sharing.db), connection, limit=1)
+        assert [item["request_id"] for item in refunds] == [request_id]
+
+    with pytest.raises(DriveSharingError, match="request_changed"):
+        await request_bulk.approve(
+            user_id="owner",
+            share_id=review["shareId"],
+            revision=review["revision"],
+            review_digest=review["reviewDigest"],
+            approval_source="trusted_auto",
+        )
+
+
 async def _approved_request(bulk, sharing, count):
     request = await _request(sharing)
     review = await bulk.create_review(
