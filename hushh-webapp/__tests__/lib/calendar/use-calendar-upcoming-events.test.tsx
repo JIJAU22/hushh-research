@@ -62,6 +62,7 @@ describe("useCalendarUpcomingEvents", () => {
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.events).toEqual([
       {
+        id: "e1",
         title: "1:1 with Jamie",
         start: { dateTime: "2026-01-01T10:00:00Z" },
         end: { dateTime: "2026-01-01T10:30:00Z" },
