@@ -65,10 +65,7 @@
         },
         "speaker_persona": "one"
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -93,10 +90,7 @@
         },
         "speaker_persona": "one"
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -122,10 +116,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -149,10 +140,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -175,10 +163,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -209,8 +194,6 @@
         }
       },
       "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518,
         "subview_action_boost": {
           "": [
             "location.pause_updates",
@@ -291,10 +274,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -318,10 +298,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -350,10 +327,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -379,10 +353,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -408,10 +379,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -437,10 +405,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -465,10 +430,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -497,10 +459,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -528,10 +487,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -562,10 +518,7 @@
           "review_only": true
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -591,10 +544,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -624,10 +574,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -653,10 +600,7 @@
         },
         "speaker_persona": "one"
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -682,10 +626,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -714,10 +655,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -740,10 +678,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -766,10 +701,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -792,10 +724,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -818,10 +747,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -848,9 +774,7 @@
         "query_defaults": {
           "source": "kai",
           "category": "top-picks"
-        },
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
+        }
       },
       "orchestration": {
         "instruction_id": null,
@@ -874,10 +798,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -900,10 +821,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -926,10 +844,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -952,10 +867,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -992,10 +904,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1031,10 +940,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1058,10 +964,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1093,10 +996,7 @@
           "navigation_prerequisites": []
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1121,8 +1021,6 @@
         }
       },
       "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518,
         "legacy_control_exemptions": {
           "add_holding": "Existing control outside the current Search action catalog; retained as explicit legacy coverage debt.",
           "analysis_retry_save": "Existing control outside the current Search action catalog; retained as explicit legacy coverage debt.",
@@ -1176,10 +1074,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1202,10 +1097,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1228,10 +1120,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1254,10 +1143,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1286,10 +1172,7 @@
           "auth_signed_in"
         ]
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1312,10 +1195,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1338,10 +1218,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
@@ -1364,10 +1241,7 @@
           ]
         }
       },
-      "search": {
-        "source_revision": "81c2394efaf045780d8030bf6060b0bdd6c38b49d1470367d51025876d01f98f",
-        "source_module_count": 1518
-      },
+      "search": {},
       "orchestration": {
         "instruction_id": null,
         "context_policy": null,
