@@ -443,7 +443,7 @@ index answers `Your receipt memory is not ready yet. Sync and save your receipts
 in Mail.` with the generated `route.profile_receipts` action, and is never
 reported as an empty mailbox. The index is written only through writer
 `gmail_receipt_memory_save_button`: once after each sync the owner starts on
-Mail > Receipts (the product default; an owner setting to ask first is planned),
+Mail > Receipts (the product default, set by `RECEIPT_MEMORY_AUTO_SAVE_DEFAULT`),
 or when the owner taps Save or Update private memory. Opening the page, a
 partly loaded list or a failed sync never writes, and a failed save is not
 retried on its own.
