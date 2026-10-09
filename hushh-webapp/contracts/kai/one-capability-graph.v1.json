@@ -1275,6 +1275,166 @@
     },
     {
       "aliases": [
+        "Read Calendar",
+        "what is on my calendar",
+        "show my calendar events",
+        "find a calendar event",
+        "when am i free"
+      ],
+      "authorization": {
+        "guard_ids": [
+          "auth_signed_in",
+          "vault_owner_token"
+        ],
+        "ownership": "server_resolved_for_target_entity",
+        "predicates": [
+          {
+            "authority": "server",
+            "effect": "required",
+            "id": "auth_signed_in"
+          },
+          {
+            "authority": "server",
+            "effect": "required",
+            "id": "vault_owner_token"
+          }
+        ],
+        "server_revalidation": "identity_consent_and_domain_service"
+      },
+      "availability": {
+        "feature_flags": [],
+        "product_available": true
+      },
+      "capability_id": "calendar.read",
+      "confirmation": {
+        "mode": "none",
+        "required": false,
+        "requires_trusted_tap": false,
+        "surface": null
+      },
+      "description": "Reads the owner's connected Google Calendar through One Live Voice. The read can list calendars, find events in a bounded time window, open a previously shown event, inspect busy periods, or find openings. Event text is displayed privately on screen; the operational voice model receives only counts and status. No event is created or changed.",
+      "execution": {
+        "binding_ref": "render:calendar.read",
+        "executor": {
+          "kind": "typed_render",
+          "settlement": "directive_ledger_settlement"
+        },
+        "mode": "client_directive",
+        "outcome": "EXECUTE",
+        "target": {
+          "path": "voice_tool",
+          "status": "wired",
+          "target": "read_calendar"
+        }
+      },
+      "goal_id": "goal.calendar.read",
+      "idempotency": {
+        "scope": "action_and_normalized_slots",
+        "strategy": "action_directive_ledger"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "kind": "action",
+      "label": "Read Calendar",
+      "navigation": {
+        "fallback": "read_calendar",
+        "routes": [
+          "/one/calendar",
+          "/one"
+        ],
+        "screens": [
+          "one_calendar",
+          "one_agents"
+        ]
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "preconditions": {
+        "guard_ids": [
+          "auth_signed_in",
+          "vault_owner_token"
+        ],
+        "mounted_surface_required": true,
+        "requires_signed_in": true,
+        "requires_vault": false
+      },
+      "render_surface": null,
+      "required_entities": [],
+      "search_keywords": [
+        "calendar events",
+        "calendar list",
+        "event details",
+        "busy times",
+        "free openings"
+      ],
+      "settlement_proof": "approved_render_acknowledgement",
+      "side_effect": {
+        "classification": "render_or_guidance"
+      },
+      "supported_entrypoints": [
+        "voice",
+        "chat",
+        "typed_search",
+        "command_bar",
+        "ui"
+      ],
+      "technical_interaction": {
+        "allowed_types": [
+          "oauth",
+          "native_permission"
+        ],
+        "policy": "platform_required_only",
+        "requires_user_interaction": false
+      },
+      "telemetry_event": "app_intelligence.action",
+      "version": 1
+    },
+    {
+      "aliases": [
         "Open Connect",
         "open connect",
         "connect",
@@ -37459,7 +37619,7 @@
         }
       ],
       "platform": "ios",
-      "projection_digest": "5e35b263feb5b0748cce0c2e002faf5290f13924669511cc82f016081fcfc27b",
+      "projection_digest": "c03bb23278adf77132f29e92563307d35b18ca2380dc8d177a4432e40a5cb134",
       "render_surfaces": [
         {
           "capability_id": "render.one_location_workflow_card",
@@ -37478,7 +37638,7 @@
         "location_workflow_api_contract": "4e65e07107cbf9a571c0a471005f18e3b31366fea6a1176b0d745e47a5b3d383",
         "service_knowledge_packages": "fc844f2d3e1b73763155fb0708676c62639bbf7115be9f5405553580f01894ba"
       },
-      "source_revision": "d3412cfe7b8de515",
+      "source_revision": "934f53f787f43981",
       "supported_entrypoints": [
         "typed",
         "voice",
@@ -38996,7 +39156,7 @@
       ]
     },
     "schema_version": "one.capability_platform_projection.v1",
-    "source_revision": "d3412cfe7b8de515",
+    "source_revision": "934f53f787f43981",
     "web": {
       "actions": [
         {
@@ -39039,7 +39199,7 @@
         }
       ],
       "platform": "web",
-      "projection_digest": "bc2a57ec6f98f2feafe483ab173c79df4165a62ac6673627b65e869dd0c51b8f",
+      "projection_digest": "b24406d00e8a00fcafb91967285bef3226326493161f52ebf593f7b4de0ba0ea",
       "render_surfaces": [
         {
           "capability_id": "render.one_location_workflow_card",
@@ -39058,7 +39218,7 @@
         "location_workflow_api_contract": "4e65e07107cbf9a571c0a471005f18e3b31366fea6a1176b0d745e47a5b3d383",
         "service_knowledge_packages": "fc844f2d3e1b73763155fb0708676c62639bbf7115be9f5405553580f01894ba"
       },
-      "source_revision": "d3412cfe7b8de515",
+      "source_revision": "934f53f787f43981",
       "supported_entrypoints": [
         "typed",
         "voice"
@@ -40615,7 +40775,7 @@
       "renderer_key": "one_location_workflow_card"
     }
   ],
-  "revision": "d3412cfe7b8de515",
+  "revision": "934f53f787f43981",
   "schema_version": "one.capability_graph.v1",
   "screens": [
     {
@@ -40924,6 +41084,7 @@
     },
     {
       "action_ids": [
+        "calendar.read",
         "consent.chat.turn",
         "location.chat.turn",
         "route.one_agents",
@@ -40944,7 +41105,9 @@
       "version": 1
     },
     {
-      "action_ids": [],
+      "action_ids": [
+        "calendar.read"
+      ],
       "capability_id": "screen:/one/calendar",
       "kind": "screen",
       "label": "calendar",
@@ -42359,18 +42522,25 @@
     }
   ],
   "semantic_diff": {
-    "added": [],
+    "added": [
+      "actions:calendar.read"
+    ],
     "breaking": [],
-    "changed": [],
+    "changed": [
+      "screens:screen:/one",
+      "screens:screen:/one/calendar",
+      "services:service.calendar"
+    ],
     "compatible": [],
     "deprecated": [],
-    "from_revision": "e64a0a56bd563562",
+    "from_revision": "d3412cfe7b8de515",
     "migrated": [],
     "removed": []
   },
   "services": [
     {
       "action_ids": [
+        "calendar.read",
         "setup.finish_calendar",
         "setup.open_calendar",
         "setup.skip_calendar"
@@ -44593,18 +44763,18 @@
     "capability_graph_evolution": "96b63878194651962b7fd3deceaac9d6223f7b170c16c67f813a3c72ca911946",
     "capability_runtime_compiler": "9a0b0b573b4e3ae42d2a49ce15f93a7cce70e5dc4046dea14922d7cd6ace9078",
     "capability_runtime_policy": "d3f4ec0d27231ef298372a48696f8ac238f7560d03d8e72c50c7bcb5b0ffd7a9",
-    "kai_action_gateway": "63c05d2958bf0a72df8f4c54d5be759e4f35369973b196de58af174b51d7737c",
+    "kai_action_gateway": "05273c47c17aeaed1c58fbe7aeb66395d49b78a9d5adcaad37d1edd45acb9443",
     "location_agent_manifest": "25952f13232f1d1adb7664da7c037b59cef093a1389caeb46af3d2771a12ff07",
     "location_knowledge_package": "054141b4aaf04ef13ce9bd139a1044287be8703c1e65015cc338a970d4fa51ed",
     "location_onboarding_runtime": "cd911f5e2e0f09352aeb89a74180a66fab79553423b126583f181d858459ae62",
     "location_workflow_api_contract": "4e65e07107cbf9a571c0a471005f18e3b31366fea6a1176b0d745e47a5b3d383",
     "product_agent_registry": "d6e5d060ebc56fdf1f2dbea5c7c6b43ea8b4973aee83385e0407f5ffbe0002c1",
-    "route_orchestration_index": "d287b08c9109f963591911627d5559b63e263d102380348a66775c9b810b4545",
+    "route_orchestration_index": "ccecb65053d9f4db19ae3fcb7bfc27813581216610ce4776802da857610c3d1a",
     "service_knowledge_packages": "fc844f2d3e1b73763155fb0708676c62639bbf7115be9f5405553580f01894ba"
   },
-  "source_revision": "d3412cfe7b8de515",
+  "source_revision": "934f53f787f43981",
   "workflow_revision_compatibility": {
-    "current_graph_revision": "d3412cfe7b8de515",
+    "current_graph_revision": "934f53f787f43981",
     "schema_version": "one.workflow_revision_compatibility.v1",
     "workflows": [
       {
@@ -44682,6 +44852,7 @@
           "cf08fb61503832fb",
           "d01f9a7a5198c5c9",
           "d1893c1a136dc255",
+          "d3412cfe7b8de515",
           "d3e820220dacdce1",
           "d4b2dd7b65a583c6",
           "db9c1ca05979d69a",
@@ -44780,6 +44951,7 @@
           "cf08fb61503832fb",
           "d01f9a7a5198c5c9",
           "d1893c1a136dc255",
+          "d3412cfe7b8de515",
           "d3e820220dacdce1",
           "d4b2dd7b65a583c6",
           "db9c1ca05979d69a",
@@ -44821,6 +44993,7 @@
           "9e8a734a41be8c78",
           "af6fca76390c1e24",
           "d01f9a7a5198c5c9",
+          "d3412cfe7b8de515",
           "db9c1ca05979d69a",
           "e64a0a56bd563562",
           "edaa00dc65d3cb12"
@@ -44977,6 +45150,7 @@
           "cf08fb61503832fb",
           "d01f9a7a5198c5c9",
           "d1893c1a136dc255",
+          "d3412cfe7b8de515",
           "d3e820220dacdce1",
           "d4b2dd7b65a583c6",
           "db9c1ca05979d69a",
@@ -45075,6 +45249,7 @@
           "cf08fb61503832fb",
           "d01f9a7a5198c5c9",
           "d1893c1a136dc255",
+          "d3412cfe7b8de515",
           "d3e820220dacdce1",
           "d4b2dd7b65a583c6",
           "db9c1ca05979d69a",
@@ -45173,6 +45348,7 @@
           "cf08fb61503832fb",
           "d01f9a7a5198c5c9",
           "d1893c1a136dc255",
+          "d3412cfe7b8de515",
           "d3e820220dacdce1",
           "d4b2dd7b65a583c6",
           "db9c1ca05979d69a",
@@ -45271,6 +45447,7 @@
           "cf08fb61503832fb",
           "d01f9a7a5198c5c9",
           "d1893c1a136dc255",
+          "d3412cfe7b8de515",
           "d3e820220dacdce1",
           "d4b2dd7b65a583c6",
           "db9c1ca05979d69a",

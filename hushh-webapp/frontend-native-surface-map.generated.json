@@ -2410,8 +2410,10 @@
         "shared_loader": false,
         "back_button_pattern": "shared-shell"
       },
-      "voice_action_contract_file": null,
-      "voice_action_contract_ids": [],
+      "voice_action_contract_file": "app/one/calendar/page.voice-action-contract.json",
+      "voice_action_contract_ids": [
+        "calendar.read"
+      ],
       "api_dependencies": [
         {
           "service_file": "lib/services/google-calendar-service.ts",
@@ -9841,5 +9843,5 @@
       "thread_and_consent_contract": null
     }
   ],
-  "content_sha256": "427f25f759933ba2df6c3196e27dfea90ccae6290ae8f91a9feaa02697f12fef"
+  "content_sha256": "a99e1ef500fbbc38bc45748ef5dd6bbaa6267fe7968eb91b2fc3e72e5732213f"
 }

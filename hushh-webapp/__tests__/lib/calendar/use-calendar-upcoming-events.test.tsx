@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useCalendarUpcomingEvents } from "@/lib/calendar/use-calendar-upcoming-events";
@@ -166,5 +166,34 @@ describe("useCalendarUpcomingEvents", () => {
 
     rerender({ isConnected: false });
     expect(result.current.events).toHaveLength(0);
+  });
+
+  it("discards an old owner's delayed response after switching accounts", async () => {
+    type ListResponse = Awaited<ReturnType<typeof GoogleCalendarService.listEvents>>;
+    let resolveOld!: (value: ListResponse) => void;
+    let resolveNew!: (value: ListResponse) => void;
+    mockedListEvents
+      .mockImplementationOnce(() => new Promise<ListResponse>((resolve) => { resolveOld = resolve; }))
+      .mockImplementationOnce(() => new Promise<ListResponse>((resolve) => { resolveNew = resolve; }));
+
+    const { result, rerender } = renderHook(
+      (props: { userId: string; vaultOwnerToken: string }) =>
+        useCalendarUpcomingEvents({ ...props, isConnected: true }),
+      { initialProps: { userId: "owner-a", vaultOwnerToken: "token-a" } },
+    );
+    await waitFor(() => expect(mockedListEvents).toHaveBeenCalledTimes(1));
+
+    rerender({ userId: "owner-b", vaultOwnerToken: "token-b" });
+    expect(result.current.events).toEqual([]);
+    await waitFor(() => expect(mockedListEvents).toHaveBeenCalledTimes(2));
+
+    await act(async () => resolveOld({ events: [RAW_EVENT] }));
+    expect(result.current.events).toEqual([]);
+    expect(result.current.loaded).toBe(false);
+
+    await act(async () => resolveNew({
+      events: [{ ...RAW_EVENT, id: "e2", title: "New owner's event" }],
+    }));
+    expect(result.current.events.map((event) => event.title)).toEqual(["New owner's event"]);
   });
 });
