@@ -486,11 +486,14 @@ minutes, void after a new save). A missing, malformed, empty or older-than-seven
 index answers `Your receipt memory is not ready yet. Sync and save your receipts
 in Mail.` with the generated `route.profile_receipts` action, and is never
 reported as an empty mailbox. The index is written only through writer
-`gmail_receipt_memory_save_button`: once after each sync the owner starts on
-Mail > Receipts (the product default, set by `RECEIPT_MEMORY_AUTO_SAVE_DEFAULT`),
-or when the owner taps Save or Update private memory. Opening the page, a
-partly loaded list or a failed sync never writes, and a failed save is not
-retried on its own.
+`gmail_receipt_memory_save_button`: once, automatically, after each sync the
+owner starts on Mail > Receipts (the product default, set by
+`RECEIPT_MEMORY_AUTO_SAVE_DEFAULT`). The page shows no save control. Opening the
+page, a partly loaded list or a failed sync never writes; a failed save retries
+twice, quietly, then waits for the next sync. Every field of the write that
+names its author, including the structure decision's `source_agent`, is that
+writer id, because the pre-save validation request carries no mutation plan and
+the reserved-branch guard judges it by `source_agent` alone.
 
 **Queued messages (Claude-Code-style queueing).** While One works on a typed
 turn, the composer stays usable. A message sent then is offered to the running

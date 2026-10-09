@@ -260,7 +260,7 @@ describe("DirectMessagesPage", () => {
     mocks.query = "";
     renderConnectionThread();
 
-    expect(await screen.findByRole("heading", { name: "Chats" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Chat" })).toBeVisible();
     expect(screen.getByLabelText("Search conversations")).toBeVisible();
     expect(screen.getByText("Select a conversation to see the chat here.")).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Message" })).toBeDisabled();
@@ -281,7 +281,7 @@ describe("DirectMessagesPage", () => {
     mocks.commandPhase = owner === "command-result" ? "result" : owner === "command" ? "working" : "idle";
     renderConnectionThread();
 
-    expect(await screen.findByRole("heading", { name: "Chats" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Chat" })).toBeVisible();
     expect(screen.getByText("Talk to One", { exact: true })).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
     expect(mocks.sendMessage).not.toHaveBeenCalled();
@@ -432,7 +432,8 @@ describe("DirectMessagesPage", () => {
     expect(screen.queryByText("See you then")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Start voice call" }));
-    expect(mocks.router.push).toHaveBeenCalledWith(ROUTES.HOME);
+    expect(mocks.morphyToast.info).toHaveBeenCalledWith("Calls are not available yet.");
+    expect(mocks.router.push).not.toHaveBeenCalled();
   });
 
   it("offers the full emoji picker and opens One chat for voice", async () => {

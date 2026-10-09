@@ -345,7 +345,7 @@ function AppShellFrame({ children }: ProvidersProps) {
         // need to guess at device safe areas or bar geometry.
         "--app-scroll-bottom-pad": bottomChromeHidden
           ? "0px"
-          : isRiaRoute(pathname)
+          : isRiaRoute(pathname) || routeLayout.route === ROUTES.ONE_MESSAGES
             ? "var(--bottom-chrome-stack-height)"
             : isOneSetupSurfaceRoute(pathname)
               ? "calc(var(--onboarding-agent-bar-clearance) + 1.5rem)"
@@ -359,6 +359,7 @@ function AppShellFrame({ children }: ProvidersProps) {
       hideGlobalChrome,
       isPublicStandaloneRoute,
       routeLayout.pageTopLocalOffset,
+      routeLayout.route,
       signedInShellContentOffset.style,
       topShellMetrics.contentOffsetMode,
       topShellMetrics.hasTabs,
@@ -401,8 +402,8 @@ function AppShellFrame({ children }: ProvidersProps) {
       agentBarHidden:
         isAuthenticated &&
         !authLoading &&
-        (pathname === ROUTES.HOME || pathname === ROUTES.ONE_MESSAGES),
-      includeComposerHeight: pathname === ROUTES.ONE_MESSAGES,
+        (pathname === ROUTES.HOME || routeLayout.route === ROUTES.ONE_MESSAGES),
+      includeComposerHeight: routeLayout.route === ROUTES.ONE_MESSAGES,
       hidden: bottomChromeHidden,
     }),
     [
@@ -411,6 +412,7 @@ function AppShellFrame({ children }: ProvidersProps) {
       isAuthenticated,
       authLoading,
       pathname,
+      routeLayout.route,
     ],
   );
   // Drive the bottom-chrome hide animation through a CSS variable instead of a
