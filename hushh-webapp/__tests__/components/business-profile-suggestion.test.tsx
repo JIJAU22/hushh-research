@@ -21,7 +21,8 @@ import { BusinessProfileSuggestion } from "@/components/agent/business-profile-s
 import { AgentBubble } from "@/components/agent/agent-chat-workspace";
 const candidate = { businessUid: "urn:hushh:business:uat:hushh.ai:v1", synthetic: true,
   sourceIdentity: { source: "uat_fixture", sourceKey: "hushh.ai:v1" }, draft: { name: "Hushh — UAT Test Business", website: "https://hushh.ai" } };
-const cards: AgentPkmPreviewCard[] = [{ card_id: "one", source_text: "Synthetic company detail", write_mode: "confirm_first", target_domain: "professional" }];
+const cards: AgentPkmPreviewCard[] = [{ card_id: "one", source_text: "Synthetic company detail", write_mode: "confirm_first", target_domain: "professional",
+  candidate_payload: { businesses: { entities: { demo: { name: "Synthetic company detail", phone: "+15555550100" } } } } }];
 const props = { ownerId: "owner", vaultKey: "key", vaultOwnerToken: "token", tokenExpiresAt: Date.now() + 100000, enabled: true };
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; };
 beforeEach(() => {
@@ -34,6 +35,21 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); publishValidatedAuthSessionOwner(null); });
 describe("post-onboarding business suggestion", () => {
+  it("saves only individually approved fields and disables an empty selection", async () => {
+    render(<BusinessProfileSuggestion {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
+    const phone = await screen.findByRole("checkbox", { name: "Save phone", exact: true });
+    fireEvent.click(phone);
+    expect(screen.getByTestId("agent-pkm-review-save")).toHaveTextContent("Save 1 field");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Save name", exact: true }));
+    expect(screen.getByTestId("agent-pkm-review-save")).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Save name", exact: true }));
+    fireEvent.click(screen.getByTestId("agent-pkm-review-save"));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+    const job = mocks.save.mock.calls[0]![0].job;
+    expect(job.cards[0].candidate_payload.businesses.entities.demo).toEqual({ name: "Synthetic company detail" });
+    expect(JSON.stringify(job)).not.toContain("+15555550100");
+  });
   it("retries an unreadable checkpoint without preparing or replacing the pending review", async () => {
     mocks.load.mockRejectedValueOnce(new Error("Cache unavailable"));
     render(<BusinessProfileSuggestion {...props} />);
