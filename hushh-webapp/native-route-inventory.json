@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-10-07",
-  "total_routes": 126,
-  "native_required_routes": 105,
+  "total_routes": 127,
+  "native_required_routes": 106,
   "excluded_routes": 21,
   "routes": [
     {
@@ -997,13 +997,28 @@
     {
       "route": "/one/profile/referrals",
       "classification": "native-required-functional",
+      "legacyAlias": true,
       "initialRoute": "/login?redirect=%2Fone%2Fprofile%2Freferrals",
-      "expectedMarker": "native-route-profile",
-      "expectedRoute": "/one/profile/referrals",
+      "expectedMarker": "native-route-one-referrals",
+      "expectedRoute": "/one/referrals",
       "autoReviewerLogin": true,
       "expectedAuth": "authenticated",
       "allowedDataStates": [
-        "loaded"
+        "loaded",
+        "unavailable-valid"
+      ]
+    },
+    {
+      "route": "/one/referrals",
+      "classification": "native-required-functional",
+      "initialRoute": "/login?redirect=%2Fone%2Freferrals",
+      "expectedMarker": "native-route-one-referrals",
+      "expectedRoute": "/one/referrals",
+      "autoReviewerLogin": true,
+      "expectedAuth": "authenticated",
+      "allowedDataStates": [
+        "loaded",
+        "unavailable-valid"
       ]
     },
     {

@@ -2752,3 +2752,33 @@ are added. Existing
 masked email/phone visibility remains unchanged. The Next proxy and native HTTP
 transport forward these additive fields. Older servers omit them; clients omit
 the badge rather than inventing a mutual relationship. No migration is required.
+
+
+## Referral dashboard reads
+
+`/one/referrals` uses the existing `/api/one/[...path]` proxy on web and
+`ApiService.apiFetch` direct backend transport on native. Each referral read
+requires a Firebase ID token; the verified UID selects the owner, never a
+client-supplied user identifier.
+
+- `GET /api/one/referrals/points` returns `{points: number}` from the owner's
+  cumulative ledger, independently of published leaderboard snapshots.
+- `GET /api/one/referrals/challenge` returns `active`, `week_started_at`,
+  `cutoff_at`, and `timezone`. Its weekly window derives from active program
+  settings. Missing settings or an unset schedule returns inactive with null
+  timestamps. A scheduled challenge does not imply weekly prize finalization
+  is enabled.
+- `GET /api/one/referrals/milestones` retains lifetime count, earned entitlements,
+  and next milestone, and adds `available_milestones` from the same active
+  settings version. The dashboard does not substitute a hardcoded catalogue.
+
+Migration 289 versions the milestone catalogue and schedule without modifying
+migration 275 or recomputing past awards. Applying it is separate from source
+verification. Summary reads can mint a referral link and authenticated reads
+can schedule identity synchronization; this dashboard is not a read-only probe
+against an environment where writes are prohibited.
+
+- `GET /api/one/referrals/policy` requires Firebase authentication and returns
+  active settings `version`, `points`, `streak_rules`, `weekly_schedule`,
+  `challenge_duration_days` (null when unscheduled), and `weekly_prizes_enabled`.
+  Rules uses these amounts directly; this read does not activate policy or award rewards.

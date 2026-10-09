@@ -228,7 +228,7 @@ export function resolveRouteId(rawPathname: string): RouteId {
     return "profile_gmail_connection";
   if (pathname === ROUTES.PROFILE_GMAIL_ACTIONS) return "profile_gmail_actions";
   if (/^\/r\/[^/]+$/.test(pathname)) return "referral_landing";
-  if (pathname === ROUTES.PROFILE_REFERRALS) return "profile_referrals";
+  if (pathname === ROUTES.PROFILE_REFERRALS || pathname === ROUTES.ONE_REFERRALS) return "profile_referrals";
   if (pathname === ROUTES.PROFILE_SUPPORT) return "profile_support";
   if (pathname === ROUTES.PROFILE_SUPPORT_ROUTING)
     return "profile_support_routing";

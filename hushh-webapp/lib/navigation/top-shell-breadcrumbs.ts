@@ -335,6 +335,14 @@ function resolveTopShellBreadcrumbInner(
   connectedSystemLabel?: string | null,
 ): TopShellBreadcrumbConfig | null {
   pathname = normalizeBreadcrumbPathname(pathname);
+  if (pathname === ROUTES.ONE_REFERRALS) {
+    return {
+      backHref: ROUTES.ONE_HOME,
+      width: "content",
+      align: "center",
+      items: [{ label: "One", href: ROUTES.ONE_HOME }, { label: "Referrals" }],
+    };
+  }
   const resolvedConnectedSystemLabel =
     String(connectedSystemLabel || "").trim() || "CRM";
 

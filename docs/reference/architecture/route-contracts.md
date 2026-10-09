@@ -138,6 +138,7 @@ use `ApiService.apiFetch` and never embed a real person reference at build time.
 - `/one/email`
 - `/one/kyc`
 - `/one/career`
+- `/one/referrals` — authenticated referral dashboard; `/one/profile/referrals` redirects here. Account totals and milestone cards come from the referral API, with explicit unavailable states and no sample balances.
 - `/one/location`
 - `/one/location/map`
 - `/one/location/check-in`
