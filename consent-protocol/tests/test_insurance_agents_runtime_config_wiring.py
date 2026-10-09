@@ -167,7 +167,7 @@ def test_the_deploy_workflow_passes_the_flag_it_configures():
     ).read_text()
     assert "--insurance-agents-api-base-url" in workflow
     assert (
-        '--one-business-directory-enabled "${{ vars.ONE_BUSINESS_DIRECTORY_ENABLED_UAT || \'false\' }}"'
+        "--one-business-directory-enabled \"${{ vars.ONE_BUSINESS_DIRECTORY_ENABLED_UAT || 'false' }}\""
         in workflow
     )
 
