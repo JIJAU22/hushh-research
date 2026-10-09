@@ -426,6 +426,14 @@ function UnlockedDocumentReview({
           throw cause;
         }
       };
+      const pendingOwnerDelivery = async (review: SharingReview): Promise<SharingDelivery | undefined> => {
+        if (!review.bulkShare) return undefined;
+        const delivery = await DriveSharingService.delivery(token, requestId, guard);
+        guard();
+        return delivery.canStopAccess || delivery.accessStopStatus || delivery.bulkShareId
+          ? delivery
+          : undefined;
+      };
       if (status.direction !== "incoming")
         return { status, delivery: await optionalOutgoingDelivery() };
       if (!UNDECIDED.has(status.status)) {
@@ -438,7 +446,10 @@ function UnlockedDocumentReview({
       let review = await DriveSharingService.review(token, requestId, guard);
       guard();
       if (isDurableReview(review)) {
-        if (isAutomaticSharingActive(review)) return { status, review };
+        if (isAutomaticSharingActive(review)) {
+          const delivery = await pendingOwnerDelivery(review);
+          return delivery ? { status, review, delivery } : { status, review };
+        }
         const legacyJob = review.search?.status === "completed" &&
           review.search.coverage?.shareabilityVerified !== true ? review.search.jobId : null;
         if ((status.status === "pending" || status.status === "review_ready") &&
@@ -464,7 +475,8 @@ function UnlockedDocumentReview({
           review = await DriveSharingService.review(token, requestId, guard);
           guard();
         }
-        return { status, review };
+        const delivery = await pendingOwnerDelivery(review);
+        return delivery ? { status, review, delivery } : { status, review };
       }
       // Worker-held, ready, or already tried for this revision: no search.
       if (
@@ -1748,6 +1760,7 @@ function UnlockedDocumentReview({
                 {delivery.canStopAccess ? (
                   <SettingsRow
                     title="Stop access"
+                    ariaLabel="Stop access"
                     description="Prevent pending files from being shared."
                     tone="destructive"
                     disabled={locked}

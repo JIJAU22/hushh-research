@@ -1209,15 +1209,21 @@ describe("exact-file document review", () => {
       expect(state.deliveryFiles).not.toHaveBeenCalled();
     });
 
-    it("lets the owner stop a paid frozen request before any grant is queued", async () => {
+    it.each([true, false])("lets the owner stop a paid frozen request before any grant is queued (trusted: %s)", async (trustedAuto) => {
       state.status.mockResolvedValue(pending());
-      state.review.mockResolvedValue(partial());
+      state.review.mockResolvedValue(partial({ durableAvailable: true, trustedAuto,
+        progressiveAllowed: !trustedAuto,
+        search: durableSearch({ status: "completed" }),
+        bulkShare: durableBulk({ status: "review_ready", fileCount: 1 }),
+      }));
       state.delivery.mockResolvedValue({ status: "pending", files: [], canStopAccess: true });
       state.prepareRevocation.mockResolvedValue({ revision: 4, directiveId: "d",
         reviewDigest: "b".repeat(64), expiresAt: new Date(Date.now() + 60_000).toISOString(),
         affectedCount: 0, pendingCount: 0, files: [] });
       render(<DocumentShareReview requestId={requestId} onChanged={vi.fn()} />);
+      await waitFor(() => expect(state.delivery).toHaveBeenCalled());
       fireEvent.click(await screen.findByRole("button", { name: "Stop access" }));
+      expect(state.prepareRevocation).toHaveBeenCalledOnce();
       expect(await screen.findByText("Stop this request before files are shared.")).toBeVisible();
       fireEvent.click(screen.getByRole("button", { name: "Stop access" }));
       await waitFor(() => expect(state.revoke).toHaveBeenCalledOnce());
