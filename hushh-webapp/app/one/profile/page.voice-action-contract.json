@@ -669,8 +669,5 @@
       "speaker_persona": "one"
     }
   ],
-  "search": {
-    "source_revision": "7607bebe3f542cbb9f2c7a2530fee3e7962c9baf80cbad44c4cfa4c985377330",
-    "source_module_count": 1517
-  }
+  "search": {}
 }
