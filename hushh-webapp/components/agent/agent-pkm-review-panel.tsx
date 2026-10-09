@@ -1,5 +1,7 @@
 "use client";
 
+import { useId, type ReactNode } from "react";
+
 import { Brain, Check, Loader2, Pencil, X } from "@/components/icons";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,9 @@ type AgentPkmReviewPanelProps = {
   domainTitles?: ReadonlyMap<string, string>;
   /** Connector notes must show their proposed content before confirmation. */
   showSourceText?: boolean;
+  /** A feature may offer finer consent inside the existing review surface. */
+  renderCardDetails?: (card: AgentPkmPreviewCard) => ReactNode;
+  saveLabel?: string;
 };
 
 type ReviewGroup = { destination: string; cards: AgentPkmPreviewCard[] };
@@ -82,7 +87,10 @@ export function AgentPkmReviewPanel({
   onEdit,
   domainTitles,
   showSourceText = false,
+  renderCardDetails,
+  saveLabel,
 }: AgentPkmReviewPanelProps) {
+  const panelId = useId();
   const reviewableCards = cards.filter((card) => !isReservedPkmCard(card));
   if (reviewableCards.length === 0) return null;
   const isSelected = (card: AgentPkmPreviewCard) =>
@@ -148,9 +156,9 @@ export function AgentPkmReviewPanel({
             data-testid="agent-pkm-review-save"
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-            {selectable && selectedCount !== reviewableCards.length
+            {saveLabel || (selectable && selectedCount !== reviewableCards.length
               ? `Save ${selectedCount} of ${reviewableCards.length}`
-              : `Save all ${reviewableCards.length}`}
+              : `Save all ${reviewableCards.length}`)}
           </Button>
         </div>
       </div>
@@ -184,7 +192,7 @@ export function AgentPkmReviewPanel({
               {group.cards.map((card) => {
                 const selected = isSelected(card);
                 return (
-                  <label
+                  <div
                     key={card.card_id}
                     className={cn(
                       "flex gap-2 rounded-lg px-3 py-2.5 text-xs",
@@ -195,6 +203,7 @@ export function AgentPkmReviewPanel({
                   >
                     {selectable ? (
                       <input
+                        id={`${panelId}-${card.card_id}`}
                         type="checkbox"
                         className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--app-accent)]"
                         checked={selected}
@@ -205,14 +214,14 @@ export function AgentPkmReviewPanel({
                     ) : null}
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-start justify-between gap-3">
-                        <p className="font-medium text-foreground">
+                        <label htmlFor={selectable ? `${panelId}-${card.card_id}` : undefined} className="font-medium text-foreground">
                           {multiGroup && !showSourceText ? cleanText(card.source_text, 140) || destinationOf(card) : destinationOf(card)}
-                        </p>
+                        </label>
                         <span className="shrink-0 rounded-full border border-border/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                           {cardSensitivity(card)}
                         </span>
                       </div>
-                      {showSourceText && card.source_text ? (
+                      {renderCardDetails ? renderCardDetails(card) : showSourceText && card.source_text ? (
                         <p className="whitespace-pre-wrap break-words text-sm leading-5 text-foreground">{card.source_text}</p>
                       ) : null}
                       {multiGroup ? null : card.confirmation_reason ? (
@@ -229,7 +238,7 @@ export function AgentPkmReviewPanel({
                         <p className="leading-5 text-muted-foreground">Private to your private agent. Consent required to share.</p>
                       )}
                     </div>
-                  </label>
+                  </div>
                 );
               })}
             </section>

@@ -73,7 +73,7 @@ describe("Profile canonical page layout", () => {
     );
 
     expect(workspace).toMatch(
-      /className=\{cn\(\s*"profile-account-content profile-vault-methods-content",\s*isPanePresentation && secondaryTypographyStyles\.paneVaultMethods,/,
+      /const vaultMethodsContent = \([\s\S]*?<div\s+className=\{cn\(\s*"profile-account-content profile-vault-methods-content",\s*isPanePresentation && secondaryTypographyStyles\.paneVaultMethods,\s*\)\}/,
     );
     expect(workspace).not.toContain('description: "Unlock methods.",');
     expect(workspace).toContain('data-testid="vault-default-unlock-actions"');

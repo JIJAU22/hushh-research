@@ -78,8 +78,5 @@
       }
     }
   ],
-  "search": {
-    "source_revision": "37b93d82ed0a475b62399d6e0d7e93c1597e25791079b506997fc14201ea0267",
-    "source_module_count": 1519
-  }
+  "search": {}
 }

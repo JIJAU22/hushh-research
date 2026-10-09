@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from hushh_mcp.adk_bridge.contract import (
+    A2ADirective,
     A2ATask,
     SpecialistReadResult,
     SpecialistTurnResult,
@@ -66,16 +67,28 @@ class EmailAgentA2A:
             conversation_id=task.conversation_id or "",
             require_access=require_access,
             timezone=task.timezone or "UTC",
+            receipt_memory=task.receipt_memory,
+            receipt_cursor=task.receipt_cursor,
         )
         await require_access()
+        # A receipts answer that is not ready proposes the generated Open
+        # Receipts action. It is a suggestion One validates through the action
+        # gateway, never a client directive this hop issues itself.
+        proposal = out.get("directive")
+        cursor = out.get("receipt_cursor")
         return SpecialistTurnResult(
             conversation_id=task.conversation_id or "",
             text=str(out.get("response") or ""),
-            directive=None,
+            directive=(
+                A2ADirective(kind="action", payload=proposal)
+                if isinstance(proposal, dict)
+                else None
+            ),
             is_complete=bool(out.get("isComplete", True)),
             state_changed=False,
             model=DELEGATED_MODEL,
             structured=SpecialistReadResult.model_validate(out["structured"]),
+            continuation=cursor if isinstance(cursor, dict) else None,
         )
 
 

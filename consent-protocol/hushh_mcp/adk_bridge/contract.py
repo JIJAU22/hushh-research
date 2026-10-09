@@ -120,6 +120,12 @@ class A2ATask:
     specialist_target: Literal["consent", "connections"] | None = None
     execution_surface: Literal["typed_chat"] | None = None
     previous_answer: str | None = None
+    # Email receipts only. The owner's saved receipt index, which their device
+    # decrypts and sends for this one turn (an expiring request secret, never
+    # session state), and where the last receipts list stopped for "show more".
+    # Neither is authority: the hop re-validates both and reads no mailbox.
+    receipt_memory: dict | None = None
+    receipt_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -193,3 +199,7 @@ class SpecialistTurnResult:
     state_changed: bool
     model: str
     structured: SpecialistReadResult | None = None
+    # A specialist-owned list position for the next turn, as
+    # ``{"action": "set" | "clear" | "keep", "value": str | None}``. The caller
+    # decides where it is kept; it never carries the information itself.
+    continuation: dict | None = None

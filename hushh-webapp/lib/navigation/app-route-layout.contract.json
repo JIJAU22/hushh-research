@@ -41,8 +41,7 @@
         }
       ],
       "kind": "root",
-      "reason": "Chat entry is an application root.",
-      "sourceRevision": "a7ebb0a98b0d22b9cf2398cdad812cd2c53ff126f4bd77ffb9d57bef03a24852"
+      "reason": "Chat entry is an application root."
     }
   },
   {

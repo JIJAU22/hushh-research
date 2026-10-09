@@ -28,7 +28,11 @@ describe("one owner with independent businesses", () => {
     const retargeted = { ...card, merge_decision: { merge_mode: "create_entity", target_entity_path: "profile.entities.chosen" } };
     expect(() => assertBusinessMemoryTarget({}, retargeted, { businessUid: "business-A" })).not.toThrow();
     const destination = (uid: string) => ({ profile: { entities: { chosen: { _business_origin: { business_uid: uid } } } } });
-    expect(() => assertBusinessMemoryTarget(destination("business-A"), retargeted, { businessUid: "business-A" })).not.toThrow();
+    expect(() => assertBusinessMemoryTarget(destination("business-A"), retargeted, { businessUid: "business-A" })).toThrow("already exists");
+    expect(() => assertBusinessMemoryTarget(destination("business-A"), { ...retargeted, merge_mode: "extend_entity" },
+      { businessUid: "business-A" })).toThrow("already exists");
+    const update = { ...retargeted, merge_decision: { ...retargeted.merge_decision, merge_mode: "correct_entity" } };
+    expect(() => assertBusinessMemoryTarget(destination("business-A"), update, { businessUid: "business-A" })).not.toThrow();
     const other = destination("business-B"); const before = structuredClone(other);
     expect(() => assertBusinessMemoryTarget(other, retargeted, { businessUid: "business-A" })).toThrow("different or unidentified");
     expect(other).toEqual(before);

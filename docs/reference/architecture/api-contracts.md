@@ -422,6 +422,29 @@ that exact message and payload shape (`400`). The row's Feed projection is held
 as a 10-minute in-memory request secret for the turn; no tool runs in it; the
 history restores the message as a `selection` chip.
 
+**Saved receipts in chat.** A typed turn from an unlocked owner may carry
+`forwardedProps.receiptMemory`: the bounded canonical receipt index that the
+owner's device decrypted from `shopping.receipts_memory._canonical_index`
+(schema `receipt_canonical_index.v1`, at most 100 transactions and 96 KB). The
+server never holds the vault key, so this is the only way the Email specialist
+can read saved receipts. `POST /api/one/agent-chat` pops the field before the
+bridge can copy it, validates it against a closed schema (`extra=forbid`; no
+subject, preview, body, sender address, provider id, signed source handle or
+link can ride along; text is made single-line and markdown-inert, and a
+link-bearing field is dropped whole), and keeps it only as an expiring request
+secret for that turn; an invalid index is treated as absent, never repaired, and
+a locked or anonymous turn keeps nothing. It is never written to conversation
+state, logged, or shown to a model. A receipts question (`read_receipts`) filters,
+pages and formats it in code, newest first, ten at a time, with dates in the
+owner's timezone and any unavailable amount omitted. "Show more" continues a
+server-held position (`hussh:receipt_cursor`, filters and offset only, thirty
+minutes, void after a new save). A missing, malformed, empty or older-than-seven-day
+index answers `Your receipt memory is not ready yet. Sync and save your receipts
+in Mail.` with the generated `route.profile_receipts` action, and is never
+reported as an empty mailbox. The owner saves or updates the index only with an
+explicit tap on Mail > Receipts (writer `gmail_receipt_memory_save_button`);
+nothing saves it automatically.
+
 **Queued messages (Claude-Code-style queueing).** While One works on a typed
 turn, the composer stays usable. A message sent then is offered to the running
 turn with `POST /api/one/agent-chat/runs/{conversation_id}/queue`
@@ -900,6 +923,19 @@ and unlocked-vault admission, requiring known, unexpired owner authority.
 It opens a labelled synthetic suggestion with Review, Later and Not my business.
 Editing a name/HTTPS website invalidates prior proposals. Review uses the existing
 private-agent memory preparation and exact-card selection; it does not save.
+Business review additionally exposes the proposed entity's individual fields,
+including nested object leaves. Arrays and synthesized summaries are visible,
+atomic entries; they are not silently rewritten to remove an overlapping fact.
+The owner can select/deselect each entry and Save shows the selected field count.
+An empty selection cannot save. Consent narrowing retains the model's domain,
+entity identity and merge decision, but builds an incoming payload containing only
+selected fields and internal business provenance. Unreviewed sibling payloads and
+original model summary projections cannot ride along. Save checkpoints the narrowed
+cards and approved source text; the full listing snapshot remains encrypted recovery
+evidence, not information added to PKM. Pending jobs lock their field selection and
+retry the exact approved payload/scopes. Deselection does not delete existing memory.
+An existing same-UID entity cannot be replaced with `create_entity`; it requires a
+fresh model-prepared update to avoid erasing previously saved omitted fields.
 Save requires an explicit second action, plus separate acknowledgment when the
 selected memory affects active sharing. It rechecks fresh candidate eligibility
 before using `business_profile_review`, a governed memory-agent writer, through

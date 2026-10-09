@@ -14,6 +14,7 @@ import { createAgentPkmCaptureGuard } from "@/lib/agent/agent-pkm-capture-runtim
 import { connectorMemorySharingImpact, prepareConnectorMemoryReview } from "@/lib/agent/connector-memory-review";
 import { attachBusinessOrigin, buildSyntheticBusinessPreview, BusinessOriginValidationError, businessCandidateSnapshot, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
 import type { AgentPkmPreviewCard } from "@/lib/agent/agent-pkm-memory";
+import { businessReviewFields, initialBusinessFieldSelection, selectBusinessReviewFields, type BusinessFieldSelection } from "@/lib/agent/business-profile-fields";
 
 type Props = {
   ownerId: string | null; vaultKey: string | null; vaultOwnerToken: string | null;
@@ -29,6 +30,7 @@ type Props = {
 type Review = {
   candidate: BusinessCandidate; name: string; website: string; message: string;
   cards: AgentPkmPreviewCard[]; selected: string[]; job?: BusinessReviewJob;
+  fields?: BusinessFieldSelection;
   phase: "offer" | "preparing" | "review" | "saving";
 };
 
@@ -136,7 +138,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
           name: job?.reviewedName ?? reviewedCandidate.draft.name,
           website: job?.reviewedWebsite ?? reviewedCandidate.draft.website,
           message: job?.message || "", cards: job?.cards || [], selected: job?.cards.map(card => card.card_id) || [],
-          job, phase: job ? "review" : "offer" } });
+          fields: initialBusinessFieldSelection(job?.cards || []), job, phase: job ? "review" : "offer" } });
         setOpen(true);
       } catch {
         // Optional discovery must not block chat or expose provider diagnostics.
@@ -198,7 +200,8 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
       // Ensure source identity can follow the actual semantic entity before offering Save.
       stage = "origin";
       result.cards.forEach(card => attachBusinessOrigin(card, review.candidate));
-      update({ ...review, message, cards: result.cards, selected: result.cards.map(card => card.card_id), phase: "review" });
+      update({ ...review, message, cards: result.cards, selected: result.cards.map(card => card.card_id),
+        fields: initialBusinessFieldSelection(result.cards), phase: "review" });
     } catch (error) {
       if (guard.isCurrent()) {
         // Bounded diagnostics only: never log source details, keys or preview payloads.
@@ -212,7 +215,13 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
       }
     } finally { if (guard.isCurrent()) busy.current = false; }
   };
-  const chosen = review?.cards.filter(card => review.selected.includes(card.card_id)) || [];
+  const chosen = review?.cards.filter(card => review.selected.includes(card.card_id)).flatMap(card => {
+    // Frozen jobs replay exactly what was approved; never change a retry scope.
+    if (review.job) return [card];
+    const selected = selectBusinessReviewFields(card, review.fields?.[card.card_id] || []);
+    return selected ? [selected] : [];
+  }) || [];
+  const fieldCount = chosen.reduce((count, card) => count + businessReviewFields(card).length, 0);
   const sharingCount = connectorMemorySharingImpact(chosen);
   const save = async (sharingImpactAcknowledged = false) => {
     if (!review || review.phase !== "review" || busy.current || !chosen.length) return;
@@ -223,7 +232,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     let attemptedJob = review.job;
     const action = (async () => {
       if (!review.job) await freshCandidate(guard);
-      const job = review.job || createBusinessReviewJob(context.ownerId!, review.candidate, review.message, chosen,
+      const job = review.job || createBusinessReviewJob(context.ownerId!, review.candidate, chosen.map(card => card.source_text).join("\n\n"), chosen,
         { name: review.name, website: review.website });
       attemptedJob = job;
       update({ ...review, job, phase: "saving" });
@@ -235,7 +244,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
         const checkpoint = await loadBusinessReview(context.ownerId!, context.vaultKey!, review.candidate.businessUid);
         await guard.assertCurrent();
         update({ ...review, job: checkpoint?.job || job, cards: job.cards,
-          selected: job.cards.map(card => card.card_id), phase: "review" });
+          selected: job.cards.map(card => card.card_id), fields: initialBusinessFieldSelection(job.cards), phase: "review" });
         throw new Error("Some details still need saving. Retry this review.");
       }
       // Persisted PKM state is authoritative, but also suppress this mounted
@@ -263,9 +272,11 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
           }
           const job = checkpoint?.job || attemptedJob;
           update({ ...review, job, cards: job?.cards || review.cards,
-            selected: job?.cards.map(card => card.card_id) || review.selected, phase: "review" });
+            selected: job?.cards.map(card => card.card_id) || review.selected,
+            fields: job ? initialBusinessFieldSelection(job.cards) : review.fields, phase: "review" });
         } catch { if (guard.isCurrent()) update({ ...review, job: attemptedJob,
-          cards: attemptedJob?.cards || review.cards, selected: attemptedJob?.cards.map(card => card.card_id) || review.selected, phase: "review" }); }
+          cards: attemptedJob?.cards || review.cards, selected: attemptedJob?.cards.map(card => card.card_id) || review.selected,
+          fields: attemptedJob ? initialBusinessFieldSelection(attemptedJob.cards) : review.fields, phase: "review" }); }
       }
     } finally { if (guard.isCurrent()) busy.current = false; }
   };
@@ -332,9 +343,31 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
         {!review.job && <Button variant="link" size="standard" disabled={pending} onClick={() => void refresh()}>Refresh listing and restart review</Button>}
         {pending && <p role="status" className="text-sm">{review.phase === "preparing" ? "Preparing details for review…" : "Saving approved details…"}</p>}
         {(review.phase === "review" || review.phase === "saving") && <AgentPkmReviewPanel
-          cards={review.cards} selectedCardIds={new Set(review.selected)} saving={pending} showSourceText className="[&_button]:min-h-11"
-          onToggleCard={review.job ? undefined : id => update({ ...review, selected: review.selected.includes(id)
-            ? review.selected.filter(value => value !== id) : [...review.selected, id] })}
+          cards={review.cards} selectedCardIds={new Set(chosen.map(card => card.card_id))} saving={pending} className="[&_button]:min-h-11"
+          saveLabel={`Save ${fieldCount} ${fieldCount === 1 ? "field" : "fields"}`}
+          renderCardDetails={card => <fieldset disabled={pending || Boolean(review.job)} className="min-w-0 space-y-1">
+            <legend className="ui-text-helper">Choose which details to save</legend>
+            {businessReviewFields(card).map(field => <label key={field.id}
+              className="flex min-h-11 cursor-pointer items-start gap-2 py-2">
+              <input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-[var(--app-accent)]"
+                aria-label={`Save ${field.label}`} checked={review.selected.includes(card.card_id) && Boolean(review.fields?.[card.card_id]?.includes(field.id))}
+                onChange={event => {
+                  const fields = review.fields?.[card.card_id] || [];
+                  const next = event.target.checked ? [...new Set([...fields, field.id])] : fields.filter(id => id !== field.id);
+                  update({ ...review, fields: { ...review.fields, [card.card_id]: next },
+                    selected: next.length ? [...new Set([...review.selected, card.card_id])] : review.selected.filter(id => id !== card.card_id) });
+                }} />
+              <span className="min-w-0"><span className="ui-text-helper capitalize">{field.label}</span>
+                <span className="block whitespace-pre-wrap break-words text-sm [overflow-wrap:anywhere]">{typeof field.value === "string" ? field.value : JSON.stringify(field.value)}</span></span>
+            </label>)}
+            <HelperText>Unchecked fields are not added or updated. Existing memory is not deleted. Business identity is retained for duplicate protection.</HelperText>
+            <HelperText>Summaries and lists are saved as shown; deselect them too if they contain details you do not want to save.</HelperText>
+          </fieldset>}
+          onToggleCard={review.job ? undefined : id => {
+            const selected = review.selected.includes(id);
+            update({ ...review, selected: selected ? review.selected.filter(value => value !== id) : [...review.selected, id],
+              fields: { ...review.fields, [id]: selected ? [] : businessReviewFields(review.cards.find(card => card.card_id === id)!).map(field => field.id) } });
+          }}
           onSave={() => void save()} onDismiss={() => setOpen(false)} />}
         {(review.phase === "offer" || review.phase === "preparing") ? <FlowActionGroup separateSecondary={false}
           primary={<Button size="standard" loading={review.phase === "preparing"}

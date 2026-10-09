@@ -37,6 +37,14 @@ from hushh_mcp.services.gmail_personal_information_request_service import (
     get_personal_gmail_information_request_service,
 )
 from hushh_mcp.services.owner_time import owner_zone
+from hushh_mcp.services.receipt_memory_read import (
+    OPEN_RECEIPTS_ACTION_ID,
+    ReceiptIdentifierKind,
+    ReceiptPlanError,
+    ReceiptPlanFields,
+    ReceiptStatus,
+    read_receipt_memory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +111,7 @@ class MailReadPlan(BaseModel):
         "read_message",
         "read_thread",
         "analyze_mail",
+        "read_receipts",
         "clarify",
     ]
     query: str = Field(default="", max_length=512)
@@ -111,6 +120,37 @@ class MailReadPlan(BaseModel):
     mailbox: Literal["inbox", "sent", "anywhere"] = "inbox"
     clarification: str = Field(default="", max_length=500)
     categories: list[AnalysisCategory] = Field(default_factory=list, max_length=3)
+    # Only for read_receipts: the window and filters the planner chose from the
+    # person's own words, answered from their saved receipt memory and never
+    # from the inbox. Flat scalars and one array of enums on purpose; nested
+    # objects in a structured-output schema are what Vertex rejected for
+    # ``MailItemGist``. An empty value means "no such restriction".
+    receipt_since: str = Field(default="", max_length=10)
+    receipt_until: str = Field(default="", max_length=10)
+    receipt_statuses: list[ReceiptStatus] = Field(default_factory=list, max_length=4)
+    receipt_identifier_kinds: list[ReceiptIdentifierKind] = Field(
+        default_factory=list, max_length=4
+    )
+    receipt_merchant: str = Field(default="", max_length=80)
+    receipt_window_label: str = Field(default="", max_length=60)
+    # "Show more" / "next" / "older": continue the receipts list just shown.
+    receipt_more: bool = False
+
+    def receipt_fields(self) -> ReceiptPlanFields:
+        return ReceiptPlanFields(
+            since=self.receipt_since,
+            until=self.receipt_until,
+            statuses=tuple(self.receipt_statuses),
+            identifier_kinds=tuple(self.receipt_identifier_kinds),
+            merchant=self.receipt_merchant,
+            window_label=self.receipt_window_label,
+            more=self.receipt_more,
+        )
+
+    @property
+    def has_receipt_fields(self) -> bool:
+        fields = self.receipt_fields()
+        return fields.more or fields.has_filters or bool(fields.window_label)
 
 
 class MailAnalysisFinding(BaseModel):
@@ -403,6 +443,86 @@ def _result(
     }
 
 
+_RECEIPT_ERRORS = {
+    "invalid_argument": (
+        "I couldn't turn that into a receipts request. "
+        "Try “show my receipts from the last 2 months”."
+    ),
+    "not_in_this_surface": (
+        "I can't read your saved receipts here yet. Ask in chat, or open Receipts in Mail."
+    ),
+}
+
+
+def _answer_from_receipt_memory(
+    *,
+    conversation_id: str,
+    plan: MailReadPlan,
+    receipt_memory: object | None,
+    receipt_cursor: str | None,
+    receipt_reads: bool,
+    zone: ZoneInfo,
+    now: datetime,
+) -> dict[str, Any]:
+    """Answer a planned receipts question from the saved receipt memory alone.
+
+    This path builds no Gmail reader and so cannot reach ``search_inbox``. The
+    planner chose the window and filters; the interpreter is not asked, because
+    every value in the answer is copied from the person's saved memory and
+    formatted by code, and a model re-writing a number is the failure to avoid.
+    That skip is logged, never silent.
+    """
+    if plan.categories:
+        raise GmailMetadataError("invalid_argument")
+    if not receipt_reads:
+        # One Live Voice has no channel for the saved memory. Refuse plainly
+        # instead of falling back to a search of the inbox.
+        return _result(
+            conversation_id,
+            _RECEIPT_ERRORS["not_in_this_surface"],
+            "invalid_argument",
+            failure_stage="planning",
+        )
+    try:
+        with mail_latency("receipts"):
+            outcome = read_receipt_memory(
+                index_raw=receipt_memory,
+                plan=plan.receipt_fields(),
+                cursor_raw=receipt_cursor,
+                zone=zone,
+                now=now,
+            )
+    except ReceiptPlanError:
+        return _result(
+            conversation_id,
+            _RECEIPT_ERRORS["invalid_argument"],
+            "invalid_argument",
+            failure_stage="planning",
+        )
+    logger.info("one_voice.mail.latency stage=%s ms=%d status=%s", "interpret", 0, "skipped")
+    if outcome.drift:
+        logger.info("one_voice.mail.receipts drift=%s", ",".join(outcome.drift))
+    result = _result(
+        conversation_id,
+        outcome.text,
+        outcome.status,
+        truncated=outcome.has_more,
+        metadata_only=True,
+        coverage=outcome.coverage,
+    )
+    # Siblings of the strict shared receipt, like ``items`` and ``offer``: the
+    # caller persists the list position for "show more" and, when the memory is
+    # not ready, proposes the generated Open Receipts action to One.
+    result["receipt_cursor"] = {"action": outcome.cursor_action, "value": outcome.cursor}
+    if outcome.propose_open_receipts:
+        result["directive"] = {
+            "type": "receipts_open_proposal",
+            "actionId": OPEN_RECEIPTS_ACTION_ID,
+            "slots": {},
+        }
+    return result
+
+
 async def run_delegated_mail_read(
     *,
     gmail: Any,
@@ -415,6 +535,9 @@ async def run_delegated_mail_read(
     message_ids: tuple[str, ...] = (),
     offer_mailbox: str = "inbox",
     expect_account: str = "",
+    receipt_memory: object | None = None,
+    receipt_cursor: str | None = None,
+    receipt_reads: bool = False,
     gene_runner: Callable[..., Awaitable[dict[str, Any]]] = run_email_gene,
     reader_factory: Callable[..., GmailMetadataReader] = GmailMetadataReader,
     personal_assessor: Callable[
@@ -466,6 +589,20 @@ async def run_delegated_mail_read(
                     plan.clarification or "What would you like to find in your inbox?",
                     "input_required",
                 )
+            if plan.operation == "read_receipts":
+                # Receipt questions are answered from the saved receipt memory
+                # only. There is deliberately no branch from here to the reader.
+                return _answer_from_receipt_memory(
+                    conversation_id=conversation_id,
+                    plan=plan,
+                    receipt_memory=receipt_memory,
+                    receipt_cursor=receipt_cursor,
+                    receipt_reads=receipt_reads,
+                    zone=zone,
+                    now=clock(),
+                )
+            if plan.has_receipt_fields:
+                raise GmailMetadataError("invalid_argument")
             operation: MailOperation = plan.operation
             if operation == "analyze_mail":
                 if not plan.categories or len(set(plan.categories)) != len(plan.categories):
