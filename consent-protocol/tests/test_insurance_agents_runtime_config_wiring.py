@@ -166,6 +166,10 @@ def test_the_deploy_workflow_passes_the_flag_it_configures():
         Path(__file__).resolve().parents[2] / ".github" / "workflows" / "deploy-uat.yml"
     ).read_text()
     assert "--insurance-agents-api-base-url" in workflow
+    assert (
+        '--one-business-directory-enabled "${{ vars.ONE_BUSINESS_DIRECTORY_ENABLED_UAT || \'false\' }}"'
+        in workflow
+    )
 
 
 def test_the_deploy_mounts_the_mirrored_key_on_the_backend():
