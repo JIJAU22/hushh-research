@@ -180,6 +180,10 @@ describe("IntroStep voice contract", () => {
     expect(screen.getByText("Your agents. Yours to own.")).toBeInTheDocument();
     expect(screen.getByText("Your personal team of AI agents.")).toBeInTheDocument();
     expect(screen.getByText("You choose what to share.")).toBeInTheDocument();
+    // The handshake mark sits beside the sentence, inside the same note.
+    expect(
+      screen.getByText("You choose what to share.").parentElement?.querySelector("img"),
+    ).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Sign in", exact: true })).not.toBeInTheDocument();
     expect(screen.getByTestId("guest-preview")).toHaveAttribute("data-preview-step", "1");
     fireEvent.click(screen.getByRole("button", { name: "Create your One", exact: true }));
