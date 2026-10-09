@@ -73,6 +73,8 @@ const DRIVE_TOOLS: ReadonlySet<string> = new Set([
 const CALENDAR_TOOLS: ReadonlySet<string> = new Set([
   "calendar_summary",
   "calendar_events",
+  "calendar_calendars",
+  "calendar_event_detail",
   "calendar_availability",
   "calendar_free_slots",
   "propose_calendar_event",
