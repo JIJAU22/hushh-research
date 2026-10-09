@@ -12,6 +12,8 @@ import {
 } from "react";
 
 import { AgentDockPortal } from "@/components/agent/agent-dock";
+import { useOptionalLocationCommand } from "@/components/agent/location-command-provider";
+import { useOptionalVoiceSession } from "@/components/one-voice/voice-session-provider";
 import { AppPageShell } from "@/components/app-ui/app-page-shell";
 import { navigateDirectMessage } from "@/lib/direct-messages/navigate-direct-message";
 import { OneChatBubble } from "@/components/agent/chat-message-styles";
@@ -221,6 +223,9 @@ function threadFromConversation(
 export function DirectMessagesPage({ selection, resolvingSelection = false }: { selection?: { kind: "conversation" | "person"; ref: string } | null; resolvingSelection?: boolean } = {}) {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
+  const command = useOptionalLocationCommand();
+  const voiceSession = useOptionalVoiceSession();
+  const agentEngaged = Boolean(command?.active || (command && command.view.phase !== "idle") || (voiceSession && (voiceSession.state.phase !== "idle" || voiceSession.state.error !== null)));
   const requestedPersonRef = selection?.kind === "person" ? selection.ref : "";
   const requestedConversationId = selection?.kind === "conversation" ? selection.ref : "";
   const [thread, setThread] = useState<ThreadState>(EMPTY_THREAD);
@@ -295,6 +300,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
   }, [editingMessageId]);
 
   const hasRouteSelection = Boolean(resolvingSelection || requestedPersonRef || requestedConversationId);
+  const canCompose = hasRouteSelection && !resolvingSelection && thread.canSend;
 
   const loadInbox = useCallback(
     async (options?: { preserveItems?: boolean }) => {
@@ -634,7 +640,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
 
   const sendDraft = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
-    if (!user || sending || !thread.canSend) return;
+    if (!user || sending || !canCompose) return;
     const content = draft;
     const reply = replyingTo;
     const recipientPersonRef = thread.peerPersonRef || requestedPersonRef;
@@ -1347,10 +1353,12 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                   {thread.disconnectedNotice || "You are no longer connected."}
                 </div>
               ) : null}
-                {thread.canSend ? (
-                  <AgentDockPortal enabled visible>
+            </>
+          ) : null}
+                  <AgentDockPortal enabled visible={hasRouteSelection || !agentEngaged}>
                   <form
                     className={styles.composer}
+                    data-direct-message-inbox-composer={!hasRouteSelection || undefined}
                     onSubmit={(event) => void sendDraft(event)}
                   >
                     {replyingTo ? (
@@ -1369,7 +1377,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                       </div>
                     ) : null}
                     <label className="sr-only" htmlFor="direct-message-draft">
-                      Message {selectedLabel}
+                      {hasRouteSelection ? `Message ${selectedLabel}` : "Message"}
                     </label>
                     <textarea
                       id="direct-message-draft"
@@ -1379,9 +1387,9 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                         setComposerError(null);
                         setDraft(event.target.value);
                       }}
-                      placeholder={`Message ${selectedLabel}`}
+                      placeholder={hasRouteSelection ? `Message ${selectedLabel}` : "Message"}
                       maxLength={DIRECT_MESSAGE_MAX_LENGTH}
-                      disabled={sending}
+                      disabled={sending || !canCompose}
                       rows={1}
                       className={styles.composerInput}
                       data-direct-message-composer-input="true"
@@ -1404,7 +1412,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                       }}
                     />
                     <DirectMessageEmojiPicker
-                      disabled={sending}
+                      disabled={sending || !canCompose}
                       onEmojiSelect={(emoji) =>
                         setDraft((current) => `${current}${emoji}`)
                       }
@@ -1421,7 +1429,7 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                       <button
                         type="submit"
                         className={styles.sendButton}
-                        disabled={sending || !draft.trim()}
+                        disabled={sending || !canCompose || !draft.trim()}
                         aria-label="Send message"
                       >
                         {sending ? (
@@ -1441,9 +1449,6 @@ export function DirectMessagesPage({ selection, resolvingSelection = false }: { 
                     ) : null}
                   </form>
                   </AgentDockPortal>
-                ) : null}
-            </>
-          ) : null}
               <AlertDialog
                 open={Boolean(deleteRequest)}
                 onOpenChange={(open) => {
