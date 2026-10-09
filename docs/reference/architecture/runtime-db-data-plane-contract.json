@@ -26,6 +26,7 @@
     "one_kyc_workflows",
     "drive_bulk_share_files",
     "drive_bulk_share_effects",
+    "drive_request_bulk_removals",
     "drive_request_payment_webhook_events",
     "circle_chat_messages",
     "circle_chat_recipients"
@@ -1543,12 +1544,13 @@
         "drive_bulk_share_files",
         "drive_bulk_share_recipients",
         "drive_bulk_share_effects",
-        "drive_bulk_share_notifications"
+        "drive_bulk_share_notifications",
+        "drive_request_bulk_removals"
       ],
-      "primary_access_path": "Vault-owner preview and explicit approval of a frozen completed Drive search; bounded Drive sharing worker creates or reconciles Google permissions for each exact file and verified Trusted recipient. The owner can stop remaining work. Recipients see only confirmed grants through their authenticated Shared with you collection; one generic push is attempted after their grants settle.",
+      "primary_access_path": "Vault-owner preview and approval of a frozen Drive search; bounded workers create and reconcile Google permissions for exact files, then remove app-created direct permissions after the owner confirms Stop access. Recipients see only confirmed grants through their authenticated Shared with you collection.",
       "retention_policy": "An unapproved review has a 24-hour authority lifetime. Approval and progress extend workflow access for seven days independently of the source search. The timestamps fence reads and worker claims; scheduled physical purging of expired bulk-share rows remains required.",
-      "deletion_behavior": "Owner erasure removes the share and cascades to its frozen files, recipients, effects and notifications. Recipient erasure removes that recipient's rows and effects without deleting another owner's other recipients. Deletion of local records does not revoke already created Google permissions; those require separate provider management.",
-      "trust_boundary": "The source search must be complete under the same live owner Drive generation. Explicit owner approval binds the frozen encrypted file manifest, verified recipient identities, revision and review digest. File metadata and recipient identities are sealed under DRIVE_SHARING_KEY_V1; plaintext contains opaque owner/recipient/workflow references, keyed digests, bounded counts, leases, states and timestamps. The worker rechecks current authority, recipient identity, Trusted membership and live file metadata before each grant. Unknown provider outcomes are reconciled by read and never blindly retried. Google per-file notification emails are suppressed, and recipient links are exposed only after confirmed grants.",
+      "deletion_behavior": "Owner erasure removes the share, frozen files, recipients, effects, notifications, and pending removal plans. Recipient erasure pseudonymizes its app ID in owner-held removal plans so recorded Google access can still be managed. Deletion of local records alone does not revoke Google permissions; confirmed Stop queues verified provider removal first.",
+      "trust_boundary": "Owner approval binds the frozen encrypted file manifest, verified recipient identities, revision and review digest. File metadata, recipient identities, successful permission receipts, and removal plans are sealed under DRIVE_SHARING_KEY_V1. Plaintext contains opaque workflow references, bounded counts, leases, states and timestamps. Grant workers recheck payment and current authority; Stop fences new grants. Removal workers delete only permissions with app-created receipts under the original Google issuer, verify absence, and never blindly repeat an uncertain DELETE. Recipient links are exposed only after confirmed grants and hidden on Stop.",
       "plaintext_posture": "encrypted_frozen_file_and_recipient_metadata_with_opaque_effect_and_notification_state",
       "expected_row_growth": "up_to_10000_files_and_100000_file_recipient_effects_per_approved_search"
     },

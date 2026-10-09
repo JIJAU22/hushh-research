@@ -1,19 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
-  TouchEvent as ReactTouchEvent,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
 
-import { AppPageShell } from "@/components/app-ui/app-page-shell";
 import { AgentDockPortal } from "@/components/agent/agent-dock";
+import { AppPageShell } from "@/components/app-ui/app-page-shell";
+import { navigateDirectMessage } from "@/lib/direct-messages/navigate-direct-message";
 import { OneChatBubble } from "@/components/agent/chat-message-styles";
 import { ConnectionPersonAvatar } from "@/components/connections/connection-person-avatar";
 import { DirectMessageEmojiPicker } from "@/components/direct-messages/direct-message-emoji-picker";
@@ -41,7 +41,7 @@ import {
   Loader2,
   MessageCircle,
   Mic,
-  MoreVertical,
+  ChevronDown,
   Pencil,
   PhoneCall,
   Quote,
@@ -63,7 +63,6 @@ import {
   type DirectMessageConversation,
 } from "@/lib/services/direct-messages-service";
 import {
-  buildDirectMessageRoute,
   ROUTES,
 } from "@/lib/navigation/routes";
 import { requestAgentConversationAfterRoute } from "@/lib/agent/agent-voice-settings";
@@ -219,14 +218,11 @@ function threadFromConversation(
   };
 }
 
-export function DirectMessagesPage() {
+export function DirectMessagesPage({ selection, resolvingSelection = false }: { selection?: { kind: "conversation" | "person"; ref: string } | null; resolvingSelection?: boolean } = {}) {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const requestedPersonRef = String(searchParams?.get("person") || "").trim();
-  const requestedConversationId = String(
-    searchParams?.get("conversation") || "",
-  ).trim();
+  const requestedPersonRef = selection?.kind === "person" ? selection.ref : "";
+  const requestedConversationId = selection?.kind === "conversation" ? selection.ref : "";
   const [thread, setThread] = useState<ThreadState>(EMPTY_THREAD);
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [inboxItems, setInboxItems] = useState<DirectMessageConversation[]>([]);
@@ -259,10 +255,7 @@ export function DirectMessagesPage() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const editingInputRef = useRef<HTMLTextAreaElement | null>(null);
   const messageLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const timestampRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const messageTouchStart = useRef<{ x: number; y: number } | null>(null);
   const acknowledgedReadConversations = useRef(new Set<string>());
-  const [showMessageTimes, setShowMessageTimes] = useState(false);
   const [messageSearchOpen, setMessageSearchOpen] = useState(false);
   const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const activeConversationId = thread.conversation?.id ?? null;
@@ -279,18 +272,12 @@ export function DirectMessagesPage() {
   useEffect(() => {
     return () => {
       if (messageLongPressTimer.current) clearTimeout(messageLongPressTimer.current);
-      if (timestampRevealTimer.current) clearTimeout(timestampRevealTimer.current);
     };
   }, []);
 
   useEffect(() => {
-    setShowMessageTimes(false);
     setMessageSearchOpen(false);
     setMessageSearchQuery("");
-    if (timestampRevealTimer.current) {
-      clearTimeout(timestampRevealTimer.current);
-      timestampRevealTimer.current = null;
-    }
   }, [activeConversationId]);
 
   const editingMessageId = editingMessage?.id;
@@ -307,7 +294,7 @@ export function DirectMessagesPage() {
     return () => cancelAnimationFrame(frame);
   }, [editingMessageId]);
 
-  const hasRouteSelection = Boolean(requestedPersonRef || requestedConversationId);
+  const hasRouteSelection = Boolean(resolvingSelection || requestedPersonRef || requestedConversationId);
 
   const loadInbox = useCallback(
     async (options?: { preserveItems?: boolean }) => {
@@ -638,9 +625,7 @@ export function DirectMessagesPage() {
     : inboxItems;
 
   const openConversation = (conversation: DirectMessageConversation) => {
-    router.replace(buildDirectMessageRoute({ conversationId: conversation.id }), {
-      scroll: false,
-    });
+    void navigateDirectMessage(router, { conversationId: conversation.id });
   };
 
   const backToConnections = () => {
@@ -691,14 +676,6 @@ export function DirectMessagesPage() {
         messageId: result.message.id,
         source: "send",
       });
-      // The route becomes conversation-addressed after the first send. Keep
-      // the optimistically rendered, server-returned record visible while the
-      // matching history refresh resolves.
-      loadedRouteKey.current = `conversation:${result.conversation.id}`;
-      router.replace(
-        buildDirectMessageRoute({ conversationId: result.conversation.id }),
-        { scroll: false },
-      );
     } catch {
       setDraft(content);
       setComposerError(
@@ -783,30 +760,6 @@ export function DirectMessagesPage() {
       window.navigator.vibrate?.(8);
       messageLongPressTimer.current = null;
     }, 450);
-  };
-
-  const revealMessageTimes = () => {
-    setShowMessageTimes(true);
-    if (timestampRevealTimer.current) clearTimeout(timestampRevealTimer.current);
-    timestampRevealTimer.current = setTimeout(() => {
-      setShowMessageTimes(false);
-      timestampRevealTimer.current = null;
-    }, 2_500);
-  };
-
-  const handleMessageTouchStart = (event: ReactTouchEvent<HTMLElement>) => {
-    const touch = event.changedTouches[0];
-    if (touch) messageTouchStart.current = { x: touch.clientX, y: touch.clientY };
-  };
-
-  const handleMessageTouchEnd = (event: ReactTouchEvent<HTMLElement>) => {
-    const start = messageTouchStart.current;
-    const touch = event.changedTouches[0];
-    messageTouchStart.current = null;
-    if (!start || !touch) return;
-    const deltaX = start.x - touch.clientX;
-    const deltaY = Math.abs(start.y - touch.clientY);
-    if (deltaX > 48 && deltaX > deltaY * 1.25) revealMessageTimes();
   };
 
   const saveEdit = () => {
@@ -901,22 +854,20 @@ export function DirectMessagesPage() {
   }
 
   return (
-    <AppPageShell width="expanded" fitContent={false}>
+    <AppPageShell width="expanded" fitContent={false} className={styles.shell}>
       <section
         className={styles.page}
         data-one-chat-surface
         data-direct-message-page="true"
         data-chat-open={hasRouteSelection ? "true" : "false"}
-        data-direct-message-composer-docked={
-          hasRouteSelection && thread.canSend ? "true" : undefined
-        }
+
         data-native-route="native-route-direct-messages"
       >
         <aside className={styles.inbox} aria-label="Conversations">
           <header className={styles.inboxHeader}>
             <div>
               <h1>Chats</h1>
-              <p>{inboxItems.length ? `${inboxItems.length} conversations` : "Your conversations"}</p>
+              <p>{inboxItems.length} {inboxItems.length === 1 ? "conversation" : "conversations"}</p>
             </div>
             <button
               type="button"
@@ -1023,7 +974,7 @@ export function DirectMessagesPage() {
           ) : null}
           {hasRouteSelection ? (
             <>
-              <header className={styles.threadHeader}>
+              <header className={styles.threadHeader} data-search-open={messageSearchOpen || undefined}>
                 <div className={styles.threadHeaderContent}>
                   <button
                     type="button"
@@ -1108,7 +1059,6 @@ export function DirectMessagesPage() {
                 className={styles.messageList}
                 ref={messageListRef}
                 data-testid="direct-message-list"
-                data-show-message-times={showMessageTimes ? "true" : undefined}
                 aria-label={`${selectedLabel} message feed`}
               >
                 {loadingThread && messages.length === 0 ? (
@@ -1145,7 +1095,7 @@ export function DirectMessagesPage() {
                     <p>No messages match “{messageSearchQuery.trim()}”.</p>
                   </div>
                 ) : null}
-                {!loadingThread && messages.length === 0 && thread.disconnectedNotice ? (
+                {!resolvingSelection && !loadingThread && messages.length === 0 && thread.disconnectedNotice ? (
                   <div className={styles.emptyThread} role="status">
                     <MessageCircle className="h-7 w-7" aria-hidden="true" />
                     <p>{thread.disconnectedNotice}</p>
@@ -1158,15 +1108,9 @@ export function DirectMessagesPage() {
                   </div>
                 ) : null}
                 {visibleMessages.map((message, index) => {
-                  const nextMessage = visibleMessages[index + 1];
-                  const showPeerAvatar =
-                    !message.senderIsViewer &&
-                    (!nextMessage ||
-                      nextMessage.senderIsViewer ||
-                      isNewMessageDay(nextMessage, message));
 
                   return (
-                    <div key={message.id} className={styles.messageFeedItem}>
+                    <div key={message.id} className={styles.messageFeedItem} data-group-start={index === 0 || visibleMessages[index - 1]?.senderIsViewer !== message.senderIsViewer || isNewMessageDay(message, visibleMessages[index - 1])}>
                       {isNewMessageDay(message, visibleMessages[index - 1]) ? (
                         <div className={styles.messageDateMarker}>
                           <time dateTime={message.createdAt}>
@@ -1188,13 +1132,19 @@ export function DirectMessagesPage() {
                         onPointerUp={clearMessageLongPress}
                         onPointerCancel={clearMessageLongPress}
                         onPointerLeave={clearMessageLongPress}
-                        onTouchStart={handleMessageTouchStart}
-                        onTouchEnd={handleMessageTouchEnd}
                         onClick={(event) => {
                           if ((event.target as HTMLElement).closest("button, textarea")) return;
                           setActiveMessageActions(message.id);
                         }}
                       >
+                        {!message.senderIsViewer ? (
+                          <ConnectionPersonAvatar
+                            label={selectedLabel}
+                            photoUrl={thread.peerPhotoUrl}
+                            size="list"
+                            className={styles.messagePeerAvatar}
+                          />
+                        ) : null}
                         <div
                           className={cn(
                             styles.messageCluster,
@@ -1202,16 +1152,6 @@ export function DirectMessagesPage() {
                             message.senderIsViewer && "flex-row-reverse",
                           )}
                         >
-                          {showPeerAvatar ? (
-                            <ConnectionPersonAvatar
-                              label={selectedLabel}
-                              photoUrl={thread.peerPhotoUrl}
-                              size="list"
-                              className={styles.messageAvatar}
-                            />
-                          ) : !message.senderIsViewer ? (
-                            <span className={styles.messageAvatarSpacer} aria-hidden="true" />
-                          ) : null}
                           <div className={styles.messageContent}>
                             <div className={styles.messageBubbleWrap}>
                               <OneChatBubble
@@ -1325,7 +1265,7 @@ export function DirectMessagesPage() {
                                       aria-label="Message options"
                                       aria-expanded={openMessageMenu === message.id}
                                     >
-                                      <MoreVertical className="h-4 w-4" aria-hidden="true" />
+                                      <ChevronDown className="h-4 w-4" aria-hidden="true" />
                                     </button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent
@@ -1407,12 +1347,8 @@ export function DirectMessagesPage() {
                   {thread.disconnectedNotice || "You are no longer connected."}
                 </div>
               ) : null}
-              <AgentDockPortal
-                enabled={hasRouteSelection}
-                visible={thread.canSend}
-                suppressed={!thread.canSend}
-              >
                 {thread.canSend ? (
+                  <AgentDockPortal enabled visible>
                   <form
                     className={styles.composer}
                     onSubmit={(event) => void sendDraft(event)}
@@ -1504,8 +1440,8 @@ export function DirectMessagesPage() {
                       </p>
                     ) : null}
                   </form>
+                  </AgentDockPortal>
                 ) : null}
-              </AgentDockPortal>
             </>
           ) : null}
               <AlertDialog

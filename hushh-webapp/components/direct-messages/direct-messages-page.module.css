@@ -522,11 +522,8 @@ article[data-message-role="user"] .messageBubble {
 }
 
 .messageTimestamp {
-  display: none;
-}
-
-.messageList[data-show-message-times="true"] .messageTimestamp {
   display: inline;
+  font-variant-numeric: tabular-nums;
 }
 
 .messageDeliveryState {
@@ -1047,4 +1044,109 @@ article[data-message-role="user"] .messageActionError {
     max-height: min(8rem, 30svh);
     padding-block: 0.625rem;
   }
+}
+
+/* The earlier Chats visual language uses the shared app tokens and chrome.
+   Both pane headers share one track, while the transcript and composer keep
+   space above the retained shared composer and navigation. */
+.shell[data-app-shell-width] {
+  max-width: var(--app-shell-expanded, 96rem);
+  padding-inline: var(--page-inline-gutter-standard, 1rem);
+}
+.page, .page[data-chat-open="true"] {
+  height: calc(100dvh - var(--app-top-content-offset, 6rem) - var(--app-safe-area-top-effective, 0px) - var(--app-scroll-bottom-pad, 8rem));
+  max-height: none;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  grid-template-columns: minmax(18rem, 0.8fr) minmax(0, 1.45fr);
+}
+.inboxHeader, .threadHeader, .threadHeaderContent {
+  height: 6.5rem;
+  min-height: 6.5rem;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.inboxHeader, .threadHeaderContent { padding: 1rem; }
+.inboxHeader h1 { font-size: 2.5rem; line-height: 1.15; font-weight: 700; }
+.inboxHeader p { font-size: 1rem; }
+.threadTitle h2 { font-size: 1.375rem; line-height: 1.3; font-weight: 650; }
+.threadAvatar { width: 2.75rem; height: 2.75rem; }
+.threadIdentity { flex: 1; overflow: hidden; gap: 0.75rem; }
+.threadHeaderActions { flex-shrink: 0; gap: 0.5rem; }
+.headerAction, .backButton, .refreshButton { width: 2.75rem; min-width: 2.75rem; height: 2.75rem; }
+.conversationList { flex: 1; }
+.conversationRow { min-height: 4.5rem; border-radius: 999px; gap: 0.75rem; padding: 0.625rem; }
+.conversationAvatar { width: 2.75rem; height: 2.75rem; }
+.conversationName { font-size: 1rem; font-weight: 600; }
+.conversationPreview, .conversationMeta { font-size: 0.9375rem; }
+.conversationMeta { align-self: center; }
+.messageList { width: 100%; flex: 1; margin-inline: 0; background-color: var(--one-chat-canvas); }
+.composer {
+  flex: 0 0 auto;
+  width: calc(100% - 2rem);
+  margin: 0.5rem 1rem;
+  min-height: 3.5rem;
+  border-radius: 999px;
+  background: var(--one-chat-raised);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.06);
+}
+@media (max-width: 767px) {
+  .shell[data-app-shell-width] { padding-inline: 0; }
+  .page, .page[data-chat-open="true"] { grid-template-columns: minmax(0, 1fr); }
+  .page[data-chat-open="true"] .inbox { display: none; }
+  .page:not([data-chat-open="true"]) .thread { display: none; }
+  .inboxHeader, .threadHeader, .threadHeaderContent { min-height: 4.5rem; height: 4.5rem; }
+  .inboxHeader, .threadHeaderContent { padding: 0.75rem; }
+  .inboxHeader h1 { font-size: 1.875rem; }
+  .inboxHeader p { font-size: 0.8125rem; }
+  .threadTitle h2 { font-size: 1.0625rem; }
+  .threadHeaderContent { gap: 0.375rem; }
+  .threadIdentity { gap: 0.5rem; }
+  .threadAvatar { width: 2.25rem; height: 2.25rem; }
+  .threadHeaderActions { gap: 0.125rem; }
+  .composer { width: calc(100% - 1rem); margin-inline: 0.5rem; }
+}
+@layer base {
+  .shell[data-app-shell-width] .page .inboxHeader h1 { font-size: 2.5rem !important; line-height: 1.15 !important; font-weight: 700 !important; }
+  .shell[data-app-shell-width] .page .threadTitle h2 { font-size: 1.375rem !important; line-height: 1.3 !important; font-weight: 650 !important; }
+  @media (max-width: 767px) {
+    .shell[data-app-shell-width] .page .inboxHeader h1 { font-size: 1.875rem !important; }
+    .shell[data-app-shell-width] .page .threadTitle h2 { font-size: 1.0625rem !important; }
+  }
+}
+
+.messagePeerAvatar { width: 1.875rem; height: 1.875rem; flex-shrink: 0; }
+.replyPreview p { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .messageActions, article[data-message-role="user"] .messageActions {
+    top: 0; right: 0; left: auto; transform: translateY(-70%);
+  }
+}
+
+/* Project into the retained shared bar: its surface and column own the pill. */
+.composer {
+  width: 100%; margin: 0; border-radius: 0; background: transparent;
+  box-shadow: none; padding: 0.375rem 0.5rem 0.375rem 1rem;
+}
+.composerInput { max-height: min(8rem, 25dvh); }
+.composerReplyPreview { margin-top: 0; }
+@media (max-width: 767px) {
+  .composer { width: 100%; margin: 0; padding-left: 0.75rem; }
+  .composerActions { flex-shrink: 0; }
+  .voiceButton, .sendButton { width: 2.75rem; height: 2.75rem; }
+}
+
+@media (max-width: 767px) {
+  .threadHeader[data-search-open="true"] .threadIdentity { display: none; }
+  .threadHeader[data-search-open="true"] .threadHeaderActions { flex: 1; }
+  .threadHeader[data-search-open="true"] .threadSearchField {
+    width: auto;
+    min-width: 0;
+    flex: 1;
+  }
+}
+
+:global(html.kb-open:not(.kb-resizes)) .page:not([data-chat-open="true"]) {
+  height: calc(100dvh - var(--app-top-content-offset, 6rem) - var(--app-safe-area-top-effective, 0px) - max(var(--app-scroll-bottom-pad, 8rem), calc(var(--kb-height, 0px) + 1rem)));
 }
