@@ -33,6 +33,9 @@ type AgentPkmReviewPanelProps = {
   saveLabel?: string;
   /** Inline business review already owns its identity and consent framing. */
   compact?: boolean;
+  /** A feature can compose one consent list while retaining this action shell. */
+  reviewContent?: ReactNode;
+  showDismissAction?: boolean;
 };
 
 type ReviewGroup = { destination: string; cards: AgentPkmPreviewCard[] };
@@ -92,6 +95,8 @@ export function AgentPkmReviewPanel({
   renderCardDetails,
   saveLabel,
   compact = false,
+  reviewContent,
+  showDismissAction = true,
 }: AgentPkmReviewPanelProps) {
   const panelId = useId();
   const reviewableCards = cards.filter((card) => !isReservedPkmCard(card));
@@ -109,11 +114,11 @@ export function AgentPkmReviewPanel({
   return (
     <div
       className={cn(
-        compact ? "space-y-4 text-sm" : "rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm",
+        compact ? "flex flex-col gap-4 text-sm" : "rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm",
         className
       )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className={compact ? "contents" : "flex flex-wrap items-start justify-between gap-3"}>
         <div className="flex min-w-0 gap-2">
           {!compact && <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
             <Brain className="h-4 w-4" />
@@ -125,7 +130,7 @@ export function AgentPkmReviewPanel({
             </p>}
           </div>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className={compact ? "order-3 flex justify-end gap-2" : "flex shrink-0 gap-2"}>
           {onEdit ? (
             <Button
               type="button"
@@ -139,7 +144,7 @@ export function AgentPkmReviewPanel({
               Edit
             </Button>
           ) : null}
-          <Button
+          {showDismissAction && <Button
             type="button"
             variant="outline"
             size="sm"
@@ -149,7 +154,7 @@ export function AgentPkmReviewPanel({
           >
             <X className="h-3.5 w-3.5" />
             Skip
-          </Button>
+          </Button>}
           <Button
             type="button"
             size="sm"
@@ -166,8 +171,8 @@ export function AgentPkmReviewPanel({
         </div>
       </div>
 
-      <div className={compact ? "space-y-4" : "mt-3 max-h-96 space-y-3 overflow-y-auto rounded-md border border-border/60 bg-background p-2 pr-1"} data-testid="agent-pkm-review-list">
-        {groups.map((group) => {
+      <div className={compact ? "order-2 space-y-4" : "mt-3 max-h-96 space-y-3 overflow-y-auto rounded-md border border-border/60 bg-background p-2 pr-1"} data-testid="agent-pkm-review-list">
+        {reviewContent ?? groups.map((group) => {
           const groupIds = group.cards.map((card) => card.card_id);
           const groupSelected = group.cards.filter(isSelected).length;
           return (

@@ -14,7 +14,7 @@ import { createAgentPkmCaptureGuard } from "@/lib/agent/agent-pkm-capture-runtim
 import { connectorMemorySharingImpact, prepareConnectorMemoryReview } from "@/lib/agent/connector-memory-review";
 import { attachBusinessOrigin, buildSyntheticBusinessPreview, BusinessOriginValidationError, businessCandidateSnapshot, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview, type BusinessCandidate, type BusinessReviewJob } from "@/lib/agent/business-profile-review";
 import type { AgentPkmPreviewCard } from "@/lib/agent/agent-pkm-memory";
-import { businessReviewFields, initialBusinessFieldSelection, selectBusinessReviewFields, type BusinessFieldSelection } from "@/lib/agent/business-profile-fields";
+import { businessReviewFields, businessReviewItems, initialBusinessFieldSelection, selectBusinessReviewFields, type BusinessFieldSelection, type BusinessReviewItem } from "@/lib/agent/business-profile-fields";
 
 type Props = {
   ownerId: string | null; vaultKey: string | null; vaultOwnerToken: string | null;
@@ -232,7 +232,8 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     const selected = selectBusinessReviewFields(card, review.fields?.[card.card_id] || []);
     return selected ? [selected] : [];
   }) || [];
-  const fieldCount = chosen.reduce((count, card) => count + businessReviewFields(card).length, 0);
+  const fieldCount = businessReviewItems(chosen).length;
+  const reviewItems = review ? businessReviewItems(review.cards) : [];
   const sharingCount = connectorMemorySharingImpact(chosen);
   const save = async (sharingImpactAcknowledged = false) => {
     if (!review || review.phase !== "review" || busy.current || !chosen.length) return;
@@ -319,6 +320,30 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
       [draft.state, draft.zip].filter(Boolean).join(" ")].filter(Boolean).join(", "),
     website: review.website.replace(/^https?:\/\//, "").replace(/\/$/, ""),
   };
+  const renderReviewItem = (item: BusinessReviewItem) => {
+    const selectedCount = item.fields.filter(field => review.selected.includes(field.cardId) && review.fields?.[field.cardId]?.includes(field.fieldId)).length;
+    const mixed = selectedCount > 0 && selectedCount < item.fields.length;
+    return <label key={item.id} className="flex min-h-11 cursor-pointer items-start gap-3 py-3">
+      <input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-[var(--app-accent)]"
+        checked={selectedCount === item.fields.length} aria-checked={mixed ? "mixed" : selectedCount === item.fields.length}
+        ref={node => { if (node) node.indeterminate = mixed; }}
+        disabled={pending || Boolean(review.job)} aria-label={`Save ${item.label.toLowerCase()}`}
+        onChange={event => {
+          if (review.job || pending) return;
+          const fields = { ...review.fields };
+          for (const field of item.fields) {
+            const next = new Set(fields[field.cardId] || []);
+            if (event.target.checked) next.add(field.fieldId); else next.delete(field.fieldId);
+            fields[field.cardId] = [...next];
+          }
+          update({ ...review, fields, selected: review.cards.filter(item => fields[item.card_id]?.length).map(item => item.card_id) });
+        }} />
+      <span className="min-w-0 flex-1"><span className="block text-xs text-muted-foreground">{item.label}</span>
+        <span className="block whitespace-pre-wrap break-words text-sm leading-6 text-foreground [overflow-wrap:anywhere]">{item.text}</span>
+        {new Set(reviewItems.map(detail => detail.destination)).size > 1 && <span className="block text-xs text-muted-foreground">{item.destination}</span>}
+      </span>
+    </label>;
+  };
   const card = <section aria-label="Is this your business?"
     className="min-w-0 space-y-[var(--app-form-section-gap)]">
     {!open && <Button variant="muted" size="standard" onClick={() => setOpen(true)}>Review business details</Button>}
@@ -359,25 +384,21 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
         {editing && !review.job && <Button variant="link" size="standard" disabled={pending} onClick={() => void refresh()}>Refresh listing</Button>}
         {pending && <p role="status" className="text-sm">{review.phase === "preparing" ? "Preparing details for review…" : "Saving approved details…"}</p>}
         {(review.phase === "review" || review.phase === "saving") && <AgentPkmReviewPanel
-          cards={review.cards} selectedCardIds={new Set(chosen.map(card => card.card_id))} saving={pending} compact className="[&_button]:min-h-11"
-          saveLabel={`Save ${fieldCount} ${fieldCount === 1 ? "field" : "fields"}`}
-          renderCardDetails={card => <fieldset disabled={pending || Boolean(review.job)} className="min-w-0 space-y-1">
-            <legend className="ui-text-helper">Choose details</legend>
-            {businessReviewFields(card).map(field => <label key={field.id}
-              className="flex min-h-11 cursor-pointer items-start gap-2 py-2">
-              <input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-[var(--app-accent)]"
-                aria-label={`Save ${field.label}`} checked={review.selected.includes(card.card_id) && Boolean(review.fields?.[card.card_id]?.includes(field.id))}
-                onChange={event => {
-                  const fields = review.fields?.[card.card_id] || [];
-                  const next = event.target.checked ? [...new Set([...fields, field.id])] : fields.filter(id => id !== field.id);
-                  update({ ...review, fields: { ...review.fields, [card.card_id]: next },
-                    selected: next.length ? [...new Set([...review.selected, card.card_id])] : review.selected.filter(id => id !== card.card_id) });
-                }} />
-              <span className="min-w-0"><span className="ui-text-helper capitalize">{field.label}</span>
-                <span className="block whitespace-pre-wrap break-words text-sm [overflow-wrap:anywhere]">{typeof field.value === "string" ? field.value : JSON.stringify(field.value)}</span></span>
-            </label>)}
-            <HelperText>Unchecked details stay unchanged. Lists save as shown.</HelperText>
-          </fieldset>}
+          cards={review.cards} selectedCardIds={new Set(chosen.map(card => card.card_id))} saving={pending} compact showDismissAction={false} className="[&_button]:min-h-11"
+          saveLabel={`Save ${fieldCount} ${fieldCount === 1 ? "detail" : "details"}`}
+          reviewContent={<div className="min-w-0">
+            <fieldset disabled={pending || Boolean(review.job)}>
+              <legend className="sr-only">Choose business details</legend>
+              <div className="divide-y divide-[color:var(--app-separator)]">{reviewItems.filter(item => !item.recordDetail).map(renderReviewItem)}</div>
+              {reviewItems.some(item => item.recordDetail) && <details className="mt-3">
+                <summary className="min-h-11 cursor-pointer py-3 text-xs text-muted-foreground">Record details · {reviewItems.filter(item => item.recordDetail && item.fields.some(field => review.selected.includes(field.cardId) && review.fields?.[field.cardId]?.includes(field.fieldId))).length} selected</summary>
+                {reviewItems.filter(item => item.recordDetail).map(renderReviewItem)}
+              </details>}
+            </fieldset>
+            <HelperText>Unchecked details won’t be added or changed.</HelperText>
+            {review.cards.some(card => card.validation_hints?.includes("possible_duplicate")) && <HelperText>Some details may already be in your memory.</HelperText>}
+            {sharingCount > 0 && <HelperText>Selected details affect memory shared with {sharingCount} {sharingCount === 1 ? "person" : "people"}.</HelperText>}
+          </div>}
           onToggleCard={review.job ? undefined : id => {
             const selected = review.selected.includes(id);
             update({ ...review, selected: selected ? review.selected.filter(value => value !== id) : [...review.selected, id],
@@ -388,8 +409,10 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
           primary={<Button size="standard" loading={review.phase === "preparing"}
             disabled={pending || !review.name.trim()}
             onClick={() => void prepare()}>Review details</Button>}
-          secondary={<Button variant="muted" size="standard" disabled={pending} onClick={() => void defer("later")}>Later</Button>}
-          tertiary={<Button variant="link" size="standard" disabled={pending} onClick={() => void defer("not_me")}>Not my business</Button>} />
+          secondary={<div className="flex items-center gap-2">
+            <Button variant="link" size="standard" disabled={pending} onClick={() => void defer("not_me")}>Not my business</Button>
+            <Button variant="muted" size="standard" disabled={pending} onClick={() => void defer("later")}>Later</Button>
+          </div>} />
           : <div className="flex flex-wrap justify-end gap-2">
             {!review.job && <Button variant="link" size="standard" disabled={pending} onClick={() => void defer("not_me")}>Not my business</Button>}
             <Button variant="link" size="standard" disabled={pending} onClick={() => void defer("later")}>Later</Button>

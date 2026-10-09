@@ -35,6 +35,27 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); publishValidatedAuthSessionOwner(null); });
 describe("post-onboarding business suggestion", () => {
+  it("reviews repeated facts once and deselects all backing fields without leaking record metadata", async () => {
+    const repeated = ["a", "b"].map(id => ({ ...cards[0]!, card_id: id,
+      candidate_payload: { businesses: { entities: { [id]: { kind: "profile_fact", summary: "state: TX", observations: ["state: TX"], status: "active" } } } } }));
+    mocks.syntheticPreview.mockReturnValue(repeated);
+    render(<BusinessProfileSuggestion {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
+    const state = await screen.findByRole("checkbox", { name: "Save state", exact: true });
+    expect(screen.getAllByText("TX", { exact: true })).toHaveLength(1);
+    expect(screen.queryByText("profile_fact", { exact: true })).toBeNull();
+    fireEvent.click(screen.getByText(/Record details ·/));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Save record type", exact: true }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Save record status", exact: true }));
+    fireEvent.click(state);
+    expect(screen.getByTestId("agent-pkm-review-save")).toBeDisabled();
+    fireEvent.click(state);
+    fireEvent.click(screen.getByTestId("agent-pkm-review-save"));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+    const saved = mocks.save.mock.calls[0]![0].job.cards;
+    for (let index = 0; index < saved.length; index++) expect(saved[index].candidate_payload.businesses.entities[["a", "b"][index]!])
+      .toEqual({ summary: "state: TX", observations: ["state: TX"] });
+  });
   it("keeps the overview focused and expands selectable details without repeated framing", async () => {
     mocks.get.mockResolvedValue({ candidates: [{ ...candidate, draft: { ...candidate.draft,
       category: "Software", formatted_address: "Austin, TX 78701", zip: "78701", state: "TX", phone: "+15555550100" } }] });
@@ -63,10 +84,10 @@ describe("post-onboarding business suggestion", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
     const phone = await screen.findByRole("checkbox", { name: "Save phone", exact: true });
     fireEvent.click(phone);
-    expect(screen.getByTestId("agent-pkm-review-save")).toHaveTextContent("Save 1 field");
-    fireEvent.click(screen.getByRole("checkbox", { name: "Save name", exact: true }));
+    expect(screen.getByTestId("agent-pkm-review-save")).toHaveTextContent("Save 1 detail");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Save business name", exact: true }));
     expect(screen.getByTestId("agent-pkm-review-save")).toBeDisabled();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Save name", exact: true }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Save business name", exact: true }));
     fireEvent.click(screen.getByTestId("agent-pkm-review-save"));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
     const job = mocks.save.mock.calls[0]![0].job;

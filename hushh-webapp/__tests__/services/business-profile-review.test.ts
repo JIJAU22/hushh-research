@@ -12,7 +12,7 @@ vi.mock("@/lib/agent/connector-memory-review", () => ({ saveConnectorMemoryRevie
 vi.mock("@/lib/services/personal-knowledge-model-service", () => ({ PersonalKnowledgeModelService: { lookupMutationCommits: mocks.lookup } }));
 vi.mock("@/lib/pkm/pkm-save-job", () => ({ withPkmSaveJobLock: async (_id: string, task: () => unknown) => task() }));
 import { assertBusinessReviewFresh, attachBusinessOrigin, businessDraftMessage, createBusinessReviewJob, decideBusinessReview, loadBusinessReview, saveBusinessReview } from "@/lib/agent/business-profile-review";
-import { businessReviewFields, selectBusinessReviewFields } from "@/lib/agent/business-profile-fields";
+import { businessReviewFields, businessReviewItems, selectBusinessReviewFields } from "@/lib/agent/business-profile-fields";
 
 export const candidate: BusinessCandidate = { businessUid: "urn:hushh:business:uat:hushh.ai:v1", synthetic: true,
   sourceIdentity: { source: "uat_fixture", sourceKey: "hushh.ai:v1" }, matchEvidence: [{ kind: "verified_email_domain", domain: "hushh.ai" }],
@@ -35,6 +35,20 @@ const args = (cards = [card()]) => ({ job: createBusinessReviewJob("owner", cand
   isCurrent: () => true, sharingImpactAcknowledged: false, assertListingFresh: vi.fn(async () => undefined) });
 
 describe("business profile reviewed-memory boundary", () => {
+  it("groups exact readable repetitions while preserving every raw consent reference", () => {
+    const repeated = { ...card(), candidate_payload: { businesses: { entities: { mem_one: {
+      kind: "profile_fact", summary: "state: TX", observations: ["state: TX"], status: "active",
+    } } } } };
+    const items = businessReviewItems([repeated]);
+    const state = items.find(item => item.label === "State")!;
+    expect(state.text).toBe("TX");
+    expect(state.fields).toHaveLength(2);
+    const selected = selectBusinessReviewFields(repeated, state.fields.map(field => field.fieldId))!;
+    expect(selected.candidate_payload).toEqual({ businesses: { entities: { mem_one: { summary: "state: TX", observations: ["state: TX"] } } } });
+    expect(items.filter(item => item.recordDetail).map(item => item.text)).toEqual(["Profile detail", "Active"]);
+    const distinct = { ...card(), candidate_payload: { businesses: { entities: { mem_one: { summary: "state: TX", observations: ["state: tx"], city: "TX" } } } } };
+    expect(businessReviewItems([distinct])).toHaveLength(3);
+  });
   it("freezes approved nested fields without excluded payloads or summaries and replays them exactly", async () => {
     const original = { ...card(), source_text: "Secret phone +15555550100", context_quotes: ["+15555550100"],
       structure_decision: { target_domain: "professional", explanation: "The phone is +15555550100", summary_projection: { phone: "+15555550100" } },
