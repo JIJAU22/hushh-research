@@ -201,8 +201,10 @@ export function CalendarAgentPage({
       status: "connected",
       access_level: accessLevel ?? current?.access_level ?? null,
       scope_csv: current?.scope_csv ?? "",
+      calendar_list_access: current?.calendar_list_access,
     }));
     morphyToast.success("Google Calendar connected.");
+    void refresh().catch(() => null);
   };
 
   /** Expiry or an explicit cancel: re-read status before saying anything. */
@@ -554,6 +556,16 @@ export function CalendarAgentPage({
 
                   {/* Actions */}
                   <div className="flex flex-col items-center gap-2.5 w-full pt-1">
+                    {connected && status?.calendar_list_access === false && !Capacitor.isNativePlatform() ? (
+                      <button
+                        type="button"
+                        className="min-h-11 text-sm font-medium text-[color:var(--app-tint)] underline-offset-4 hover:underline"
+                        disabled={busy}
+                        onClick={() => void connect("read")}
+                      >
+                        Allow One to find subscribed calendars
+                      </button>
+                    ) : null}
                     <AskOneButton
                       disabled={busy}
                       showIcon={false}

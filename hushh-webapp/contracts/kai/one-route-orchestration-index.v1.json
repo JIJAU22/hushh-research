@@ -1443,6 +1443,7 @@
       "canonical_screen": "one_agents",
       "voice_contract_file": "app/one/page.voice-action-contract.json",
       "action_ids": [
+        "calendar.read",
         "consent.chat.turn",
         "location.chat.turn",
         "route.one_agents",
@@ -1471,7 +1472,7 @@
       "route_pattern": "/one/calendar",
       "page_file": "app/one/calendar/page.tsx",
       "route_mode": "standard",
-      "orchestration_class": "context_only",
+      "orchestration_class": "interactive",
       "instruction_id": "route.one.calendar",
       "context_policy": "minimal",
       "voice_playbook": {
@@ -1500,14 +1501,16 @@
         "allowed_families": []
       },
       "canonical_screen": "calendar",
-      "voice_contract_file": null,
-      "action_ids": [],
-      "action_coverage": "none",
+      "voice_contract_file": "app/one/calendar/page.voice-action-contract.json",
+      "action_ids": [
+        "calendar.read"
+      ],
+      "action_coverage": "inherited",
       "delegation_policy": {
         "mode": "no_delegation",
         "allowed_delegate_agent_ids": []
       },
-      "trust_boundary": "none",
+      "trust_boundary": "vault",
       "native_surface_id": null
     },
     {
