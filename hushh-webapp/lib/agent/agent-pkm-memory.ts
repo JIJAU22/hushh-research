@@ -25,6 +25,7 @@ import {
   type PkmReconciliationCandidate,
 } from "@/lib/agent/agent-pkm-context-store";
 import type { OwnerStyleSettings } from "@/lib/agent/owner-style-settings";
+import type { ReceiptCanonicalIndex } from "@/lib/profile/gmail-receipt-memory-index";
 import { isDegradedPreviewCard } from "@/lib/profile/pkm-agent-lab-preview";
 import { humanizeMemorySegment } from "@/lib/pkm/humanize-segment";
 import { toPlainMemoryText, toPlainMemoryValue } from "@/lib/pkm/memory-plain-text";
@@ -1028,6 +1029,17 @@ export async function loadAgentPkmContext(params: {
     source: "metadata",
     mode: "summary",
   };
+}
+
+/**
+ * The owner's saved receipt index for one typed chat turn, or null. Read from
+ * the same unlocked working set as `peekAgentPkmContext`, so it costs no extra
+ * decrypt and is voided by the same domain-change event as a new save.
+ */
+export function peekReceiptMemoryIndex(params: {
+  userId: string;
+}): ReceiptCanonicalIndex | null {
+  return AgentPkmContextStore.peekReceiptIndex(params.userId);
 }
 
 export function peekAgentPkmContext(params: {

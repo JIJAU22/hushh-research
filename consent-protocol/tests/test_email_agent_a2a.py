@@ -1,5 +1,7 @@
 """EmailAgentA2A adapts the read-only EmailChatService.handle_turn dict into the
-generic SpecialistTurnResult envelope. The email agent emits no client directive."""
+generic SpecialistTurnResult envelope. The email agent issues no client directive
+of its own: its one directive is the receipts "not ready" proposal, which One
+validates and parks through the action gateway."""
 
 import time
 from dataclasses import replace
@@ -150,3 +152,47 @@ def test_get_email_a2a_is_singleton():
     from hushh_mcp.adk_bridge.email_agent import get_email_a2a
 
     assert get_email_a2a() is get_email_a2a()
+
+
+async def test_receipt_memory_and_cursor_reach_the_service_and_the_proposal_is_mapped():
+    class _ReceiptsService(_FakeEmailService):
+        async def handle_delegated_turn(self, **kwargs):
+            await kwargs["require_access"]()
+            self.calls.append(kwargs)
+            return {
+                "conversationId": "c1",
+                "response": "Your receipt memory is not ready yet. Sync and save your receipts in Mail.",
+                "isComplete": True,
+                "stateChanged": False,
+                "structured": {
+                    "connector": "mail",
+                    "status": "input_required",
+                    "metadata_only": True,
+                },
+                "receipt_cursor": {"action": "clear", "value": None},
+                "directive": {
+                    "type": "receipts_open_proposal",
+                    "actionId": "route.profile_receipts",
+                    "slots": {},
+                },
+            }
+
+    service = _ReceiptsService()
+    result = await EmailAgentA2A(service=service).handle(
+        _task(message="show my receipts", receipt_memory={"schema": "x"}, receipt_cursor="cursor")
+    )
+    assert service.calls[0]["receipt_memory"] == {"schema": "x"}
+    assert service.calls[0]["receipt_cursor"] == "cursor"
+    assert result.structured.status == "input_required"
+    assert result.directive.kind == "action"
+    assert result.directive.payload["actionId"] == "route.profile_receipts"
+    assert result.continuation == {"action": "clear", "value": None}
+    assert result.state_changed is False
+
+
+async def test_a_plain_read_carries_no_receipt_context_and_no_continuation():
+    service = _FakeEmailService()
+    result = await EmailAgentA2A(service=service).handle(_task())
+    assert service.calls[0]["receipt_memory"] is None
+    assert service.calls[0]["receipt_cursor"] is None
+    assert result.continuation is None

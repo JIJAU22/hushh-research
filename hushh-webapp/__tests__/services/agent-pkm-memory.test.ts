@@ -39,6 +39,7 @@ import {
   getPkmConfirmationCards,
   loadAgentPkmContext,
   peekAgentPkmContext,
+  peekReceiptMemoryIndex,
   previewAgentPkmMemory,
   warmAgentPkmContext,
   type AgentPkmPreviewCard,
@@ -786,6 +787,67 @@ describe("agent PKM memory helpers", () => {
     expect(context.text).not.toContain("runtime_secrets");
     expect(context.text).not.toContain("gemini_api_key");
     expect(context.text).not.toContain("must-not-reach-agent-context");
+  });
+
+  it("keeps the saved receipt index out of One's packet and offers it only as typed turn data", async () => {
+    const transaction = {
+      ref: `txn_${"a".repeat(24)}`,
+      merchant: "Supabase",
+      amount: 124.01,
+      currency: "USD",
+      category: "Cloud & Infra",
+      status: "overdue",
+      transaction_date: "2026-10-04",
+      identifiers: [{ kind: "invoice", value: "ZSUQHV-00028" }],
+      detail: null,
+    };
+    const index = {
+      schema: "receipt_canonical_index.v1",
+      generated_at: "2026-10-09T10:00:00Z",
+      total_transactions: 1,
+      truncated: false,
+      transactions: [transaction],
+    };
+    const shoppingMetadata = {
+      ...METADATA,
+      domains: [...METADATA.domains, { ...METADATA.domains[0], key: "shopping", displayName: "Shopping" }],
+    };
+    pkmGetMetadataMock.mockResolvedValue(shoppingMetadata);
+    pkmBlob = {
+      preferences: { writing: { default_style: "concise summaries" } },
+      shopping: { wishlists: { first: "noise-cancelling headphones" }, receipts_memory: { _canonical_index: index } },
+    };
+
+    const context = await loadAgentPkmContext({
+      userId: "user_1",
+      vaultOwnerToken: "vault_token",
+      vaultKey: "vault_key",
+      message: "show my receipts",
+    });
+    // The rest of the shopping domain still reaches One; the transaction index never does.
+    expect(context.text).toContain("noise-cancelling headphones");
+    for (const leaked of ["Supabase", "ZSUQHV", "124.01", "txn_aaaa"]) {
+      expect(context.text).not.toContain(leaked);
+    }
+    expect(peekReceiptMemoryIndex({ userId: "user_1" })).toEqual(index);
+    expect(peekReceiptMemoryIndex({ userId: "someone_else" })).toBeNull();
+
+    // Negative control: an index carrying a field the reader's closed schema forbids is not offered.
+    clearAgentPkmContext();
+    pkmBlob = {
+      shopping: {
+        receipts_memory: {
+          _canonical_index: { ...index, transactions: [{ ...transaction, subject: "Invoice from Supabase" }] },
+        },
+      },
+    };
+    await loadAgentPkmContext({
+      userId: "user_1",
+      vaultOwnerToken: "vault_token",
+      vaultKey: "vault_key",
+      message: "show my receipts",
+    });
+    expect(peekReceiptMemoryIndex({ userId: "user_1" })).toBeNull();
   });
 
   it("sends communication preferences as standing style, never inside the memory packet", async () => {

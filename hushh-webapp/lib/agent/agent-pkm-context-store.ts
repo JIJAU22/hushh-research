@@ -8,6 +8,10 @@ import { shouldSkipPkmAgentContextKey } from "@/lib/pkm/pkm-memory-cards";
 import { PkmDomainResourceService } from "@/lib/pkm/pkm-domain-resource";
 import { PKM_QUARANTINE_SEGMENT_ID } from "@/lib/personal-knowledge-model/upgrade-registry";
 import { reservedEntryFor } from "@/lib/pkm/reserved-branches";
+import {
+  readReceiptCanonicalIndex,
+  type ReceiptCanonicalIndex,
+} from "@/lib/profile/gmail-receipt-memory-index";
 import { maskSecretSpans } from "@/lib/pkm/secret-span-guard";
 import {
   OWNER_STYLE_BRANCH,
@@ -64,6 +68,13 @@ type AgentPkmWorkingSet = {
   inventory: PkmInventory;
   /** The owner's Settings style choices, sent apart from the packet. */
   ownerStyle: OwnerStyleSettings;
+  /**
+   * The owner's saved receipt index (`shopping.receipts_memory`). It is kept
+   * apart from the packet on purpose: it is a leading-underscore branch the
+   * inventory skips, and it travels to the server only as the typed field the
+   * Email receipts read consumes, never as text One reads.
+   */
+  receiptIndex: ReceiptCanonicalIndex | null;
   loadedAt: number;
   metadataUpdatedAt: string | null;
 };
@@ -557,6 +568,16 @@ export class AgentPkmContextStore {
     invalidateWorkingSet(userId, "invalidated");
   }
 
+  /**
+   * The saved receipt index from the unlocked, memory-only working set, or
+   * null. Never decrypts or fetches: a turn that has no loaded working set
+   * simply carries no index, and a receipts question then answers "not ready".
+   */
+  static peekReceiptIndex(userId: string): ReceiptCanonicalIndex | null {
+    ensurePkmChangeListener();
+    return workingSets.get(userId)?.receiptIndex ?? null;
+  }
+
   static peek(params: { userId: string; message?: string; maxChars?: number }): AgentPkmWorkingContext | null {
     ensurePkmChangeListener();
     const cached = workingSets.get(params.userId);
@@ -720,6 +741,7 @@ export class AgentPkmContextStore {
         ownerStyle: ownerStyleFromBranch(
           identity && typeof identity === "object" ? (identity as Record<string, unknown>)[OWNER_STYLE_BRANCH] : null,
         ),
+        receiptIndex: readReceiptCanonicalIndex(blob.shopping),
         loadedAt: Date.now(),
         metadataUpdatedAt,
       };
