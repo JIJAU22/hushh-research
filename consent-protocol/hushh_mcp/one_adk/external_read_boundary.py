@@ -47,6 +47,10 @@ _DRIVE_CONNECTION_ANSWERS = {
 MAIL_TOOL = "ask_email_agent"
 READ_TOOLS = {
     MAIL_TOOL: "gmail_chat_reads",
+    # Resolves bounded Gmail metadata into an owner-confirmation card. It is
+    # still a connector read, so no later tool in this model turn can act on
+    # the selected email text.
+    "propose_gmail_todo": "gmail_chat_reads",
     "ask_documents_agent": "google_drive_chat_reads",
     "read_selected_drive_search_result": "google_drive_chat_reads",
     "inspect_selected_drive_files": "google_drive_chat_reads",

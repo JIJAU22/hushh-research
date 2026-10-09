@@ -822,6 +822,11 @@ const SERVER_TOOL_PRESENTATION: Record<
     message: "Preparing a mailbox change for your confirmation.",
     activity: "Preparing a mailbox change",
   },
+  propose_gmail_todo: {
+    label: "Gmail",
+    message: "Preparing email follow-ups for your confirmation.",
+    activity: "Preparing follow-ups",
+  },
   propose_drive_share: {
     label: "Google Drive",
     message: "Preparing a Drive share for your confirmation.",
