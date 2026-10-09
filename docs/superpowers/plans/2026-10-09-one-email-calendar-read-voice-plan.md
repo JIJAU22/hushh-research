@@ -1,6 +1,6 @@
 # One Email and Calendar Read/Voice — Implementation Plan
 
-Status: first release merged as PR #7678 and deployed to UAT; second audit implementation complete; core/CI and UAT release verification in progress. Date: 2026-10-09. The current-code [Email graph](../../reference/one/one-email-knowledge-graph.md) and [Calendar graph](../../reference/one/one-calendar-knowledge-graph.md) hold the evidence and disposition. Preserve the [owner-approved Gmail contract](../../reference/one/gmail-owner-approved-email.md).
+Status: first release merged as PR #7678 and deployed to UAT; second audit implementation complete. [PR #7686](https://github.com/hushh-labs/hushh-research/pull/7686) records current CI, merge and exact-SHA UAT release evidence. Date: 2026-10-09. The current-code [Email graph](../../reference/one/one-email-knowledge-graph.md) and [Calendar graph](../../reference/one/one-calendar-knowledge-graph.md) hold the evidence and disposition. Preserve the [owner-approved Gmail contract](../../reference/one/gmail-owner-approved-email.md).
 
 ## Implementation ledger
 
@@ -220,3 +220,7 @@ Remaining product work is explicit: complete cross-calendar aggregation, Gmail a
 Integration review also reproduced an unbounded provider-response await after the read timed out. The final relay bounds provider receipt delivery and the complete timeout/cancellation settlement to three seconds, closes unhealthy transports within one second, and never retries an uncertain provider receipt. Six regression variants cover blocked provider writes, client writes and close. This is a dispatch-liveness guarantee under cooperative cancellation, not evidence that an external dependency always responds.
 
 Local proof at integration: 207 Calendar/service/authorization tests; 283 Email tests; 108 web card/hook/page/service tests; 205 baseline relay tests plus the final 43 focused relay tests; 35 initial Calendar adapter/time/continuation tests with three subsequent recovery cases; contract, type and lint checks. Counts overlap and must not be summed into a unique test total. Core and GitHub release results are recorded separately.
+
+### Deployment prerequisite found during release
+
+An unrelated UAT deployment, run `37950082299`, failed before application promotion because replaying migration 262 narrowed the Drive event constraint installed by migration 288. Existing `document_share_request_sent` records then violated the older constraint. The release includes a bounded replay-guard repair that preserves an installed superset, with a PostgreSQL regression covering populated upgraded state. It does not remove records, change migration execution mode, or advance the schema version. Local PostgreSQL availability and the exact-head CI PostgreSQL result must be reported separately.
