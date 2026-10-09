@@ -73,6 +73,9 @@ const mocks = vi.hoisted(() => {
     pkmWriteCoordinator: {
       savePreparedDomain: vi.fn(),
     },
+    receiptMemorySave: {
+      saveReceiptCanonicalIndexToMemory: vi.fn(),
+    },
     personalKnowledgeModelService: {
       validatePreparedDomainStore: vi.fn(),
     },
@@ -336,6 +339,14 @@ vi.mock("@/lib/pkm/pkm-domain-resource", () => ({
 
 vi.mock("@/lib/services/pkm-write-coordinator", () => ({
   PkmWriteCoordinator: mocks.pkmWriteCoordinator,
+}));
+
+// The save routine is async and finishes after a test ends; mocking it here
+// keeps one test's late write out of another's count. Its governed writer
+// (gmail_receipt_memory_save_button) is pinned in gmail-receipt-memory-save.test.ts.
+vi.mock("@/lib/profile/gmail-receipt-memory-save", () => ({
+  saveReceiptCanonicalIndexToMemory:
+    mocks.receiptMemorySave.saveReceiptCanonicalIndexToMemory,
 }));
 
 vi.mock("@/lib/services/gmail-receipt-memory-service", () => ({
@@ -632,6 +643,9 @@ describe("ProfileReceiptsPage", () => {
     });
     mocks.pkmDomainResourceService.prepareDomainWriteContext.mockResolvedValue({
       domainData: {},
+    });
+    mocks.receiptMemorySave.saveReceiptCanonicalIndexToMemory.mockResolvedValue({
+      count: 1,
     });
     mocks.pkmWriteCoordinator.savePreparedDomain.mockResolvedValue({
       success: true,
@@ -1019,19 +1033,17 @@ describe("ProfileReceiptsPage", () => {
       ).toHaveBeenCalledOnce();
     });
     // The owner started this sync, so its finished list is saved once to private
-    // memory (default on): through the governed writer, to one domain, nothing else.
+    // memory (default on) through the save routine, and the page writes nothing itself.
     await waitFor(() => {
-      expect(mocks.pkmWriteCoordinator.savePreparedDomain).toHaveBeenCalledOnce();
+      expect(
+        mocks.receiptMemorySave.saveReceiptCanonicalIndexToMemory,
+      ).toHaveBeenCalledOnce();
     });
-    expect(mocks.pkmWriteCoordinator.savePreparedDomain).toHaveBeenCalledWith(
-      expect.objectContaining({
-        domain: "shopping",
-        confirmation: expect.objectContaining({
-          confirmedByUser: true,
-          source: "gmail_receipt_memory_save_button",
-        }),
-      }),
-    );
+    const saved =
+      mocks.receiptMemorySave.saveReceiptCanonicalIndexToMemory.mock.calls[0][0];
+    expect(saved.userId).toBe("user-123");
+    expect(saved.receipts).toHaveLength(1);
+    expect(mocks.pkmWriteCoordinator.savePreparedDomain).not.toHaveBeenCalled();
   });
 
   it("holds sealed receipts behind vault unlock when the vault is locked", async () => {
