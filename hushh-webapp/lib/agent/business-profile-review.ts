@@ -120,7 +120,7 @@ export async function decideBusinessReview(input: {
 export function businessDraftMessage(candidate: BusinessCandidate, name: string, website: string) {
   if (!name.trim() || name.length > 160 || website.length > 512) throw new Error("Check the business details.");
   const url = website.trim() ? new URL(website) : null;
-  if (url && (url.protocol !== "https:" || url.username || url.password)) throw new Error("Use an HTTPS website without credentials.");
+  if (url && (!["https:", "http:"].includes(url.protocol) || url.username || url.password)) throw new Error("Use an HTTP or HTTPS website without credentials.");
   // Do not infer an owner, phone, address, or role from the matched domain.
   const fields = Object.entries(candidate.draft).filter(([key, value]) => !["name", "website"].includes(key) && value)
     .map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`);

@@ -16,7 +16,7 @@ vi.mock("@/lib/agent/business-profile-review", () => ({
 }));
 vi.mock("@/lib/agent/connector-memory-review", () => ({ prepareConnectorMemoryReview: mocks.prepare,
   connectorMemorySharingImpact: (cards: AgentPkmPreviewCard[]) => Math.max(0, ...cards.map(card => card.sharing_impact?.active_recipient_count || 0)) }));
-vi.mock("@/lib/morphy-ux/morphy", () => ({ morphyToast: { error: vi.fn(), promise: vi.fn() } }));
+vi.mock("@/lib/morphy-ux/morphy", () => ({ morphyToast: { error: vi.fn(), success: vi.fn(), promise: vi.fn() } }));
 import { BusinessProfileSuggestion } from "@/components/agent/business-profile-suggestion";
 import { AgentBubble } from "@/components/agent/agent-chat-workspace";
 const candidate = { businessUid: "urn:hushh:business:uat:hushh.ai:v1", synthetic: true,
@@ -35,6 +35,29 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); publishValidatedAuthSessionOwner(null); });
 describe("post-onboarding business suggestion", () => {
+  it("keeps the overview focused and expands selectable details without repeated framing", async () => {
+    mocks.get.mockResolvedValue({ candidates: [{ ...candidate, draft: { ...candidate.draft,
+      category: "Software", formatted_address: "Austin, TX 78701", zip: "78701", state: "TX", phone: "+15555550100" } }] });
+    render(<BusinessProfileSuggestion {...props} />);
+    await screen.findByText("Software");
+    expect(screen.queryByText("78701", { exact: true })).toBeNull();
+    expect(screen.queryByText("TX", { exact: true })).toBeNull();
+    expect(screen.queryByText("+15555550100", { exact: true })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Review details", exact: true }));
+    await screen.findByRole("checkbox", { name: "Save phone", exact: true });
+    expect(screen.queryByText("Save this memory?")).toBeNull();
+    expect(screen.getByTestId("agent-pkm-review-list")).not.toHaveClass("overflow-y-auto");
+  });
+  it("dismisses exact duplicates without a new write or ownership claim", async () => {
+    mocks.syntheticPreview.mockReturnValue([]);
+    mocks.prepare.mockResolvedValue({ cards: [], incomplete: false, alreadySaved: true });
+    const onSaved = vi.fn();
+    render(<BusinessProfileSuggestion {...props} onSaved={onSaved} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(candidate.businessUid));
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.decide).not.toHaveBeenCalled();
+  });
   it("saves only individually approved fields and disables an empty selection", async () => {
     render(<BusinessProfileSuggestion {...props} />);
     fireEvent.click(await screen.findByRole("button", { name: "Review details", exact: true }));
@@ -83,10 +106,10 @@ describe("post-onboarding business suggestion", () => {
         timestamp: "", status: "done", ephemeral: true }} businessProfileCard={card} />} />);
     expect(await screen.findByRole("region", { name: "Is this your business?" })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByText(/I found a business you may be connected to/)).toBeTruthy();
+    expect(screen.getByText("Is this your business?")).toBeTruthy();
     const region = screen.getByRole("region", { name: "Is this your business?" });
     const assistantBubble = region.closest('[class*="--one-chat-bubble"]');
-    expect(assistantBubble?.textContent).toContain("I found a business");
+    expect(assistantBubble?.textContent).toContain("Is this your business?");
     expect(region.closest('[data-message-role="assistant"]')).toBeTruthy();
     await waitFor(() => expect(onVisibleChange).toHaveBeenLastCalledWith(true));
     expect(screen.getByText(/UAT test suggestion/)).toBeTruthy(); expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();

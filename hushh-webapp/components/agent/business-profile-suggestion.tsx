@@ -182,9 +182,10 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
     if (!guard.isCurrent()) return;
     busy.current = true;
     update({ ...review, phase: "preparing" });
-    let stage: "lookup" | "preview" | "coverage" | "origin" = "lookup";
+    let stage: "lookup" | "details" | "preview" | "coverage" | "origin" = "lookup";
     try {
       await freshCandidate(guard);
+      stage = "details";
       const message = businessDraftMessage(review.candidate, review.name, review.website);
       stage = "preview";
       // Keep older isolated test/module mocks compatible while the real
@@ -196,6 +197,14 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
           vaultKey: context.vaultKey!, vaultOwnerToken: context.vaultOwnerToken!, message, source: "business_profile_review" });
       await guard.assertCurrent();
       stage = "coverage";
+      if (result.alreadySaved && !result.incomplete && !result.cards.length) {
+        // Exact duplicate evidence is not a new save or an ownership claim.
+        setSaved(true);
+        props.onSaved?.(review.candidate.businessUid);
+        setState(null); setOpen(false);
+        morphyToast.success("Details already saved");
+        return;
+      }
       if (result.incomplete || !result.cards.length) throw new Error("The details could not be fully prepared. Please try again.");
       // Ensure source identity can follow the actual semantic entity before offering Save.
       stage = "origin";
@@ -211,7 +220,9 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
           : "unavailable";
         console.warn(`[BusinessReview] Preparation failed at ${stage}: ${originReason}`);
         update({ ...review, phase: "offer" });
-        morphyToast.error("The details could not be prepared. Try again.");
+        morphyToast.error(stage === "lookup" ? "Listing changed or unavailable. Edit details, then refresh."
+          : stage === "details" ? "Check the name and website in Edit details."
+          : "Couldn’t prepare details. Try Review details again.");
       }
     } finally { if (guard.isCurrent()) busy.current = false; }
   };
@@ -300,35 +311,40 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
   </div>;
   if (saved || !review || !eligible()) return null;
   const pending = review.phase === "preparing" || review.phase === "saving";
-  const introduction = "I found a business you may be connected to. Check the public details below—is this yours?";
+  const introduction = "Is this your business?";
+  const draft = review.candidate.draft;
+  const overview = {
+    category: draft.category,
+    address: draft.formatted_address || [draft.address_line1 || draft.street1, draft.city,
+      [draft.state, draft.zip].filter(Boolean).join(" ")].filter(Boolean).join(", "),
+    website: review.website.replace(/^https?:\/\//, "").replace(/\/$/, ""),
+  };
   const card = <section aria-label="Is this your business?"
     className="min-w-0 space-y-[var(--app-form-section-gap)]">
     {!open && <Button variant="muted" size="standard" onClick={() => setOpen(true)}>Review business details</Button>}
-    {open && <div className="min-w-0 space-y-3 rounded-[var(--app-card-radius-compact)] border border-[color:var(--app-separator)] p-3 sm:p-4">
+    {open && <div className="min-w-0 space-y-5 rounded-[var(--app-card-radius-compact)] border border-[color:var(--app-separator)] p-4 sm:p-5">
         <div className="flex min-w-0 items-start justify-between gap-3">
           <div className="min-w-0">
           <h3 className="ui-text-row-title break-words text-foreground">{review.name || review.candidate.draft.name}</h3>
-          <HelperText>Suggested profile · ownership unverified</HelperText>
-          {(review.name !== review.candidate.draft.name || review.website !== review.candidate.draft.website) &&
-            <HelperText>Your correction · ownership still unverified</HelperText>}
+          <HelperText>Suggested profile · unverified</HelperText>
           </div>
           {!review.job && <Button variant="link" size="standard" disabled={pending} aria-expanded={editing}
             onClick={() => setEditing(value => !value)}>{editing ? "Done editing" : "Edit details"}</Button>}
         </div>
-        <div className="space-y-1">
+        <details className="ui-text-helper text-muted-foreground">
+          <summary className="min-h-11 cursor-pointer py-3">Why this match</summary>
           {review.candidate.synthetic && <HelperText className="font-semibold text-foreground">UAT test suggestion</HelperText>}
-          <HelperText className="leading-relaxed text-foreground/80">Why this appeared: {review.candidate.synthetic ? "your verified email domain matches the UAT test business" :
-            review.candidate.matchEvidence.map(item => item.kind === "verified_phone" ? "your linked phone matches the directory phone" : item.kind === "verified_email_identity" ? "your verified email matches this directory record" : "your verified email domain matches the business website").join("; ")}. Business ownership has not been verified.</HelperText>
+          <HelperText>{review.candidate.synthetic ? "Email domain matches this test business." :
+            [...new Set(review.candidate.matchEvidence.map(item => item.kind === "verified_phone" ? "Verified phone matches." : item.kind === "verified_email_identity" ? "Verified email matches." : "Email domain matches."))].join(" ")}</HelperText>
           {!review.candidate.synthetic && <HelperText>Public directory · {review.candidate.sourceIdentity.vertical}</HelperText>}
-        </div>
-        <dl className="divide-y divide-[color:var(--app-separator)]">
-          {Object.entries({ ...review.candidate.draft, name: review.name, website: review.website })
-            .filter(([key, value]) => key !== "name" && Boolean(value)).map(([key, value]) => <div key={key}
+        </details>
+        {review.phase !== "review" && review.phase !== "saving" && <dl className="space-y-2">
+          {Object.entries(overview).filter(([, value]) => Boolean(value)).map(([key, value]) => <div key={key}
               className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] gap-3 py-2 sm:grid-cols-[7rem_minmax(0,1fr)]">
-              <dt className="ui-text-helper capitalize text-muted-foreground">{key === "name" ? "Business name" : key.replaceAll("_", " ")}</dt>
+              <dt className="ui-text-helper capitalize text-muted-foreground">{key}</dt>
               <dd className="ui-text-row-description min-w-0 break-words text-foreground [overflow-wrap:anywhere]">{value}</dd>
             </div>)}
-        </dl>
+        </dl>}
         {editing && !review.job && <div className="space-y-[var(--app-form-section-gap)]">
           <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor={`${fieldId}-name`}>Business name</Label>
             <Input id={`${fieldId}-name`} maxLength={160} value={review.name} disabled={pending}
@@ -336,17 +352,17 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
           <div className="space-y-[var(--app-form-field-gap)]"><Label htmlFor={`${fieldId}-website`}>Website</Label>
             <Input id={`${fieldId}-website`} type="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={512} value={review.website} disabled={pending}
               onChange={event => update({ ...review, website: event.target.value, cards: [], selected: [], phase: "offer" })} /></div>
-          <HelperText>Website is optional. Use an HTTPS address or clear it before reviewing.</HelperText>
+          <HelperText>Website is optional.</HelperText>
         </div>}
-        <HelperText className="leading-relaxed text-foreground/80">Review first, then choose what to save. Nothing is published and no ownership claim is created.</HelperText>
-        {review.job && <HelperText>Resuming your original reviewed details. Newer directory fields do not replace a pending save.</HelperText>}
-        {!review.job && <Button variant="link" size="standard" disabled={pending} onClick={() => void refresh()}>Refresh listing and restart review</Button>}
+        <HelperText>Only selected details are saved privately. This does not verify ownership.</HelperText>
+        {review.job && <HelperText>Resuming your approved selection.</HelperText>}
+        {editing && !review.job && <Button variant="link" size="standard" disabled={pending} onClick={() => void refresh()}>Refresh listing</Button>}
         {pending && <p role="status" className="text-sm">{review.phase === "preparing" ? "Preparing details for review…" : "Saving approved details…"}</p>}
         {(review.phase === "review" || review.phase === "saving") && <AgentPkmReviewPanel
-          cards={review.cards} selectedCardIds={new Set(chosen.map(card => card.card_id))} saving={pending} className="[&_button]:min-h-11"
+          cards={review.cards} selectedCardIds={new Set(chosen.map(card => card.card_id))} saving={pending} compact className="[&_button]:min-h-11"
           saveLabel={`Save ${fieldCount} ${fieldCount === 1 ? "field" : "fields"}`}
           renderCardDetails={card => <fieldset disabled={pending || Boolean(review.job)} className="min-w-0 space-y-1">
-            <legend className="ui-text-helper">Choose which details to save</legend>
+            <legend className="ui-text-helper">Choose details</legend>
             {businessReviewFields(card).map(field => <label key={field.id}
               className="flex min-h-11 cursor-pointer items-start gap-2 py-2">
               <input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-[var(--app-accent)]"
@@ -360,8 +376,7 @@ function BusinessCandidateReview(props: Props & { candidate: BusinessCandidate;
               <span className="min-w-0"><span className="ui-text-helper capitalize">{field.label}</span>
                 <span className="block whitespace-pre-wrap break-words text-sm [overflow-wrap:anywhere]">{typeof field.value === "string" ? field.value : JSON.stringify(field.value)}</span></span>
             </label>)}
-            <HelperText>Unchecked fields are not added or updated. Existing memory is not deleted. Business identity is retained for duplicate protection.</HelperText>
-            <HelperText>Summaries and lists are saved as shown; deselect them too if they contain details you do not want to save.</HelperText>
+            <HelperText>Unchecked details stay unchanged. Lists save as shown.</HelperText>
           </fieldset>}
           onToggleCard={review.job ? undefined : id => {
             const selected = review.selected.includes(id);
