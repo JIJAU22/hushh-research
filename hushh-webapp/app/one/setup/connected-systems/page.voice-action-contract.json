@@ -8,7 +8,7 @@
     { "action_id": "setup.skip_connected_systems", "label": "Skip CRM setup", "meaning": "Returns to the setup hub without recording CRM setup as complete.", "aliases": ["skip CRM setup", "skip CRM"], "search_keywords": ["skip", "crm", "link"], "reachability": { "routes": ["/one/setup/connected-systems"], "screens": ["one_setup_connected_systems"], "hidden_navigable": false, "navigation_prerequisites": [] }, "guard_ids": ["auth_signed_in"], "risk_level": "low", "execution_policy": "allow_direct", "execution_target": { "status": "wired", "path": "local_handler", "target": "setup.skip_connected_systems" }, "control_ids": ["one-setup-connected-systems-terminal"], "state_exposure": ["active setup capability"] }
   ],
   "search": {
-    "source_revision": "55364ade6c5699f578398ff1abd6fbe5256e28dd366f78da5fd57cd6a776dbfe",
+    "source_revision": "778efa0c1b3f50bace82183e221873d5406eecee1ccc8f79ea3bf5e4e8dae9cb",
     "source_module_count": 1513
   }
 }
